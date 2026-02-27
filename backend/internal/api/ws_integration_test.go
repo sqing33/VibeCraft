@@ -1,0 +1,198 @@
+package api_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
+
+	"vibe-tree/backend/internal/api"
+	"vibe-tree/backend/internal/execution"
+	"vibe-tree/backend/internal/runner"
+	"vibe-tree/backend/internal/server"
+	"vibe-tree/backend/internal/ws"
+)
+
+func TestWebSocketBroadcastExecutionLifecycle(t *testing.T) {
+	t.Parallel()
+
+	hub := ws.NewHub()
+	grace := 200 * time.Millisecond
+	execRunner := runner.PTYRunner{DefaultGrace: grace}
+	execMgr := execution.NewManager(execRunner, grace, hub)
+
+	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub})
+	httpSrv := httptest.NewServer(engine)
+	defer httpSrv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http") + "/api/v1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer conn.Close()
+
+	reqBody := []byte(`{"command":"bash","args":["-lc","echo hi; sleep 0.05; echo bye"]}`)
+	res, err := http.Post(httpSrv.URL+"/api/v1/executions", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("start execution: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: %s", res.Status)
+	}
+
+	var started execution.Execution
+	if err := json.NewDecoder(res.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start response: %v", err)
+	}
+	if started.ID == "" {
+		t.Fatalf("missing execution_id in start response")
+	}
+
+	type envelope struct {
+		Type        string          `json:"type"`
+		ExecutionID string          `json:"execution_id"`
+		Payload     json.RawMessage `json:"payload"`
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	_ = conn.SetReadDeadline(deadline)
+
+	var gotStarted, gotLog, gotExited bool
+	for !gotExited {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("ws read: %v", err)
+		}
+		var env envelope
+		if err := json.Unmarshal(msg, &env); err != nil {
+			t.Fatalf("parse ws json: %v (msg=%q)", err, string(msg))
+		}
+		if env.ExecutionID != started.ID {
+			continue
+		}
+		switch env.Type {
+		case "execution.started":
+			gotStarted = true
+		case "node.log":
+			gotLog = true
+		case "execution.exited":
+			gotExited = true
+		}
+	}
+
+	if !gotStarted {
+		t.Fatalf("missing execution.started event")
+	}
+	if !gotLog {
+		t.Fatalf("missing node.log event")
+	}
+	if !gotExited {
+		t.Fatalf("missing execution.exited event")
+	}
+}
+
+func TestCancelExecutionBroadcastsCanceledExit(t *testing.T) {
+	t.Parallel()
+
+	hub := ws.NewHub()
+	grace := 100 * time.Millisecond
+	execRunner := runner.PTYRunner{DefaultGrace: grace}
+	execMgr := execution.NewManager(execRunner, grace, hub)
+
+	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub})
+	httpSrv := httptest.NewServer(engine)
+	defer httpSrv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http") + "/api/v1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer conn.Close()
+
+	reqBody := []byte(`{"command":"bash","args":["-lc","echo start; sleep 10; echo end"]}`)
+	res, err := http.Post(httpSrv.URL+"/api/v1/executions", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("start execution: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: %s", res.Status)
+	}
+
+	var started execution.Execution
+	if err := json.NewDecoder(res.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start response: %v", err)
+	}
+	if started.ID == "" {
+		t.Fatalf("missing execution_id in start response")
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	_ = conn.SetReadDeadline(deadline)
+
+	type envelope struct {
+		Type        string          `json:"type"`
+		ExecutionID string          `json:"execution_id"`
+		Payload     json.RawMessage `json:"payload"`
+	}
+
+	// Wait until we see the process produce any log (ensures it's running).
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("ws read: %v", err)
+		}
+		var env envelope
+		if err := json.Unmarshal(msg, &env); err != nil {
+			continue
+		}
+		if env.ExecutionID != started.ID {
+			continue
+		}
+		if env.Type == "node.log" {
+			break
+		}
+	}
+
+	cancelRes, err := http.Post(httpSrv.URL+"/api/v1/executions/"+started.ID+"/cancel", "application/json", nil)
+	if err != nil {
+		t.Fatalf("cancel request: %v", err)
+	}
+	cancelRes.Body.Close()
+	if cancelRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected cancel status: %s", cancelRes.Status)
+	}
+
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("ws read: %v", err)
+		}
+		var env envelope
+		if err := json.Unmarshal(msg, &env); err != nil {
+			continue
+		}
+		if env.ExecutionID != started.ID || env.Type != "execution.exited" {
+			continue
+		}
+
+		var payload struct {
+			Status string `json:"status"`
+		}
+		if err := json.Unmarshal(env.Payload, &payload); err != nil {
+			t.Fatalf("parse execution.exited payload: %v", err)
+		}
+		if payload.Status != "canceled" {
+			t.Fatalf("expected canceled status, got %q", payload.Status)
+		}
+		return
+	}
+}
