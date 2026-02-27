@@ -139,7 +139,7 @@ func patchWorkflowHandler(deps Deps) gin.HandlerFunc {
 		}
 
 		workflowID := c.Param("id")
-		wf, err := deps.Store.UpdateWorkflow(c.Request.Context(), workflowID, store.UpdateWorkflowParams{
+		wf, touchedNodes, err := deps.Store.UpdateWorkflow(c.Request.Context(), workflowID, store.UpdateWorkflowParams{
 			Title:         req.Title,
 			WorkspacePath: req.WorkspacePath,
 			Mode:          req.Mode,
@@ -158,6 +158,9 @@ func patchWorkflowHandler(deps Deps) gin.HandlerFunc {
 		}
 
 		broadcastWorkflowUpdated(deps.Hub, wf)
+		for _, n := range touchedNodes {
+			broadcastNodeUpdated(deps.Hub, n)
+		}
 		c.JSON(http.StatusOK, wf)
 	}
 }
@@ -189,6 +192,26 @@ func broadcastNodeUpdated(hub *ws.Hub, node store.Node) {
 		WorkflowID: node.WorkflowID,
 		NodeID:     node.ID,
 		Payload:    node,
+	}
+	b, err := json.Marshal(env)
+	if err != nil {
+		return
+	}
+	hub.Broadcast(b)
+}
+
+func broadcastDAGGenerated(hub *ws.Hub, workflowID string, nodes, edges int) {
+	if hub == nil {
+		return
+	}
+	env := ws.Envelope{
+		Type:       "dag.generated",
+		Ts:         time.Now().UnixMilli(),
+		WorkflowID: workflowID,
+		Payload: map[string]any{
+			"nodes": nodes,
+			"edges": edges,
+		},
 	}
 	b, err := json.Marshal(env)
 	if err != nil {

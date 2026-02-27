@@ -16,6 +16,7 @@ import (
 	"vibe-tree/backend/internal/api"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/runner"
+	"vibe-tree/backend/internal/scheduler"
 	"vibe-tree/backend/internal/server"
 	"vibe-tree/backend/internal/store"
 	"vibe-tree/backend/internal/ws"
@@ -220,29 +221,201 @@ func TestStartWorkflowCreatesMasterExecution(t *testing.T) {
 	if err := json.NewDecoder(getWfRes.Body).Decode(&gotWf); err != nil {
 		t.Fatalf("decode workflow: %v", err)
 	}
-	if gotWf.Status == "running" {
-		t.Fatalf("expected workflow not running after master exit")
+	if gotWf.Status != "running" {
+		t.Fatalf("expected workflow running after master exit, got %q", gotWf.Status)
 	}
 
-	nodesRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID + "/nodes")
-	if err != nil {
-		t.Fatalf("list nodes: %v", err)
-	}
-	defer nodesRes.Body.Close()
-	if nodesRes.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected nodes status: %s", nodesRes.Status)
-	}
+	deadline = time.Now().Add(3 * time.Second)
 	var nodes []store.Node
-	if err := json.NewDecoder(nodesRes.Body).Decode(&nodes); err != nil {
-		t.Fatalf("decode nodes: %v", err)
+	for time.Now().Before(deadline) {
+		nodesRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID + "/nodes")
+		if err != nil {
+			t.Fatalf("list nodes: %v", err)
+		}
+		if nodesRes.StatusCode != http.StatusOK {
+			nodesRes.Body.Close()
+			t.Fatalf("unexpected nodes status: %s", nodesRes.Status)
+		}
+		var ns []store.Node
+		if err := json.NewDecoder(nodesRes.Body).Decode(&ns); err != nil {
+			nodesRes.Body.Close()
+			t.Fatalf("decode nodes: %v", err)
+		}
+		nodesRes.Body.Close()
+
+		if len(ns) >= 4 {
+			nodes = ns
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	if len(nodes) != 1 {
-		t.Fatalf("expected 1 node, got %d", len(nodes))
+	if len(nodes) < 4 {
+		t.Fatalf("expected dag nodes to be created, got %d", len(nodes))
 	}
-	if nodes[0].NodeType != "master" {
-		t.Fatalf("expected master node, got %q", nodes[0].NodeType)
+
+	var master *store.Node
+	workers := make([]store.Node, 0)
+	for i := range nodes {
+		if nodes[i].NodeType == "master" {
+			master = &nodes[i]
+			continue
+		}
+		workers = append(workers, nodes[i])
 	}
-	if nodes[0].LastExecution == nil || *nodes[0].LastExecution != started.Execution.ID {
-		t.Fatalf("expected last_execution_id to be %q", started.Execution.ID)
+	if master == nil {
+		t.Fatalf("expected master node to exist")
 	}
+	if master.LastExecution == nil || *master.LastExecution != started.Execution.ID {
+		t.Fatalf("expected master last_execution_id to be %q", started.Execution.ID)
+	}
+	if len(workers) == 0 {
+		t.Fatalf("expected worker nodes to exist")
+	}
+	for _, n := range workers {
+		if n.Status != "pending_approval" {
+			t.Fatalf("expected worker node pending_approval, got %q (node_id=%s)", n.Status, n.ID)
+		}
+		if n.LastExecution != nil {
+			t.Fatalf("expected worker node without execution, got last_execution_id=%s", *n.LastExecution)
+		}
+	}
+}
+
+func TestManualApproveRunsWorkerNodes(t *testing.T) {
+	t.Parallel()
+
+	hub := ws.NewHub()
+	grace := 50 * time.Millisecond
+	execRunner := runner.PTYRunner{DefaultGrace: grace}
+	execMgr := execution.NewManager(execRunner, grace, hub)
+	sched := scheduler.New(scheduler.Options{Store: nil, Executions: execMgr, Hub: hub, MaxConcurrency: 4})
+
+	stateDBPath := filepath.Join(t.TempDir(), "state.db")
+	st, err := store.Open(context.Background(), stateDBPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate store: %v", err)
+	}
+	sched = scheduler.New(scheduler.Options{Store: st, Executions: execMgr, Hub: hub, MaxConcurrency: 4})
+
+	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub, Store: st})
+	httpSrv := httptest.NewServer(engine)
+	defer httpSrv.Close()
+
+	createReq := []byte(`{"title":"hello","workspace_path":".","mode":"manual"}`)
+	res, err := http.Post(httpSrv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(createReq))
+	if err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected create status: %s", res.Status)
+	}
+	var created store.Workflow
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	startRes, err := http.Post(httpSrv.URL+"/api/v1/workflows/"+created.ID+"/start", "application/json", nil)
+	if err != nil {
+		t.Fatalf("start workflow: %v", err)
+	}
+	defer startRes.Body.Close()
+	if startRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected start status: %s", startRes.Status)
+	}
+
+	// Wait for DAG to be applied (master exits and creates worker nodes).
+	waitDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(waitDeadline) {
+		nodesRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID + "/nodes")
+		if err != nil {
+			t.Fatalf("list nodes: %v", err)
+		}
+		var ns []store.Node
+		if err := json.NewDecoder(nodesRes.Body).Decode(&ns); err != nil {
+			nodesRes.Body.Close()
+			t.Fatalf("decode nodes: %v", err)
+		}
+		nodesRes.Body.Close()
+		if len(ns) >= 4 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	for step := 0; step < 3; step++ {
+		approveRes, err := http.Post(httpSrv.URL+"/api/v1/workflows/"+created.ID+"/approve", "application/json", nil)
+		if err != nil {
+			t.Fatalf("approve workflow: %v", err)
+		}
+		if approveRes.StatusCode != http.StatusOK {
+			approveRes.Body.Close()
+			t.Fatalf("unexpected approve status: %s", approveRes.Status)
+		}
+		var approved struct {
+			Nodes []store.Node `json:"nodes"`
+		}
+		if err := json.NewDecoder(approveRes.Body).Decode(&approved); err != nil {
+			approveRes.Body.Close()
+			t.Fatalf("decode approve response: %v", err)
+		}
+		approveRes.Body.Close()
+
+		if len(approved.Nodes) != 1 {
+			t.Fatalf("expected 1 runnable node to be approved, got %d", len(approved.Nodes))
+		}
+		nodeID := approved.Nodes[0].ID
+
+		if err := sched.Tick(context.Background()); err != nil {
+			t.Fatalf("scheduler tick: %v", err)
+		}
+
+		// Wait for this node to finish.
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			nodesRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID + "/nodes")
+			if err != nil {
+				t.Fatalf("list nodes: %v", err)
+			}
+			var ns []store.Node
+			if err := json.NewDecoder(nodesRes.Body).Decode(&ns); err != nil {
+				nodesRes.Body.Close()
+				t.Fatalf("decode nodes: %v", err)
+			}
+			nodesRes.Body.Close()
+			for _, n := range ns {
+				if n.ID == nodeID && n.Status == "succeeded" {
+					goto nextStep
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatalf("timeout waiting for node %s to succeed", nodeID)
+
+	nextStep:
+	}
+
+	// All worker nodes succeeded => workflow done.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		getWfRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID)
+		if err != nil {
+			t.Fatalf("get workflow: %v", err)
+		}
+		var wf store.Workflow
+		if err := json.NewDecoder(getWfRes.Body).Decode(&wf); err != nil {
+			getWfRes.Body.Close()
+			t.Fatalf("decode workflow: %v", err)
+		}
+		getWfRes.Body.Close()
+		if wf.Status == "done" {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for workflow to be done")
 }

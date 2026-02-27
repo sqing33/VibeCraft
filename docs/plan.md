@@ -160,48 +160,48 @@
 ## Phase 3：DAG 生成与 Manual approval（5–9 天）
 
 ### 3.1 定义 DAG JSON schema + 校验器
-- [ ] 定义 master 输出 schema（按 `docs/规划.md` 9）：nodes/edges + expert_id/prompt 等
-- [ ] 实现严格 JSON 解析策略：
+- [x] 定义 master 输出 schema（按 `docs/规划.md` 9）：nodes/edges + expert_id/prompt 等
+- [x] 实现严格 JSON 解析策略：
   尝试从 stdout 提取第一个 JSON 对象（允许外层有解释文本）
-  解析失败时：把原始输出摘要写入 node result_summary，并在 UI 展示错误
-- [ ] 校验规则（MVP 必做）：
+  解析失败时：把原始输出摘要写入 node result_summary（UI 展示错误待做）
+- [x] 校验规则（MVP 必做）：
   无环
   node.id 唯一
   edges 引用的节点必须存在
   expert_id 必须存在（否则直接 reject 或 fallback，二选一；建议先 reject）
 
 验收：
-- [ ] 给一份坏 DAG（有环/缺节点/未知 expert），后端能给出可读错误
+- [x] 给一份坏 DAG（有环/缺节点/未知 expert），后端能给出可读错误
 
 ### 3.2 master 输出落库为 nodes/edges
-- [ ] master execution 结束后：
+- [x] master execution 结束后：
   解析 DAG
   创建 worker nodes（status 取决于 mode：auto=queued 或 manual=pending_approval）
   创建 edges
   写 events：`dag.generated`
-- [ ] `workflow_title` 可覆盖 workflow.title（可选；建议 UI 提示用户确认再改）
+- [x] `workflow_title` 可覆盖 workflow.title（可选；建议 UI 提示用户确认再改）
 
 验收：
-- [ ] UI 在 DAG 生成后能看到节点列表变成多节点
+- [x] UI 在 DAG 生成后能看到节点列表变成多节点
 
 ### 3.3 调度器（依赖 + 并发 + fail-fast）
-- [ ] 实现可重复运行的调度循环（例如每 200ms tick 或事件驱动）：
+- [x] 实现可重复运行的调度循环（例如每 200ms tick 或事件驱动）：
   找到 runnable nodes（依赖全部 succeeded）
   mode=auto 时把 runnable 推进 queued→running
   mode=manual 时把 runnable 推进 pending_approval（不自动跑）
-- [ ] 并发上限：从 config `execution.max_concurrency` 读取
-- [ ] fail-fast：任一 node failed 后，把未开始的节点标记为 skipped（或留在 pending，二选一；建议 skipped）
+- [x] 并发上限：从 config `execution.max_concurrency` 读取
+- [x] fail-fast：任一 node failed 后，把未开始的节点标记为 skipped（或留在 pending，二选一；建议 skipped）
 
 验收：
 - [ ] 同一个 DAG 能按依赖顺序自动推进；并发数不会超过上限
 
 ### 3.4 Manual approval：审批与编辑
-- [ ] `PATCH /api/v1/nodes/{id}`：允许修改 `prompt` 与 `expert_id`
+- [x] `PATCH /api/v1/nodes/{id}`：允许修改 `prompt` 与 `expert_id`
   修改写 events：`prompt.updated`（payload 含 old/new 摘要）
-- [ ] `POST /api/v1/workflows/{id}:approve`：
+- [x] `POST /api/v1/workflows/{id}/approve`：
   仅在 mode=manual 生效
   将所有 runnable 且 `pending_approval` 的 nodes 推到 queued（等待调度执行）
-- [ ] `PATCH /api/v1/workflows/{id}` 支持运行中切换 mode（Execution Breakpoint Toggle）：
+- [x] `PATCH /api/v1/workflows/{id}` 支持运行中切换 mode（Execution Breakpoint Toggle）：
   auto→manual：阻断后续启动，把 runnable/queued 的未运行节点拦为 pending_approval
   manual→auto：恢复调度，把 runnable 的 pending_approval 推进 queued
 

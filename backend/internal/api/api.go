@@ -39,6 +39,10 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.PATCH("/workflows/:id", patchWorkflowHandler(deps))
 	v1.POST("/workflows/:id/start", startWorkflowHandler(deps))
 	v1.GET("/workflows/:id/nodes", listWorkflowNodesHandler(deps))
+	v1.GET("/workflows/:id/edges", listWorkflowEdgesHandler(deps))
+	v1.POST("/workflows/:id/approve", approveWorkflowHandler(deps))
+
+	v1.PATCH("/nodes/:id", patchNodeHandler(deps))
 
 	v1.POST("/executions", startExecutionHandler(deps))
 	v1.POST("/executions/:id/cancel", cancelExecutionHandler(deps))

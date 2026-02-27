@@ -155,7 +155,7 @@ func (s *Store) ListNodes(ctx context.Context, workflowID string) ([]Node, error
 	}
 	defer rows.Close()
 
-	var out []Node
+	out := make([]Node, 0)
 	for rows.Next() {
 		var n Node
 		if err := rows.Scan(

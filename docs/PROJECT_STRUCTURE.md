@@ -31,12 +31,17 @@
 | `backend/internal/config/config.go` | 配置读取逻辑，处理默认值、XDG 路径、环境变量覆盖 |
 | `backend/internal/runner/pty_runner.go` | PTY runner：启动子进程、流式输出、Cancel（SIGTERM→grace→SIGKILL） |
 | `backend/internal/execution/manager.go` | Execution 管理：启动/取消、日志落盘、WS 推送 `execution.*`/`node.log` |
+| `backend/internal/dag/dag.go` | DAG 解析与校验：从 master 输出提取第一个 JSON 对象并做 MVP 约束校验（无环/引用存在/expert 校验） |
+| `backend/internal/scheduler/scheduler.go` | Workflow 调度器：依赖 + 并发上限 + fail-fast（启动 queued worker nodes 并收敛终态） |
 | `backend/internal/ws/hub.go` | WebSocket hub：连接管理与广播（配合 log tail 断线补齐） |
 | `backend/internal/store/sqlite.go` | SQLite state DB 打开与 pragma 初始化（WAL/busy_timeout/foreign_keys） |
 | `backend/internal/store/migrate.go` | SQLite migrations（使用 `PRAGMA user_version` 管理 schema 版本） |
 | `backend/internal/store/workflows.go` | Workflow 存储：SQLite CRUD + events 写入 |
+| `backend/internal/store/dag.go` | DAG 落库：从 master DAG 创建 worker nodes/edges，并提供 edges 查询 |
 | `backend/internal/store/nodes.go` | Node 存储：master node 创建、nodes 列表查询 |
 | `backend/internal/store/executions.go` | Execution 存储：execution started/exited 落库、同步 node/workflow 状态与 events |
+| `backend/internal/store/approval.go` | Manual approval：runnable `pending_approval` 节点批准为 `queued` |
+| `backend/internal/store/node_patch.go` | Node 编辑：PATCH prompt/expert_id，写入 `prompt.updated` 与 `node.updated` |
 | `backend/internal/store/failures.go` | 失败兜底：启动/落库失败时标记 node/workflow failed |
 | `backend/internal/store/recovery.go` | 重启恢复：将 DB 中遗留的 running execution 标记为 failed（daemon_restarted） |
 | `backend/internal/paths/paths.go` | XDG data/logs/state.db 路径解析（`~/.local/share/vibe-tree/...`） |
@@ -69,6 +74,12 @@
 | WebSocket 推送 | `backend/internal/api/api.go`, `backend/internal/ws/hub.go`, `backend/internal/ws/envelope.go` |
 | PTY runner | `backend/internal/runner/pty_runner.go` |
 | execution cancel API | `backend/internal/api/api.go`, `backend/internal/execution/manager.go` |
+| DAG JSON 提取/校验 | `backend/internal/dag/dag.go`, `backend/internal/api/workflow_start.go` |
+| DAG 落库（nodes/edges） | `backend/internal/store/dag.go`, `backend/internal/api/workflow_start.go` |
+| 调度器（依赖/并发/fail-fast） | `backend/internal/scheduler/scheduler.go`, `backend/cmd/vibe-tree-daemon/main.go`, `backend/internal/store/scheduler.go` |
+| manual approve API | `backend/internal/api/approve.go`, `backend/internal/store/approval.go` |
+| node patch API | `backend/internal/api/nodes.go`, `backend/internal/store/node_patch.go` |
+| workflow mode 切换（断点） | `backend/internal/api/workflows.go`, `backend/internal/store/workflows.go` |
 | ID 生成规则 | `backend/internal/id/id.go` |
 | 后端统一日志格式 | `backend/internal/logx/logx.go`, `backend/internal/server/server.go` |
 | 前端连通性提示 | `ui/src/App.tsx` |

@@ -15,6 +15,7 @@ import (
 	"vibe-tree/backend/internal/logx"
 	"vibe-tree/backend/internal/paths"
 	"vibe-tree/backend/internal/runner"
+	"vibe-tree/backend/internal/scheduler"
 	"vibe-tree/backend/internal/server"
 	"vibe-tree/backend/internal/store"
 	"vibe-tree/backend/internal/ws"
@@ -62,6 +63,33 @@ func main() {
 	execRunner := runner.PTYRunner{DefaultGrace: grace}
 	execMgr := execution.NewManager(execRunner, grace, hub)
 
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+
+	sched := scheduler.New(scheduler.Options{
+		Store:          stateStore,
+		Executions:     execMgr,
+		Hub:            hub,
+		MaxConcurrency: cfg.Execution.MaxConcurrency,
+	})
+	logx.Info("workflow-scheduler", "start", "启动调度器", "max_concurrency", cfg.Execution.MaxConcurrency)
+	go func() {
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-runCtx.Done():
+				return
+			case <-ticker.C:
+				tickCtx, cancel := context.WithTimeout(runCtx, 2*time.Second)
+				if err := sched.Tick(tickCtx); err != nil {
+					logx.Warn("workflow-scheduler", "tick", "调度 tick 失败", "err", err)
+				}
+				cancel()
+			}
+		}
+	}()
+
 	engine := server.New(
 		server.Options{DevCORS: server.DevCORSFromEnv()},
 		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore},
@@ -88,9 +116,11 @@ func main() {
 			logx.Error("daemon", "listen", "HTTP 服务启动失败", "err", err)
 			os.Exit(1)
 		}
+		runCancel()
 		return
 	}
 
+	runCancel()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

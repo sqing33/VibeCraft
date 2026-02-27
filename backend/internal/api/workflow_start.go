@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"vibe-tree/backend/internal/dag"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/logx"
 	"vibe-tree/backend/internal/paths"
@@ -79,21 +81,61 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 				defer cancel()
 
+				finalStatus := string(final.Status)
+				finalError := ""
+				var finalSummary *string
+
+				// Master 成功退出后尝试解析 DAG 并落库；解析/落库失败视为 workflow 失败（MVP）。
+				if final.Status == execution.StatusSucceeded {
+					logPath, err := paths.ExecutionLogPath(final.ID)
+					if err != nil {
+						finalStatus = "failed"
+						finalError = err.Error()
+						finalSummary = &finalError
+					} else if b, err := os.ReadFile(logPath); err != nil {
+						finalStatus = "failed"
+						finalError = fmt.Sprintf("read master output: %v", err)
+						finalSummary = &finalError
+					} else if d, err := dag.ParseAndValidate(b, dag.ValidateOptions{
+						KnownExperts: map[string]struct{}{
+							"bash": {},
+						},
+					}); err != nil {
+						finalStatus = "failed"
+						finalError = fmt.Sprintf("invalid dag: %v", err)
+						s := fmt.Sprintf("%s\n\noutput_tail:\n%s", finalError, summarizeOutputTail(b))
+						finalSummary = &s
+					} else if updatedWf, createdNodes, createdEdges, err := deps.Store.ApplyDAG(ctx, final.WorkflowID, d); err != nil {
+						finalStatus = "failed"
+						finalError = fmt.Sprintf("apply dag: %v", err)
+						s := fmt.Sprintf("%s\n\noutput_tail:\n%s", finalError, summarizeOutputTail(b))
+						finalSummary = &s
+					} else {
+						broadcastWorkflowUpdated(deps.Hub, updatedWf)
+						for _, n := range createdNodes {
+							broadcastNodeUpdated(deps.Hub, n)
+						}
+						broadcastDAGGenerated(deps.Hub, updatedWf.ID, len(createdNodes), len(createdEdges))
+					}
+				}
+
 				endedAt := time.Now().UnixMilli()
 				if final.EndedAt != nil {
 					endedAt = final.EndedAt.UnixMilli()
 				}
 				startedAt := final.StartedAt.UnixMilli()
 
-				updatedWf, updatedNode, err := deps.Store.FinalizeExecution(ctx, store.FinalizeExecutionParams{
-					ExecutionID: final.ID,
-					WorkflowID:  final.WorkflowID,
-					NodeID:      final.NodeID,
-					Status:      string(final.Status),
-					ExitCode:    final.ExitCode,
-					Signal:      final.Signal,
-					StartedAt:   startedAt,
-					EndedAt:     endedAt,
+				updatedWf, updatedNodes, err := deps.Store.FinalizeExecution(ctx, store.FinalizeExecutionParams{
+					ExecutionID:   final.ID,
+					WorkflowID:    final.WorkflowID,
+					NodeID:        final.NodeID,
+					Status:        finalStatus,
+					ExitCode:      final.ExitCode,
+					Signal:        final.Signal,
+					StartedAt:     startedAt,
+					EndedAt:       endedAt,
+					ErrorMessage:  finalError,
+					ResultSummary: finalSummary,
 				})
 				if err != nil {
 					logx.Warn("workflow", "finalize-execution", "execution 终态落库失败", "err", err, "workflow_id", final.WorkflowID, "node_id", final.NodeID, "execution_id", final.ID)
@@ -101,7 +143,9 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 				}
 
 				broadcastWorkflowUpdated(deps.Hub, updatedWf)
-				broadcastNodeUpdated(deps.Hub, updatedNode)
+				for _, n := range updatedNodes {
+					broadcastNodeUpdated(deps.Hub, n)
+				}
 			},
 		})
 		if err != nil {
@@ -185,8 +229,67 @@ func masterStubSpec(wf store.Workflow, node store.Node) runner.RunSpec {
 		Command: "bash",
 		Args: []string{
 			"-lc",
-			`printf '\033[36m[vibe-tree]\033[0m master node started\n'; printf 'workflow_id=%s node_id=%s\n' "` + wf.ID + `" "` + node.ID + `"; for i in {1..40}; do printf '\033[32m[%03d]\033[0m planning...\n' "$i"; sleep 0.02; done; printf '\033[36m[vibe-tree]\033[0m master node finished\n'`,
+			`printf '\033[36m[vibe-tree]\033[0m master node started\n'
+printf 'workflow_id=%s node_id=%s\n' "` + wf.ID + `" "` + node.ID + `"
+for i in {1..40}; do printf '\033[32m[%03d]\033[0m planning...\n' "$i"; sleep 0.02; done
+printf '\033[36m[vibe-tree]\033[0m master node finished\n'
+cat <<'JSON'
+{
+  "workflow_title": "",
+  "nodes": [
+    {
+      "id": "n1",
+      "title": "Step 1",
+      "type": "worker",
+      "expert_id": "bash",
+      "fallback_expert_id": "bash",
+      "complexity": "low",
+      "quality_tier": "fast",
+      "model": null,
+      "routing_reason": "bash 可直接执行 shell 命令，便于 MVP 验证链路",
+      "prompt": "echo '[n1] hello'; sleep 0.05; echo '[n1] done'"
+    },
+    {
+      "id": "n2",
+      "title": "Step 2",
+      "type": "worker",
+      "expert_id": "bash",
+      "fallback_expert_id": "bash",
+      "complexity": "low",
+      "quality_tier": "fast",
+      "model": null,
+      "routing_reason": "bash 可直接执行 shell 命令，便于 MVP 验证链路",
+      "prompt": "echo '[n2] hello'; sleep 0.05; echo '[n2] done'"
+    },
+    {
+      "id": "n3",
+      "title": "Step 3",
+      "type": "worker",
+      "expert_id": "bash",
+      "fallback_expert_id": "bash",
+      "complexity": "low",
+      "quality_tier": "fast",
+      "model": null,
+      "routing_reason": "bash 可直接执行 shell 命令，便于 MVP 验证链路",
+      "prompt": "echo '[n3] hello'; sleep 0.05; echo '[n3] done'"
+    }
+  ],
+  "edges": [
+    { "from": "n1", "to": "n2", "type": "success", "source_handle": null, "target_handle": null },
+    { "from": "n2", "to": "n3", "type": "success", "source_handle": null, "target_handle": null }
+  ]
+}
+JSON
+`,
 		},
 		Cwd: cwd,
 	}
+}
+
+func summarizeOutputTail(b []byte) string {
+	const max = 4000
+	if len(b) <= max {
+		return string(b)
+	}
+	return string(b[len(b)-max:])
 }

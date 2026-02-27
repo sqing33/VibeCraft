@@ -137,7 +137,7 @@ func (s *Store) ListWorkflows(ctx context.Context, limit int) ([]Workflow, error
 	}
 	defer rows.Close()
 
-	var out []Workflow
+	out := make([]Workflow, 0)
 	for rows.Next() {
 		var wf Workflow
 		if err := rows.Scan(
@@ -204,27 +204,27 @@ type UpdateWorkflowParams struct {
 	Mode          *string
 }
 
-// UpdateWorkflow 功能：更新 workflow 的 title/workspace/mode（按需），并写入 `workflow.updated` 审计事件。
-// 参数/返回：workflowID 为目标；patch 为可选字段；返回更新后的 Workflow。
+// UpdateWorkflow 功能：更新 workflow 的 title/workspace/mode（按需），并写入 `workflow.updated` 审计事件（含运行中 mode 切换的节点状态同步）。
+// 参数/返回：workflowID 为目标；patch 为可选字段；返回更新后的 Workflow 与被同步更新的 nodes（仅在运行中切换 mode 时可能非空）。
 // 失败场景：workflow 不存在、参数非法或 SQL 更新失败时返回 error。
-// 副作用：写入 SQLite workflows/events。
-func (s *Store) UpdateWorkflow(ctx context.Context, workflowID string, patch UpdateWorkflowParams) (Workflow, error) {
+// 副作用：写入 SQLite workflows/nodes/events。
+func (s *Store) UpdateWorkflow(ctx context.Context, workflowID string, patch UpdateWorkflowParams) (Workflow, []Node, error) {
 	if s == nil || s.db == nil {
-		return Workflow{}, fmt.Errorf("store not initialized")
+		return Workflow{}, nil, fmt.Errorf("store not initialized")
 	}
 	if patch.Title == nil && patch.WorkspacePath == nil && patch.Mode == nil {
-		return Workflow{}, fmt.Errorf("%w: empty patch", ErrValidation)
+		return Workflow{}, nil, fmt.Errorf("%w: empty patch", ErrValidation)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return Workflow{}, fmt.Errorf("begin tx: %w", err)
+		return Workflow{}, nil, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
 	current, err := getWorkflowTx(ctx, tx, workflowID)
 	if err != nil {
-		return Workflow{}, err
+		return Workflow{}, nil, err
 	}
 
 	fields := make([]string, 0, 3)
@@ -235,14 +235,14 @@ func (s *Store) UpdateWorkflow(ctx context.Context, workflowID string, patch Upd
 	}
 	if patch.WorkspacePath != nil {
 		if *patch.WorkspacePath == "" {
-			return Workflow{}, fmt.Errorf("%w: workspace_path is required", ErrValidation)
+			return Workflow{}, nil, fmt.Errorf("%w: workspace_path is required", ErrValidation)
 		}
 		updated.WorkspacePath = *patch.WorkspacePath
 		fields = append(fields, "workspace_path")
 	}
 	if patch.Mode != nil {
 		if *patch.Mode != string(WorkflowModeAuto) && *patch.Mode != string(WorkflowModeManual) {
-			return Workflow{}, fmt.Errorf("%w: invalid mode %q", ErrValidation, *patch.Mode)
+			return Workflow{}, nil, fmt.Errorf("%w: invalid mode %q", ErrValidation, *patch.Mode)
 		}
 		updated.Mode = *patch.Mode
 		fields = append(fields, "mode")
@@ -258,24 +258,97 @@ func (s *Store) UpdateWorkflow(ctx context.Context, workflowID string, patch Upd
 		updated.Title, updated.WorkspacePath, updated.Mode, updated.UpdatedAt, workflowID,
 	)
 	if err != nil {
-		return Workflow{}, fmt.Errorf("update workflow: %w", err)
+		return Workflow{}, nil, fmt.Errorf("update workflow: %w", err)
 	}
 	affected, _ := res.RowsAffected()
 	if affected == 0 {
-		return Workflow{}, os.ErrNotExist
+		return Workflow{}, nil, os.ErrNotExist
 	}
 
 	if err := insertEvent(ctx, tx, workflowID, "workflow", workflowID, "workflow.updated", updated.UpdatedAt, map[string]any{
 		"action": "updated",
 		"fields": fields,
 	}); err != nil {
-		return Workflow{}, err
+		return Workflow{}, nil, err
+	}
+
+	updatedNodes := make([]Node, 0)
+	if patch.Mode != nil && current.Mode != updated.Mode && current.Status == string(WorkflowStatusRunning) {
+		fromStatus := "queued"
+		toStatus := "pending_approval"
+		if updated.Mode == string(WorkflowModeAuto) {
+			fromStatus = "pending_approval"
+			toStatus = "queued"
+		}
+
+		rows, err := tx.QueryContext(
+			ctx,
+			`SELECT id, workflow_id, node_type, expert_id, title, prompt, status,
+			        created_at, updated_at, last_execution_id, result_summary, result_json, error_message
+			   FROM nodes
+			  WHERE workflow_id = ?
+			    AND node_type != 'master'
+			    AND status = ?
+			  ORDER BY created_at ASC;`,
+			workflowID,
+			fromStatus,
+		)
+		if err != nil {
+			return Workflow{}, nil, fmt.Errorf("query nodes for mode switch: %w", err)
+		}
+		defer rows.Close()
+
+		var switchNodes []Node
+		for rows.Next() {
+			var n Node
+			if err := rows.Scan(
+				&n.ID,
+				&n.WorkflowID,
+				&n.NodeType,
+				&n.ExpertID,
+				&n.Title,
+				&n.Prompt,
+				&n.Status,
+				&n.CreatedAt,
+				&n.UpdatedAt,
+				&n.LastExecution,
+				&n.ResultSummary,
+				&n.ResultJSON,
+				&n.ErrorMessage,
+			); err != nil {
+				return Workflow{}, nil, fmt.Errorf("scan node for mode switch: %w", err)
+			}
+			switchNodes = append(switchNodes, n)
+		}
+		if err := rows.Err(); err != nil {
+			return Workflow{}, nil, fmt.Errorf("iterate nodes for mode switch: %w", err)
+		}
+		rows.Close()
+
+		for i := range switchNodes {
+			n := &switchNodes[i]
+			n.Status = toStatus
+			n.UpdatedAt = updated.UpdatedAt
+			n.ErrorMessage = nil
+			if _, err := tx.ExecContext(ctx, `UPDATE nodes SET status = ?, updated_at = ?, error_message = NULL WHERE id = ?;`, n.Status, n.UpdatedAt, n.ID); err != nil {
+				return Workflow{}, nil, fmt.Errorf("update node status for mode switch: %w", err)
+			}
+			if err := insertEvent(ctx, tx, workflowID, "node", n.ID, "node.updated", n.UpdatedAt, map[string]any{
+				"action":  "mode.switched",
+				"node_id": n.ID,
+				"status":  n.Status,
+				"mode":    updated.Mode,
+			}); err != nil {
+				return Workflow{}, nil, err
+			}
+			updatedNodes = append(updatedNodes, *n)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return Workflow{}, fmt.Errorf("commit: %w", err)
+		return Workflow{}, nil, fmt.Errorf("commit: %w", err)
 	}
-	return updated, nil
+	return updated, updatedNodes, nil
 }
 
 func getWorkflowTx(ctx context.Context, tx *sql.Tx, workflowID string) (Workflow, error) {
