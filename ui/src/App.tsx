@@ -2,12 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   cancelExecution,
+  createWorkflow,
   daemonUrlFromEnv,
   fetchExecutionLogTail,
   fetchHealth,
+  fetchWorkflows,
   startExecution,
   wsUrlFromDaemonUrl,
   type Execution,
+  type Workflow,
 } from './lib/daemon'
 import { TerminalPane, type TerminalPaneHandle } from './components/TerminalPane'
 
@@ -38,6 +41,11 @@ function App() {
   const wsUrl = useMemo(() => wsUrlFromDaemonUrl(daemonUrl), [daemonUrl])
   const [health, setHealth] = useState<HealthState>({ status: 'checking' })
   const [wsState, setWsState] = useState<WsState>('connecting')
+  const [workflows, setWorkflows] = useState<Workflow[]>([])
+  const [wfTitle, setWfTitle] = useState('')
+  const [wfWorkspace, setWfWorkspace] = useState('.')
+  const [wfMode, setWfMode] = useState<'manual' | 'auto'>('manual')
+  const [wfError, setWfError] = useState<string | null>(null)
   const [executions, setExecutions] = useState<Execution[]>([])
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(
     null,
@@ -63,6 +71,36 @@ function App() {
       })
 
     return () => abortController.abort()
+  }, [daemonUrl])
+
+  const loadWorkflows = useCallback(async () => {
+    setWfError(null)
+    try {
+      const wfs = await fetchWorkflows(daemonUrl)
+      setWorkflows(wfs)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      setWfError(message)
+    }
+  }, [daemonUrl])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchWorkflows(daemonUrl)
+      .then((wfs) => {
+        if (cancelled) return
+        setWorkflows(wfs)
+        setWfError(null)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        const message = err instanceof Error ? err.message : String(err)
+        setWfError(message)
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [daemonUrl])
 
   const loadTailIntoTerminal = useCallback(
@@ -202,6 +240,23 @@ function App() {
     }
   }
 
+  const onCreateWorkflow = async () => {
+    setWfError(null)
+    try {
+      const created = await createWorkflow(daemonUrl, {
+        title: wfTitle.trim() ? wfTitle.trim() : undefined,
+        workspace_path: wfWorkspace.trim(),
+        mode: wfMode,
+      })
+      setWfTitle('')
+      setWfWorkspace(created.workspace_path)
+      await loadWorkflows()
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      setWfError(message)
+    }
+  }
+
   return (
     <div className="page">
       <header className="header">
@@ -232,6 +287,88 @@ function App() {
               </div>
             )}
           </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panelTitle">Workflows</div>
+
+        <div className="row">
+          <div className="label">Title</div>
+          <div className="value">
+            <input
+              className="input"
+              placeholder="Untitled"
+              value={wfTitle}
+              onChange={(e) => setWfTitle(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="row">
+          <div className="label">Workspace</div>
+          <div className="value">
+            <input
+              className="input"
+              placeholder="."
+              value={wfWorkspace}
+              onChange={(e) => setWfWorkspace(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="row">
+          <div className="label">Mode</div>
+          <div className="value">
+            <select
+              className="select"
+              value={wfMode}
+              onChange={(e) =>
+                setWfMode(e.target.value === 'auto' ? 'auto' : 'manual')
+              }
+            >
+              <option value="manual">manual</option>
+              <option value="auto">auto</option>
+            </select>
+          </div>
+        </div>
+        <div className="row">
+          <div className="label">Actions</div>
+          <div className="value">
+            <div className="actionsRow">
+              <button className="primaryBtnInline" onClick={onCreateWorkflow}>
+                Create
+              </button>
+              <button className="ghostBtn" onClick={loadWorkflows}>
+                Refresh
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {wfError && (
+          <div className="errorBox" style={{ marginTop: 10 }}>
+            <div className="errorTitle">加载/创建 workflow 失败</div>
+            <div className="errorMsg">{wfError}</div>
+          </div>
+        )}
+
+        <div className="wfList">
+          {workflows.length === 0 ? (
+            <div className="emptyHint">暂无 workflow，先创建一个。</div>
+          ) : (
+            workflows.map((wf) => (
+              <div key={wf.workflow_id} className="wfItem">
+                <div className="wfItemTop">
+                  <span className="wfStatus">{wf.status}</span>
+                  <span className="wfMode">{wf.mode}</span>
+                </div>
+                <div className="wfTitleRow">
+                  <span className="wfTitleText">{wf.title}</span>
+                  <span className="wfId">{wf.workflow_id}</span>
+                </div>
+                <div className="wfMeta">{wf.workspace_path}</div>
+              </div>
+            ))
+          )}
         </div>
       </section>
 

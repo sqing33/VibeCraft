@@ -34,6 +34,18 @@ func LogsDir() (string, error) {
 	return filepath.Join(dataDir, "logs"), nil
 }
 
+// StateDBPath 功能：返回 SQLite state DB 路径。
+// 参数/返回：返回 `$XDG_DATA_HOME/vibe-tree/state.db`（或 `~/.local/share/vibe-tree/state.db`）。
+// 失败场景：dataDir 解析失败时返回 error。
+// 副作用：读取环境变量与 home 目录信息（间接）。
+func StateDBPath() (string, error) {
+	dataDir, err := DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dataDir, "state.db"), nil
+}
+
 // EnsureDir 功能：确保目录存在（幂等）。
 // 参数/返回：传入目录路径；成功返回 nil。
 // 失败场景：权限不足或路径不可创建时返回 error。

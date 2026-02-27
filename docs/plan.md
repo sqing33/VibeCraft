@@ -1,6 +1,6 @@
 # vibe-tree MVP 实现 TodoList（细化到可直接照做）
 
-> 详细规格/架构/协议：`plan/规划.md`
+> 详细规格/架构/协议：`docs/规划.md`
 
 ## 0. 约定（先定死，避免返工）
 - [ ] 约定仓库结构（MVP）：`backend/`（Go daemon）、`ui/`（React SPA）、`desktop/`（Wails 壳）
@@ -9,17 +9,17 @@
 - [ ] 约定数据目录（Ubuntu/XDG）：
   config：`~/.config/vibe-tree/config.json`
   data：`~/.local/share/vibe-tree/`
-  sqlite：`~/.local/share/vibe-tree/vibe-tree.sqlite3`
+  sqlite：`~/.local/share/vibe-tree/state.db`
   logs：`~/.local/share/vibe-tree/logs/`
 - [ ] 约定 ID 规则（便于日志与排障）：workflow `wf_...`、node `nd_...`、execution `ex_...`（后端生成）
 - [ ] 约定状态枚举（先用 MVP 子集，后续再扩）：
   workflow：`todo` `running` `done` `failed` `canceled`
   node：`draft` `pending_approval` `queued` `running` `succeeded` `failed` `canceled` `skipped`
   execution：`queued` `running` `succeeded` `failed` `canceled` `timeout`
-- [ ] 约定 WS envelope（字段名对齐 `plan/规划.md` 8.2）：`type` `ts` `workflow_id` `node_id` `execution_id` `payload`
+- [ ] 约定 WS envelope（字段名对齐 `docs/规划.md` 8.2）：`type` `ts` `workflow_id` `node_id` `execution_id` `payload`
 
 验收：
-- [ ] `plan/规划.md` 里 8.x/9.x 的协议点，在本文件里都能找到对应的落地步骤
+- [ ] `docs/规划.md` 里 8.x/9.x 的协议点，在本文件里都能找到对应的落地步骤
 
 ## Phase 0：仓库与骨架（0.5–1 天）
 
@@ -66,7 +66,7 @@
 - [x] 定义 logfile 路径：`~/.local/share/vibe-tree/logs/<execution_id>.log`
 - [x] runner 输出写入文件（append），并定期 flush（例如 100ms 或按行）
 - [x] 新增 API：`GET /api/v1/executions/{id}/log?tail=2000`
-  约定：`tail` 以字节为单位（和 `plan/规划.md` 一致），返回纯文本（UTF-8，包含 ANSI）
+  约定：`tail` 以字节为单位（和 `docs/规划.md` 一致），返回纯文本（UTF-8，包含 ANSI）
 
 验收：
 - [x] 进程运行期间 logfile 持续增长；daemon 重启后仍可读取 tail
@@ -108,24 +108,24 @@
 ## Phase 2：Workflow/Node/Execution 元数据闭环（4–7 天）
 
 ### 2.1 SQLite 初始化与迁移
-- [ ] 引入 SQLite（建议 `mattn/go-sqlite3` 或 `modernc.org/sqlite`，二选一）
-- [ ] 启用 WAL + busy_timeout；设置 `db.SetMaxOpenConns(1)`（MVP 先保守）
-- [ ] 建立 migrations（或 GORM AutoMigrate）：创建表
-  `workflows` `nodes` `edges` `executions` `events` `experts`
-  字段参考：`plan/规划.md` 7.2
+- [x] 引入 SQLite（建议 `mattn/go-sqlite3` 或 `modernc.org/sqlite`，二选一）
+- [x] 启用 WAL + busy_timeout；设置 `db.SetMaxOpenConns(1)`（MVP 先保守）
+- [x] 建立 migrations（或 GORM AutoMigrate）：创建表
+  `workflows` `nodes` `edges` `executions` `events`
+  字段参考：`docs/规划.md` 7.2
 
 验收：
-- [ ] daemon 启动会自动创建 sqlite 文件与表
+- [x] daemon 启动会自动创建 sqlite 文件与表
 
 ### 2.2 Workflow CRUD（先不做 DAG）
-- [ ] `POST /api/v1/workflows`：创建 workflow（title/workspace/mode/master_expert_id）
-- [ ] `GET /api/v1/workflows`：列表（含状态、更新时间、mode）
-- [ ] `GET /api/v1/workflows/{id}`：详情（含配置与汇总字段）
-- [ ] `PATCH /api/v1/workflows/{id}`：更新 title/workspace/mode
-- [ ] 每次变更写 events：`workflow.updated`
+- [x] `POST /api/v1/workflows`：创建 workflow（title/workspace/mode）
+- [x] `GET /api/v1/workflows`：列表（含状态、更新时间、mode）
+- [x] `GET /api/v1/workflows/{id}`：详情（含配置与汇总字段）
+- [x] `PATCH /api/v1/workflows/{id}`：更新 title/workspace/mode
+- [x] 每次变更写 events：`workflow.updated`
 
 验收：
-- [ ] UI 首页能创建 workflow 并在列表中看到
+- [x] UI 首页能创建 workflow 并在列表中看到
 
 ### 2.3 Node/Execution 模型与 Start（创建 master 执行）
 - [ ] `POST /api/v1/workflows/{id}:start`：
@@ -160,7 +160,7 @@
 ## Phase 3：DAG 生成与 Manual approval（5–9 天）
 
 ### 3.1 定义 DAG JSON schema + 校验器
-- [ ] 定义 master 输出 schema（按 `plan/规划.md` 9）：nodes/edges + expert_id/prompt 等
+- [ ] 定义 master 输出 schema（按 `docs/规划.md` 9）：nodes/edges + expert_id/prompt 等
 - [ ] 实现严格 JSON 解析策略：
   尝试从 stdout 提取第一个 JSON 对象（允许外层有解释文本）
   解析失败时：把原始输出摘要写入 node result_summary，并在 UI 展示错误
@@ -225,7 +225,7 @@
 ## Phase 4：接入真实 AI Expert（3–10 天）
 
 ### 4.1 Expert 配置系统（config.json）
-- [ ] 定义并实现 `config.json` 读取（参考 `plan/规划.md` 5.1）：
+- [ ] 定义并实现 `config.json` 读取（参考 `docs/规划.md` 5.1）：
   server.host/port
   execution.max_concurrency/kill_grace_ms
   experts[]（id/label/run_mode/command/args/env/timeout_ms）

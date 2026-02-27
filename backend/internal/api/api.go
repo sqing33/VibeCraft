@@ -14,12 +14,14 @@ import (
 
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/runner"
+	"vibe-tree/backend/internal/store"
 	"vibe-tree/backend/internal/ws"
 )
 
 type Deps struct {
 	Executions *execution.Manager
 	Hub        *ws.Hub
+	Store      *store.Store
 }
 
 // Register 功能：注册 HTTP/WS 路由到 `/api/v1` 路由组。
@@ -30,6 +32,11 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
+
+	v1.GET("/workflows", listWorkflowsHandler(deps))
+	v1.POST("/workflows", createWorkflowHandler(deps))
+	v1.GET("/workflows/:id", getWorkflowHandler(deps))
+	v1.PATCH("/workflows/:id", patchWorkflowHandler(deps))
 
 	v1.POST("/executions", startExecutionHandler(deps))
 	v1.POST("/executions/:id/cancel", cancelExecutionHandler(deps))

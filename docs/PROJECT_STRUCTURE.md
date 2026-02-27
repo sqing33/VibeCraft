@@ -15,9 +15,8 @@
 | `ui/` | React 前端：健康检查展示、工作流页面与后续交互 |
 | `desktop/` | 桌面壳（预留）：后续承载 Wails 集成 |
 | `scripts/` | 仓库级脚本：本地开发启动与辅助命令 |
-| `plan/` | 产品/技术规划文档：MVP 路线与详细规格 |
 | `.codex/skills/` | 项目级 Codex skills：流程规范与协作约束 |
-| `docs/` | 项目文档：结构索引、规范说明、维护规则 |
+| `docs/` | 项目文档：结构索引、MVP TodoList、详细规划与维护规则 |
 
 ## 3. 当前关键文件索引
 
@@ -26,17 +25,21 @@
 | `AGENTS.md` | 仓库级 Agent 协作入口（技能路由、执行流程、交付要求） |
 | `backend/cmd/vibe-tree-daemon/main.go` | daemon 进程入口，负责加载配置、启动 HTTP Server、处理优雅退出 |
 | `backend/internal/server/server.go` | Gin Engine 装配：恢复中间件、请求日志、dev CORS，并挂载 `internal/api` 路由 |
-| `backend/internal/api/api.go` | HTTP/WS handlers：health、execution start/log/cancel、WebSocket 升级入口 |
+| `backend/internal/api/api.go` | HTTP/WS handlers：health、workflow CRUD、execution start/log/cancel、WebSocket 升级入口 |
+| `backend/internal/api/workflows.go` | Workflow HTTP handlers：create/list/get/patch，并广播 `workflow.updated` |
 | `backend/internal/config/config.go` | 配置读取逻辑，处理默认值、XDG 路径、环境变量覆盖 |
 | `backend/internal/runner/pty_runner.go` | PTY runner：启动子进程、流式输出、Cancel（SIGTERM→grace→SIGKILL） |
 | `backend/internal/execution/manager.go` | Execution 管理：启动/取消、日志落盘、WS 推送 `execution.*`/`node.log` |
 | `backend/internal/ws/hub.go` | WebSocket hub：连接管理与广播（配合 log tail 断线补齐） |
-| `backend/internal/paths/paths.go` | XDG data/logs 路径解析（`~/.local/share/vibe-tree/...`） |
+| `backend/internal/store/sqlite.go` | SQLite state DB 打开与 pragma 初始化（WAL/busy_timeout/foreign_keys） |
+| `backend/internal/store/migrate.go` | SQLite migrations（使用 `PRAGMA user_version` 管理 schema 版本） |
+| `backend/internal/store/workflows.go` | Workflow 存储：SQLite CRUD + events 写入 |
+| `backend/internal/paths/paths.go` | XDG data/logs/state.db 路径解析（`~/.local/share/vibe-tree/...`） |
 | `backend/internal/id/id.go` | ID 生成：`wf_`/`nd_`/`ex_` 前缀 ID（MVP 先用短随机） |
 | `backend/internal/logx/logx.go` | 后端统一日志格式封装（`level=... module=... action=... msg="..."`） |
-| `ui/src/App.tsx` | 前端首页：daemon health + execution 列表 + WS 订阅 + 终端输出路由 |
+| `ui/src/App.tsx` | 前端首页：daemon health + workflow 创建/列表 + execution 列表 + WS 订阅 + 终端输出 |
 | `ui/src/components/TerminalPane.tsx` | xterm.js 封装组件（fit + write/reset 接口） |
-| `ui/src/lib/daemon.ts` | daemon URL/WS URL 解析与 health/execution API 封装 |
+| `ui/src/lib/daemon.ts` | daemon URL/WS URL 解析与 health/workflow/execution API 封装 |
 | `scripts/dev.sh` | 本地开发一键启动脚本（并行拉起 backend 与 UI） |
 
 ## 4. 功能定位索引（关键词 -> 文件）
@@ -50,6 +53,8 @@
 | daemon 地址默认值 | `backend/internal/config/config.go`, `ui/src/lib/daemon.ts` |
 | XDG 配置路径 | `backend/internal/config/config.go` |
 | XDG 日志路径 | `backend/internal/paths/paths.go` |
+| SQLite state.db 初始化 | `backend/cmd/vibe-tree-daemon/main.go`, `backend/internal/store/sqlite.go`, `backend/internal/store/migrate.go` |
+| Workflow CRUD API | `backend/internal/api/workflows.go`, `backend/internal/store/workflows.go` |
 | execution 启动 | `backend/internal/api/api.go`, `backend/internal/execution/manager.go` |
 | execution 日志落盘 | `backend/internal/execution/manager.go` |
 | execution log tail API | `backend/internal/api/api.go`, `backend/internal/execution/logtail.go` |
@@ -59,7 +64,8 @@
 | ID 生成规则 | `backend/internal/id/id.go` |
 | 后端统一日志格式 | `backend/internal/logx/logx.go`, `backend/internal/server/server.go` |
 | 前端连通性提示 | `ui/src/App.tsx` |
-| health/execution API 封装 | `ui/src/lib/daemon.ts` |
+| Workflow 列表/创建 UI | `ui/src/App.tsx`, `ui/src/lib/daemon.ts` |
+| health/workflow/execution API 封装 | `ui/src/lib/daemon.ts` |
 | 终端渲染与路由 | `ui/src/components/TerminalPane.tsx`, `ui/src/App.tsx` |
 | 本地一键启动 | `scripts/dev.sh` |
 | UI 开发端口代理与构建配置 | `ui/vite.config.ts`, `ui/package.json` |

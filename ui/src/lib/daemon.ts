@@ -62,6 +62,18 @@ export type Execution = {
   signal?: string
 }
 
+export type Workflow = {
+  workflow_id: string
+  title: string
+  workspace_path: string
+  mode: string
+  status: string
+  created_at: number
+  updated_at: number
+  error_message?: string
+  summary?: string
+}
+
 /**
  * 功能：启动一个 execution（默认 demo 命令）。
  * 参数/返回：daemonUrl 为必填；req 可选覆盖 command/args/cwd/env；返回 Execution。
@@ -127,4 +139,41 @@ export async function cancelExecution(
     const text = await res.text().catch(() => '')
     throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
   }
+}
+
+/**
+ * 功能：拉取 workflow 列表（`GET /api/v1/workflows`）。
+ * 参数/返回：接收 daemonUrl；返回 Workflow[]。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchWorkflows(daemonUrl: string): Promise<Workflow[]> {
+  const res = await fetch(`${daemonUrl}/api/v1/workflows`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as Workflow[]
+}
+
+/**
+ * 功能：创建 workflow（`POST /api/v1/workflows`）。
+ * 参数/返回：接收 daemonUrl 与创建参数；返回创建后的 Workflow。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求并在后端写入 SQLite。
+ */
+export async function createWorkflow(
+  daemonUrl: string,
+  req: { title?: string; workspace_path: string; mode?: string },
+): Promise<Workflow> {
+  const res = await fetch(`${daemonUrl}/api/v1/workflows`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as Workflow
 }

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -12,8 +13,10 @@ import (
 	"vibe-tree/backend/internal/config"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/logx"
+	"vibe-tree/backend/internal/paths"
 	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/server"
+	"vibe-tree/backend/internal/store"
 	"vibe-tree/backend/internal/ws"
 )
 
@@ -27,13 +30,35 @@ func main() {
 	logx.Info("daemon", "listen", "启动 HTTP 服务", "addr", cfg.Addr())
 
 	grace := time.Duration(cfg.Execution.KillGraceMs) * time.Millisecond
+
+	stateDBPath, err := paths.StateDBPath()
+	if err != nil {
+		logx.Error("daemon", "open-state-db", "解析 state.db 路径失败", "err", err)
+		os.Exit(1)
+	}
+	if err := paths.EnsureDir(filepath.Dir(stateDBPath)); err != nil {
+		logx.Error("daemon", "open-state-db", "创建数据目录失败", "err", err, "path", stateDBPath)
+		os.Exit(1)
+	}
+	stateStore, err := store.Open(context.Background(), stateDBPath)
+	if err != nil {
+		logx.Error("daemon", "open-state-db", "打开 state.db 失败", "err", err, "path", stateDBPath)
+		os.Exit(1)
+	}
+	defer stateStore.Close()
+	if err := stateStore.Migrate(context.Background()); err != nil {
+		logx.Error("daemon", "migrate-state-db", "迁移 state.db 失败", "err", err, "path", stateDBPath)
+		os.Exit(1)
+	}
+	logx.Info("daemon", "open-state-db", "初始化 state.db 成功", "path", stateDBPath)
+
 	hub := ws.NewHub()
 	execRunner := runner.PTYRunner{DefaultGrace: grace}
 	execMgr := execution.NewManager(execRunner, grace, hub)
 
 	engine := server.New(
 		server.Options{DevCORS: server.DevCORSFromEnv()},
-		api.Deps{Executions: execMgr, Hub: hub},
+		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore},
 	)
 	srv := &http.Server{
 		Addr:              cfg.Addr(),
