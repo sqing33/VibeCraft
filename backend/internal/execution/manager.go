@@ -29,15 +29,18 @@ const (
 )
 
 type Execution struct {
-	ID        string     `json:"execution_id"`
-	Status    Status     `json:"status"`
-	Command   string     `json:"command"`
-	Args      []string   `json:"args,omitempty"`
-	Cwd       string     `json:"cwd,omitempty"`
-	StartedAt time.Time  `json:"started_at"`
-	EndedAt   *time.Time `json:"ended_at,omitempty"`
-	ExitCode  int        `json:"exit_code,omitempty"`
-	Signal    string     `json:"signal,omitempty"`
+	ID         string     `json:"execution_id"`
+	WorkflowID string     `json:"workflow_id,omitempty"`
+	NodeID     string     `json:"node_id,omitempty"`
+	Status     Status     `json:"status"`
+	Command    string     `json:"command"`
+	Args       []string   `json:"args,omitempty"`
+	Cwd        string     `json:"cwd,omitempty"`
+	PID        int        `json:"pid,omitempty"`
+	StartedAt  time.Time  `json:"started_at"`
+	EndedAt    *time.Time `json:"ended_at,omitempty"`
+	ExitCode   int        `json:"exit_code,omitempty"`
+	Signal     string     `json:"signal,omitempty"`
 }
 
 type Manager struct {
@@ -48,11 +51,18 @@ type Manager struct {
 	executions   map[string]*executionState
 }
 
+type StartOptions struct {
+	WorkflowID string
+	NodeID     string
+	OnExit     func(exec Execution)
+}
+
 type executionState struct {
 	exec            Execution
 	logPath         string
 	handle          runner.ProcessHandle
 	cancelRequested bool
+	onExit          func(exec Execution)
 }
 
 // NewManager 功能：创建执行管理器，用于启动/取消 execution 并驱动日志落盘与 WS 推送。
@@ -73,6 +83,14 @@ func NewManager(r runner.Runner, defaultGrace time.Duration, hub *ws.Hub) *Manag
 // 失败场景：日志路径解析失败、日志文件创建失败或进程启动失败时返回 error。
 // 副作用：创建日志文件、启动子进程、启动 goroutine 进行日志流处理与状态收敛。
 func (m *Manager) StartOneshot(ctx context.Context, spec runner.RunSpec) (Execution, error) {
+	return m.StartOneshotWithOptions(ctx, spec, StartOptions{})
+}
+
+// StartOneshotWithOptions 功能：启动一次性 execution，并可携带 workflow/node 上下文与退出回调（用于落库/状态收敛）。
+// 参数/返回：opts 可选提供 WorkflowID/NodeID 与 OnExit 回调；返回 Execution 元数据与错误信息。
+// 失败场景：同 StartOneshot。
+// 副作用：同 StartOneshot，并在退出时调用 opts.OnExit（如提供）。
+func (m *Manager) StartOneshotWithOptions(ctx context.Context, spec runner.RunSpec, opts StartOptions) (Execution, error) {
 	executionID := id.New("ex_")
 	logPath, err := paths.ExecutionLogPath(executionID)
 	if err != nil {
@@ -94,18 +112,22 @@ func (m *Manager) StartOneshot(ctx context.Context, spec runner.RunSpec) (Execut
 	}
 
 	exec := Execution{
-		ID:        executionID,
-		Status:    StatusRunning,
-		Command:   spec.Command,
-		Args:      spec.Args,
-		Cwd:       spec.Cwd,
-		StartedAt: time.Now(),
+		ID:         executionID,
+		WorkflowID: opts.WorkflowID,
+		NodeID:     opts.NodeID,
+		Status:     StatusRunning,
+		Command:    spec.Command,
+		Args:       spec.Args,
+		Cwd:        spec.Cwd,
+		PID:        handle.PID(),
+		StartedAt:  time.Now(),
 	}
 
 	st := &executionState{
 		exec:    exec,
 		logPath: logPath,
 		handle:  handle,
+		onExit:  opts.OnExit,
 	}
 
 	m.mu.Lock()
@@ -115,6 +137,8 @@ func (m *Manager) StartOneshot(ctx context.Context, spec runner.RunSpec) (Execut
 	m.broadcast(ws.Envelope{
 		Type:        "execution.started",
 		Ts:          time.Now().UnixMilli(),
+		WorkflowID:  exec.WorkflowID,
+		NodeID:      exec.NodeID,
 		ExecutionID: executionID,
 		Payload: executionStartedPayload{
 			Command: exec.Command,
@@ -174,6 +198,9 @@ func (m *Manager) streamToLogAndFinalize(executionID string, st *executionState,
 	writer := bufio.NewWriterSize(logFile, 64*1024)
 	lastFlush := time.Now()
 
+	workflowID := st.exec.WorkflowID
+	nodeID := st.exec.NodeID
+
 	output := handle.Output()
 	buf := make([]byte, 4096)
 	for {
@@ -188,6 +215,8 @@ func (m *Manager) streamToLogAndFinalize(executionID string, st *executionState,
 			m.broadcast(ws.Envelope{
 				Type:        "node.log",
 				Ts:          time.Now().UnixMilli(),
+				WorkflowID:  workflowID,
+				NodeID:      nodeID,
 				ExecutionID: executionID,
 				Payload: nodeLogPayload{
 					Chunk: string(buf[:n]),
@@ -220,12 +249,25 @@ func (m *Manager) streamToLogAndFinalize(executionID string, st *executionState,
 	st.exec.ExitCode = exitRes.ExitCode
 	st.exec.Signal = exitRes.Signal
 	st.handle = nil
+	onExit := st.onExit
+	finalExec := st.exec
 	m.mu.Unlock()
+
+	if onExit != nil {
+		func() {
+			defer func() {
+				_ = recover()
+			}()
+			onExit(finalExec)
+		}()
+	}
 
 	durationMs := exitRes.EndedAt.Sub(exitRes.StartedAt).Milliseconds()
 	m.broadcast(ws.Envelope{
 		Type:        "execution.exited",
 		Ts:          time.Now().UnixMilli(),
+		WorkflowID:  workflowID,
+		NodeID:      nodeID,
 		ExecutionID: executionID,
 		Payload: executionExitedPayload{
 			Status:     string(status),

@@ -52,6 +52,12 @@ func main() {
 	}
 	logx.Info("daemon", "open-state-db", "初始化 state.db 成功", "path", stateDBPath)
 
+	if fixed, err := stateStore.RecoverAfterRestart(context.Background()); err != nil {
+		logx.Warn("daemon", "recover", "启动恢复失败（将由后续状态机兜底）", "err", err)
+	} else if fixed > 0 {
+		logx.Warn("daemon", "recover", "检测到未收敛的 running execution，已标记为 failed", "count", fixed)
+	}
+
 	hub := ws.NewHub()
 	execRunner := runner.PTYRunner{DefaultGrace: grace}
 	execMgr := execution.NewManager(execRunner, grace, hub)

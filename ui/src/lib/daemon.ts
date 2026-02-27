@@ -74,6 +74,22 @@ export type Workflow = {
   summary?: string
 }
 
+export type Node = {
+  node_id: string
+  workflow_id: string
+  node_type: string
+  expert_id: string
+  title: string
+  prompt: string
+  status: string
+  created_at: number
+  updated_at: number
+  last_execution_id?: string
+  result_summary?: string
+  result_json?: string
+  error_message?: string
+}
+
 /**
  * 功能：启动一个 execution（默认 demo 命令）。
  * 参数/返回：daemonUrl 为必填；req 可选覆盖 command/args/cwd/env；返回 Execution。
@@ -176,4 +192,48 @@ export async function createWorkflow(
     throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
   }
   return (await res.json()) as Workflow
+}
+
+export type StartWorkflowResponse = {
+  workflow: Workflow
+  master_node: Node
+  execution: Execution
+}
+
+/**
+ * 功能：启动 workflow（`POST /api/v1/workflows/{id}/start`）。
+ * 参数/返回：接收 daemonUrl 与 workflowId；返回 StartWorkflowResponse。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求，触发后端创建 master node + execution 并开始执行。
+ */
+export async function startWorkflow(
+  daemonUrl: string,
+  workflowId: string,
+): Promise<StartWorkflowResponse> {
+  const res = await fetch(`${daemonUrl}/api/v1/workflows/${workflowId}/start`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as StartWorkflowResponse
+}
+
+/**
+ * 功能：读取 workflow 下的 nodes（`GET /api/v1/workflows/{id}/nodes`）。
+ * 参数/返回：接收 daemonUrl 与 workflowId；返回 Node[]。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchWorkflowNodes(
+  daemonUrl: string,
+  workflowId: string,
+): Promise<Node[]> {
+  const res = await fetch(`${daemonUrl}/api/v1/workflows/${workflowId}/nodes`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as Node[]
 }

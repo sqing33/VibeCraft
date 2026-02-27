@@ -178,3 +178,21 @@ func broadcastWorkflowUpdated(hub *ws.Hub, wf store.Workflow) {
 	}
 	hub.Broadcast(b)
 }
+
+func broadcastNodeUpdated(hub *ws.Hub, node store.Node) {
+	if hub == nil {
+		return
+	}
+	env := ws.Envelope{
+		Type:       "node.updated",
+		Ts:         time.Now().UnixMilli(),
+		WorkflowID: node.WorkflowID,
+		NodeID:     node.ID,
+		Payload:    node,
+	}
+	b, err := json.Marshal(env)
+	if err != nil {
+		return
+	}
+	hub.Broadcast(b)
+}

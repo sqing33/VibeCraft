@@ -128,19 +128,19 @@
 - [x] UI 首页能创建 workflow 并在列表中看到
 
 ### 2.3 Node/Execution 模型与 Start（创建 master 执行）
-- [ ] `POST /api/v1/workflows/{id}:start`：
+- [x] `POST /api/v1/workflows/{id}/start`：
   创建 master node（type=master）
   创建 execution（status=running）
   通过 runner 启动 master expert（先用 `bash` stub 也行）
   workflow 状态置为 `running`
-- [ ] `GET /api/v1/workflows/{id}/nodes`：返回 nodes（先只有 master）
-- [ ] execution 结束后：写回 executions 表（exit_code/duration/status），写 events
+- [x] `GET /api/v1/workflows/{id}/nodes`：返回 nodes（先只有 master）
+- [x] execution 结束后：写回 executions 表（exit_code/duration/status），写 events
 
 验收：
-- [ ] 点击 Start 后 UI 能看到 master 的终端输出与结束状态
+- [x] 点击 Start 后 UI 能看到 master 的终端输出与结束状态
 
 ### 2.4 重启恢复（最小版）
-- [ ] daemon 启动时扫描 DB：
+- [x] daemon 启动时扫描 DB：
   将 `executions.status=running` 标为 `failed`（原因=daemon_restarted）或 `canceled`（二选一，建议 failed）
   对应 node/workflow 状态也做一致性修正
 - [ ] UI 加一个“Retry”入口（先只支持 node retry）
@@ -149,13 +149,13 @@
 - [ ] 手动 kill daemon 后重启，workflow 仍可打开；历史日志可 tail；running 的 execution 不会卡死在 running
 
 ### 2.5 UI：Kanban + 详情页骨架
-- [ ] 首页 Kanban（最小版可以先用 4 列分组列表，不强制拖拽）：Todo/Running/Done/Failed
-- [ ] 详情页 `/workflows/:id`：
+- [x] 首页 Kanban（最小版可以先用 4 列分组列表，不强制拖拽）：Todo/Running/Done/Failed
+- [x] 详情页 `#/workflows/:id`（MVP 先用 hash 路由，避免 dev server 刷新 404）：
   左：先放 nodes 列表（后续再换 DAG）
   右：TerminalPane（显示选中 node 的最新 execution 日志）
 
 验收：
-- [ ] 从首页进入详情页，能切换 node 并查看日志
+- [x] 从首页进入详情页，能切换 node 并查看日志
 
 ## Phase 3：DAG 生成与 Manual approval（5–9 天）
 
