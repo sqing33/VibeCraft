@@ -1,7 +1,9 @@
 package server
 
 import (
+	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -39,6 +41,8 @@ func New(opts Options, deps api.Deps) *gin.Engine {
 	v1 := r.Group("/api/v1")
 	api.Register(v1, deps)
 
+	maybeServeUIBuild(r)
+
 	return r
 }
 
@@ -72,4 +76,54 @@ func requestLogger() gin.HandlerFunc {
 			"latency_ms", latency.Milliseconds(),
 		)
 	}
+}
+
+func maybeServeUIBuild(r *gin.Engine) {
+	distDir := strings.TrimSpace(os.Getenv("VIBE_TREE_UI_DIST"))
+	if distDir == "" {
+		distDir = filepath.Join("ui", "dist")
+	}
+
+	absDist, err := filepath.Abs(distDir)
+	if err != nil {
+		absDist = distDir
+	}
+
+	indexPath := filepath.Join(absDist, "index.html")
+	if _, err := os.Stat(indexPath); err != nil {
+		return
+	}
+
+	logx.Info("ui", "serve-ui", "启用 UI 静态资源", "dist", absDist)
+
+	assetsDir := filepath.Join(absDist, "assets")
+	if st, err := os.Stat(assetsDir); err == nil && st.IsDir() {
+		r.Static("/assets", assetsDir)
+	}
+
+	r.GET("/", func(c *gin.Context) {
+		c.File(indexPath)
+	})
+
+	r.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if strings.HasPrefix(path, "/api/") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+
+		rel := strings.TrimPrefix(path, "/")
+		if rel != "" {
+			rel = filepath.Clean(rel)
+			full := filepath.Join(absDist, rel)
+			if absFull, err := filepath.Abs(full); err == nil && strings.HasPrefix(absFull, absDist+string(os.PathSeparator)) {
+				if st, err := os.Stat(absFull); err == nil && !st.IsDir() {
+					c.File(absFull)
+					return
+				}
+			}
+		}
+
+		c.File(indexPath)
+	})
 }

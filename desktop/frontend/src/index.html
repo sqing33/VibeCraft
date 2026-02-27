@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>vibe-tree-desktop</title>
+    <link href="/main.css" rel="stylesheet"/>
+</head>
+
+<body>
+<div class="boot" id="boot">
+    <div class="bootCard">
+        <div class="bootTitle">vibe-tree</div>
+        <div class="bootRow">
+            <div aria-hidden="true" class="spinner" id="bootSpinner"></div>
+            <div class="bootStatus" id="bootStatus">Starting daemon…</div>
+        </div>
+        <div class="bootActions" id="bootActions">
+            <button class="bootButton" id="retryButton" type="button">Retry</button>
+        </div>
+    </div>
+</div>
+<iframe class="frame" id="frame" title="vibe-tree" src="about:blank"></iframe>
+<script src="/main.js"></script>
+</body>
+</html>

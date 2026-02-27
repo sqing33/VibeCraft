@@ -47,9 +47,6 @@ func (s *Store) StartExecution(ctx context.Context, params StartExecutionParams)
 	if params.ExecutionID == "" || params.NodeID == "" || params.WorkflowID == "" {
 		return Node{}, fmt.Errorf("%w: missing execution/node/workflow id", ErrValidation)
 	}
-	if params.Attempt <= 0 {
-		params.Attempt = 1
-	}
 	if params.LogPath == "" {
 		return Node{}, fmt.Errorf("%w: log_path is required", ErrValidation)
 	}
@@ -96,6 +93,14 @@ func (s *Store) StartExecution(ctx context.Context, params StartExecutionParams)
 	}
 	if node.WorkflowID != params.WorkflowID {
 		return Node{}, fmt.Errorf("%w: node workflow mismatch", ErrValidation)
+	}
+
+	if params.Attempt <= 0 {
+		var maxAttempt int
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(attempt), 0) FROM executions WHERE node_id = ?;`, params.NodeID).Scan(&maxAttempt); err != nil {
+			return Node{}, fmt.Errorf("query max attempt: %w", err)
+		}
+		params.Attempt = maxAttempt + 1
 	}
 
 	_, err = tx.ExecContext(

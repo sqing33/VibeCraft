@@ -3,6 +3,7 @@ import './App.css'
 import {
   approveWorkflow,
   cancelExecution,
+  cancelNode,
   cancelWorkflow,
   createWorkflow,
   daemonUrlFromEnv,
@@ -13,6 +14,7 @@ import {
   fetchWorkflows,
   patchNode,
   patchWorkflow,
+  retryNode,
   startWorkflow,
   startExecution,
   wsUrlFromDaemonUrl,
@@ -86,6 +88,9 @@ function App() {
   const [nodeEditExpert, setNodeEditExpert] = useState('bash')
   const [nodeEditSaving, setNodeEditSaving] = useState(false)
   const [nodeEditError, setNodeEditError] = useState<string | null>(null)
+  const [nodeRetrying, setNodeRetrying] = useState(false)
+  const [nodeCanceling, setNodeCanceling] = useState(false)
+  const [nodeActionError, setNodeActionError] = useState<string | null>(null)
   const [executions, setExecutions] = useState<Execution[]>([])
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(
     null,
@@ -588,6 +593,47 @@ function App() {
     }
   }
 
+  const onRetrySelectedNode = async () => {
+    if (!selectedNode || selectedNode.node_type === 'master') return
+    setNodeActionError(null)
+    setNodeRetrying(true)
+    try {
+      const res = await retryNode(daemonUrl, selectedNode.node_id)
+      setNodes((prev) => {
+        const map = new Map(prev.map((n) => [n.node_id, n]))
+        for (const n of res.nodes ?? []) map.set(n.node_id, n)
+        return Array.from(map.values()).sort((a, b) => a.created_at - b.created_at)
+      })
+      setWorkflows((prev) =>
+        prev.some((w) => w.workflow_id === res.workflow.workflow_id)
+          ? prev.map((w) =>
+              w.workflow_id === res.workflow.workflow_id ? res.workflow : w,
+            )
+          : [res.workflow, ...prev],
+      )
+      void refreshGraphById(selectedNode.workflow_id)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      setNodeActionError(message)
+    } finally {
+      setNodeRetrying(false)
+    }
+  }
+
+  const onCancelSelectedNode = async () => {
+    if (!selectedNode || selectedNode.node_type === 'master') return
+    setNodeActionError(null)
+    setNodeCanceling(true)
+    try {
+      await cancelNode(daemonUrl, selectedNode.node_id)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      setNodeActionError(message)
+    } finally {
+      setNodeCanceling(false)
+    }
+  }
+
   const kanbanColumns = useMemo(
     () => [
       { key: 'todo', title: 'Todo', statuses: ['todo'] },
@@ -928,7 +974,10 @@ function App() {
                       selectedNode.node_type !== 'master' &&
                       (selectedNode.status === 'draft' ||
                         selectedNode.status === 'pending_approval' ||
-                        selectedNode.status === 'queued') && (
+                        selectedNode.status === 'queued' ||
+                        selectedNode.status === 'failed' ||
+                        selectedNode.status === 'canceled' ||
+                        selectedNode.status === 'timeout') && (
                         <div className="nodeEditor">
                           <div className="nodeEditorRow">
                             <div className="detailControlsLabel">Expert</div>
@@ -972,6 +1021,38 @@ function App() {
                           )}
                         </div>
                       )}
+
+                    {selectedNode.node_type !== 'master' && (
+                      <div className="actionsRow">
+                        {selectedNode.status === 'running' && (
+                          <button
+                            className="dangerBtn"
+                            disabled={nodeCanceling}
+                            onClick={() => void onCancelSelectedNode()}
+                          >
+                            {nodeCanceling ? 'Canceling…' : 'Cancel node'}
+                          </button>
+                        )}
+                        {(selectedNode.status === 'failed' ||
+                          selectedNode.status === 'canceled' ||
+                          selectedNode.status === 'timeout') && (
+                          <button
+                            className="primaryBtnInline"
+                            disabled={nodeRetrying}
+                            onClick={() => void onRetrySelectedNode()}
+                          >
+                            {nodeRetrying ? 'Retrying…' : 'Retry'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {nodeActionError && (
+                      <div className="errorBox">
+                        <div className="errorTitle">节点操作失败</div>
+                        <div className="errorMsg">{nodeActionError}</div>
+                      </div>
+                    )}
 
                     {selectedNode.result_summary && (
                       <div className="resultBox">

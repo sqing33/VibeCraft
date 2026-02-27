@@ -178,7 +178,7 @@ func (s *Scheduler) startNode(ctx context.Context, n store.RunnableNode) error {
 		ExecutionID: exec.ID,
 		WorkflowID:  n.WorkflowID,
 		NodeID:      n.ID,
-		Attempt:     1,
+		Attempt:     0,
 		PID:         exec.PID,
 		LogPath:     logPath,
 		StartedAt:   exec.StartedAt.UnixMilli(),

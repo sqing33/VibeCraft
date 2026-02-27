@@ -76,6 +76,8 @@ func (s *Store) UpdateNode(ctx context.Context, nodeID string, patch UpdateNodeP
 	switch n.Status {
 	case "draft", "pending_approval", "queued":
 		// ok
+	case "failed", "canceled", "timeout":
+		// ok (允许用户修复后 retry)
 	default:
 		return Node{}, fmt.Errorf("%w: node status %q not editable", ErrConflict, n.Status)
 	}

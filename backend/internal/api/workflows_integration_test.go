@@ -538,3 +538,481 @@ func TestManualApproveRunsWorkerNodes(t *testing.T) {
 	}
 	t.Fatalf("timeout waiting for workflow to be done")
 }
+
+func TestNodeRetry_UnskipsAndAllowsWorkflowToFinish(t *testing.T) {
+	t.Parallel()
+
+	hub := ws.NewHub()
+	grace := 50 * time.Millisecond
+	execRunner := runner.PTYRunner{DefaultGrace: grace}
+	execMgr := execution.NewManager(execRunner, grace, hub)
+	experts := expert.NewRegistry(config.Default())
+
+	stateDBPath := filepath.Join(t.TempDir(), "state.db")
+	st, err := store.Open(context.Background(), stateDBPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate store: %v", err)
+	}
+
+	sched := scheduler.New(scheduler.Options{Store: st, Executions: execMgr, Hub: hub, Experts: experts, MaxConcurrency: 4})
+	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub, Store: st, Experts: experts})
+	httpSrv := httptest.NewServer(engine)
+	defer httpSrv.Close()
+
+	createReq := []byte(`{"title":"hello","workspace_path":".","mode":"manual"}`)
+	res, err := http.Post(httpSrv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(createReq))
+	if err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected create status: %s", res.Status)
+	}
+	var created store.Workflow
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	startRes, err := http.Post(httpSrv.URL+"/api/v1/workflows/"+created.ID+"/start", "application/json", nil)
+	if err != nil {
+		t.Fatalf("start workflow: %v", err)
+	}
+	startRes.Body.Close()
+	if startRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected start status: %s", startRes.Status)
+	}
+
+	// Wait for DAG to be applied (master exits and creates worker nodes).
+	waitDeadline := time.Now().Add(5 * time.Second)
+	var nodes []store.Node
+	for time.Now().Before(waitDeadline) {
+		nodesRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID + "/nodes")
+		if err != nil {
+			t.Fatalf("list nodes: %v", err)
+		}
+		var ns []store.Node
+		if err := json.NewDecoder(nodesRes.Body).Decode(&ns); err != nil {
+			nodesRes.Body.Close()
+			t.Fatalf("decode nodes: %v", err)
+		}
+		nodesRes.Body.Close()
+		if len(ns) >= 4 {
+			nodes = ns
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(nodes) < 4 {
+		t.Fatalf("expected dag nodes to be created, got %d", len(nodes))
+	}
+
+	workers := make([]store.Node, 0)
+	for _, n := range nodes {
+		if n.NodeType != "master" {
+			workers = append(workers, n)
+		}
+	}
+	if len(workers) != 3 {
+		t.Fatalf("expected 3 worker nodes, got %d", len(workers))
+	}
+
+	approveRes, err := http.Post(httpSrv.URL+"/api/v1/workflows/"+created.ID+"/approve", "application/json", nil)
+	if err != nil {
+		t.Fatalf("approve workflow: %v", err)
+	}
+	if approveRes.StatusCode != http.StatusOK {
+		approveRes.Body.Close()
+		t.Fatalf("unexpected approve status: %s", approveRes.Status)
+	}
+	var approved struct {
+		Nodes []store.Node `json:"nodes"`
+	}
+	if err := json.NewDecoder(approveRes.Body).Decode(&approved); err != nil {
+		approveRes.Body.Close()
+		t.Fatalf("decode approve response: %v", err)
+	}
+	approveRes.Body.Close()
+	if len(approved.Nodes) != 1 {
+		t.Fatalf("expected 1 runnable node to be approved, got %d", len(approved.Nodes))
+	}
+	target := approved.Nodes[0]
+
+	// Make the approved (runnable) worker fail.
+	patchBody, _ := json.Marshal(map[string]string{"prompt": `echo "[n1] failing"; exit 1`})
+	patchReq, err := http.NewRequest(http.MethodPatch, httpSrv.URL+"/api/v1/nodes/"+target.ID, bytes.NewReader(patchBody))
+	if err != nil {
+		t.Fatalf("new patch request: %v", err)
+	}
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchRes, err := http.DefaultClient.Do(patchReq)
+	if err != nil {
+		t.Fatalf("patch node: %v", err)
+	}
+	patchRes.Body.Close()
+	if patchRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected patch status: %s", patchRes.Status)
+	}
+
+	if err := sched.Tick(context.Background()); err != nil {
+		t.Fatalf("scheduler tick: %v", err)
+	}
+
+	// Wait for failure and fail-fast skip.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		nodesRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID + "/nodes")
+		if err != nil {
+			t.Fatalf("list nodes: %v", err)
+		}
+		var ns []store.Node
+		if err := json.NewDecoder(nodesRes.Body).Decode(&ns); err != nil {
+			nodesRes.Body.Close()
+			t.Fatalf("decode nodes: %v", err)
+		}
+		nodesRes.Body.Close()
+
+		skipped := 0
+		failed := false
+		for _, n := range ns {
+			if n.ID == target.ID && n.Status == "failed" {
+				failed = true
+			}
+			if n.NodeType != "master" && n.Status == "skipped" {
+				skipped++
+			}
+		}
+		if failed && skipped == 2 {
+			goto afterFailFast
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for fail-fast to skip nodes")
+
+afterFailFast:
+
+	// Fix prompt then retry.
+	patchBody, _ = json.Marshal(map[string]string{"prompt": `echo "[n1] ok"; sleep 0.02; echo "[n1] done"`})
+	patchReq, err = http.NewRequest(http.MethodPatch, httpSrv.URL+"/api/v1/nodes/"+target.ID, bytes.NewReader(patchBody))
+	if err != nil {
+		t.Fatalf("new patch request: %v", err)
+	}
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchRes, err = http.DefaultClient.Do(patchReq)
+	if err != nil {
+		t.Fatalf("patch node: %v", err)
+	}
+	patchRes.Body.Close()
+	if patchRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected patch status: %s", patchRes.Status)
+	}
+
+	retryRes, err := http.Post(httpSrv.URL+"/api/v1/nodes/"+target.ID+"/retry", "application/json", nil)
+	if err != nil {
+		t.Fatalf("retry node: %v", err)
+	}
+	if retryRes.StatusCode != http.StatusOK {
+		retryRes.Body.Close()
+		t.Fatalf("unexpected retry status: %s", retryRes.Status)
+	}
+	var retried struct {
+		Workflow store.Workflow `json:"workflow"`
+		Nodes    []store.Node   `json:"nodes"`
+	}
+	if err := json.NewDecoder(retryRes.Body).Decode(&retried); err != nil {
+		retryRes.Body.Close()
+		t.Fatalf("decode retry response: %v", err)
+	}
+	retryRes.Body.Close()
+
+	foundQueued := false
+	for _, n := range retried.Nodes {
+		if n.ID == target.ID && n.Status == "queued" {
+			foundQueued = true
+		}
+	}
+	if !foundQueued {
+		t.Fatalf("expected retried node to be queued")
+	}
+
+	if err := sched.Tick(context.Background()); err != nil {
+		t.Fatalf("scheduler tick after retry: %v", err)
+	}
+
+	// Wait for retried node to succeed.
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		nodesRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID + "/nodes")
+		if err != nil {
+			t.Fatalf("list nodes: %v", err)
+		}
+		var ns []store.Node
+		if err := json.NewDecoder(nodesRes.Body).Decode(&ns); err != nil {
+			nodesRes.Body.Close()
+			t.Fatalf("decode nodes: %v", err)
+		}
+		nodesRes.Body.Close()
+		for _, n := range ns {
+			if n.ID == target.ID && n.Status == "succeeded" {
+				goto afterRetrySucceeded
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for retried node to succeed")
+
+afterRetrySucceeded:
+
+	// Approve + run remaining steps.
+	for step := 0; step < 2; step++ {
+		approveRes, err := http.Post(httpSrv.URL+"/api/v1/workflows/"+created.ID+"/approve", "application/json", nil)
+		if err != nil {
+			t.Fatalf("approve workflow: %v", err)
+		}
+		if approveRes.StatusCode != http.StatusOK {
+			approveRes.Body.Close()
+			t.Fatalf("unexpected approve status: %s", approveRes.Status)
+		}
+		var approved struct {
+			Nodes []store.Node `json:"nodes"`
+		}
+		if err := json.NewDecoder(approveRes.Body).Decode(&approved); err != nil {
+			approveRes.Body.Close()
+			t.Fatalf("decode approve response: %v", err)
+		}
+		approveRes.Body.Close()
+
+		if len(approved.Nodes) != 1 {
+			t.Fatalf("expected 1 runnable node to be approved, got %d", len(approved.Nodes))
+		}
+		nodeID := approved.Nodes[0].ID
+
+		if err := sched.Tick(context.Background()); err != nil {
+			t.Fatalf("scheduler tick: %v", err)
+		}
+
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			nodesRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID + "/nodes")
+			if err != nil {
+				t.Fatalf("list nodes: %v", err)
+			}
+			var ns []store.Node
+			if err := json.NewDecoder(nodesRes.Body).Decode(&ns); err != nil {
+				nodesRes.Body.Close()
+				t.Fatalf("decode nodes: %v", err)
+			}
+			nodesRes.Body.Close()
+			for _, n := range ns {
+				if n.ID == nodeID && n.Status == "succeeded" {
+					goto nextStep
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatalf("timeout waiting for node %s to succeed", nodeID)
+
+	nextStep:
+	}
+
+	// All worker nodes succeeded => workflow done.
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		getWfRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID)
+		if err != nil {
+			t.Fatalf("get workflow: %v", err)
+		}
+		var wf store.Workflow
+		if err := json.NewDecoder(getWfRes.Body).Decode(&wf); err != nil {
+			getWfRes.Body.Close()
+			t.Fatalf("decode workflow: %v", err)
+		}
+		getWfRes.Body.Close()
+		if wf.Status == "done" {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for workflow to be done")
+}
+
+func TestNodeCancel_CancelsRunningNode(t *testing.T) {
+	t.Parallel()
+
+	hub := ws.NewHub()
+	grace := 50 * time.Millisecond
+	execRunner := runner.PTYRunner{DefaultGrace: grace}
+	execMgr := execution.NewManager(execRunner, grace, hub)
+	experts := expert.NewRegistry(config.Default())
+
+	stateDBPath := filepath.Join(t.TempDir(), "state.db")
+	st, err := store.Open(context.Background(), stateDBPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate store: %v", err)
+	}
+
+	sched := scheduler.New(scheduler.Options{Store: st, Executions: execMgr, Hub: hub, Experts: experts, MaxConcurrency: 4})
+	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub, Store: st, Experts: experts})
+	httpSrv := httptest.NewServer(engine)
+	defer httpSrv.Close()
+
+	createReq := []byte(`{"title":"hello","workspace_path":".","mode":"manual"}`)
+	res, err := http.Post(httpSrv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(createReq))
+	if err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected create status: %s", res.Status)
+	}
+	var created store.Workflow
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	startRes, err := http.Post(httpSrv.URL+"/api/v1/workflows/"+created.ID+"/start", "application/json", nil)
+	if err != nil {
+		t.Fatalf("start workflow: %v", err)
+	}
+	startRes.Body.Close()
+	if startRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected start status: %s", startRes.Status)
+	}
+
+	// Wait for DAG to be applied (master exits and creates worker nodes).
+	waitDeadline := time.Now().Add(5 * time.Second)
+	var nodes []store.Node
+	for time.Now().Before(waitDeadline) {
+		nodesRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID + "/nodes")
+		if err != nil {
+			t.Fatalf("list nodes: %v", err)
+		}
+		var ns []store.Node
+		if err := json.NewDecoder(nodesRes.Body).Decode(&ns); err != nil {
+			nodesRes.Body.Close()
+			t.Fatalf("decode nodes: %v", err)
+		}
+		nodesRes.Body.Close()
+		if len(ns) >= 4 {
+			nodes = ns
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(nodes) < 4 {
+		t.Fatalf("expected dag nodes to be created, got %d", len(nodes))
+	}
+
+	var target store.Node
+	for _, n := range nodes {
+		if n.NodeType != "master" {
+			target = n
+			break
+		}
+	}
+	if target.ID == "" {
+		t.Fatalf("missing worker node")
+	}
+
+	approveRes, err := http.Post(httpSrv.URL+"/api/v1/workflows/"+created.ID+"/approve", "application/json", nil)
+	if err != nil {
+		t.Fatalf("approve workflow: %v", err)
+	}
+	if approveRes.StatusCode != http.StatusOK {
+		approveRes.Body.Close()
+		t.Fatalf("unexpected approve status: %s", approveRes.Status)
+	}
+	var approved struct {
+		Nodes []store.Node `json:"nodes"`
+	}
+	if err := json.NewDecoder(approveRes.Body).Decode(&approved); err != nil {
+		approveRes.Body.Close()
+		t.Fatalf("decode approve response: %v", err)
+	}
+	approveRes.Body.Close()
+	if len(approved.Nodes) != 1 {
+		t.Fatalf("expected 1 runnable node to be approved, got %d", len(approved.Nodes))
+	}
+	target = approved.Nodes[0]
+
+	// Make it run long enough to cancel.
+	patchBody, _ := json.Marshal(map[string]string{"prompt": `echo "[run] start"; sleep 10; echo "[run] end"`})
+	patchReq, err := http.NewRequest(http.MethodPatch, httpSrv.URL+"/api/v1/nodes/"+target.ID, bytes.NewReader(patchBody))
+	if err != nil {
+		t.Fatalf("new patch request: %v", err)
+	}
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchRes, err := http.DefaultClient.Do(patchReq)
+	if err != nil {
+		t.Fatalf("patch node: %v", err)
+	}
+	patchRes.Body.Close()
+	if patchRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected patch status: %s", patchRes.Status)
+	}
+
+	if err := sched.Tick(context.Background()); err != nil {
+		t.Fatalf("scheduler tick: %v", err)
+	}
+
+	// Wait for node to start.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		nodesRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID + "/nodes")
+		if err != nil {
+			t.Fatalf("list nodes: %v", err)
+		}
+		var ns []store.Node
+		if err := json.NewDecoder(nodesRes.Body).Decode(&ns); err != nil {
+			nodesRes.Body.Close()
+			t.Fatalf("decode nodes: %v", err)
+		}
+		nodesRes.Body.Close()
+		for _, n := range ns {
+			if n.ID == target.ID && n.Status == "running" && n.LastExecution != nil && *n.LastExecution != "" {
+				goto started
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for node to start")
+
+started:
+	cancelRes, err := http.Post(httpSrv.URL+"/api/v1/nodes/"+target.ID+"/cancel", "application/json", nil)
+	if err != nil {
+		t.Fatalf("cancel node: %v", err)
+	}
+	cancelRes.Body.Close()
+	if cancelRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected cancel status: %s", cancelRes.Status)
+	}
+
+	// Wait for node to be canceled.
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		nodesRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID + "/nodes")
+		if err != nil {
+			t.Fatalf("list nodes: %v", err)
+		}
+		var ns []store.Node
+		if err := json.NewDecoder(nodesRes.Body).Decode(&ns); err != nil {
+			nodesRes.Body.Close()
+			t.Fatalf("decode nodes: %v", err)
+		}
+		nodesRes.Body.Close()
+		for _, n := range ns {
+			if n.ID == target.ID && n.Status == "canceled" {
+				return
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for node to be canceled")
+}

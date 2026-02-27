@@ -254,26 +254,29 @@
 - [x] 用 codex 生成 DAG；daemon 校验通过后自动落库并进入 manual pending
 
 ### 4.4 Retry/Cancel 完整闭环（按 node 粒度）
-- [ ] `POST /api/v1/nodes/{id}:retry`：创建新的 execution（保留历史）
-- [ ] `POST /api/v1/nodes/{id}:cancel`：取消当前 running execution
-- [ ] UI：failed/canceled 节点显示 Retry；running 节点显示 Cancel
+- [x] `POST /api/v1/nodes/{id}/retry`：创建新的 execution（保留历史）
+- [x] `POST /api/v1/nodes/{id}/cancel`：取消当前 running execution
+- [x] UI：failed/canceled 节点显示 Retry；running 节点显示 Cancel
 
 验收：
-- [ ] 同一 node 多次 retry，能在 UI 里查看每次 execution 的状态与日志
+- [x] 同一 node 多次 retry，能在 UI 里查看每次 execution 的状态与日志
 
 ## Phase 5：桌面壳与发布（3–6 天）
 
 ### 5.1 Wails 工程初始化
-- [ ] 初始化 Wails v2 工程：`desktop/`
-- [ ] desktop 启动时拉起 daemon（子进程或内嵌同进程，二选一；MVP 建议子进程）
-- [ ] desktop WebView 打开 `http://127.0.0.1:<port>/`（开发态也可先直连 `ui dev server`）
+- [x] 初始化 Wails v2 工程：`desktop/`
+- [x] desktop 启动时拉起/复用 daemon（子进程；支持 `VIBE_TREE_DAEMON_PATH` 覆盖可执行路径）
+- [x] desktop WebView 打开 `http://127.0.0.1:<port>/`（daemon 需挂载 UI 静态资源：`ui/dist` 或 `VIBE_TREE_UI_DIST`）
 
 验收：
 - [ ] 双击启动 desktop 后，能看到 UI 且 health 正常
+  - [ ] （Linux）安装依赖：`sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev`
+  - [ ] 构建 UI：`cd ui && npm run build`（或设置 `VIBE_TREE_UI_DIST`）
+  - [ ] 启动 desktop：`cd desktop && wails dev`
 
 ### 5.2 生命周期与数据入口
-- [ ] 约定关闭窗口行为（MVP 先简单：关闭即退出并停止 daemon）
-- [ ] 提供“打开数据目录”入口（至少在菜单里）
+- [x] 约定关闭窗口行为（MVP 先简单：关闭即退出并停止 desktop 拉起的 daemon 子进程）
+- [x] 提供“打开数据目录”入口（菜单：`Tools -> 打开数据目录`）
 
 验收：
 - [ ] 用户能快速定位 sqlite 与 logs 文件位置

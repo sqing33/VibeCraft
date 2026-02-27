@@ -213,7 +213,7 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 			ExecutionID: exec.ID,
 			WorkflowID:  wf.ID,
 			NodeID:      node.ID,
-			Attempt:     1,
+			Attempt:     0,
 			PID:         exec.PID,
 			LogPath:     logPath,
 			StartedAt:   exec.StartedAt.UnixMilli(),

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "vibe-tree-desktop",
+  "outputfilename": "desktop",
+  "wailsjsdir": "./frontend",
+  "author": {
+    "name": "sqing",
+    "email": "1395251710@qq.com"
+  }
+}

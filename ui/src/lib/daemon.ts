@@ -314,6 +314,56 @@ export async function patchNode(
   return (await res.json()) as Node
 }
 
+export type RetryNodeResponse = {
+  workflow: Workflow
+  nodes: Node[]
+}
+
+/**
+ * 功能：重试 node（`POST /api/v1/nodes/{id}/retry`）。
+ * 参数/返回：接收 daemonUrl 与 nodeId；返回 RetryNodeResponse（含被更新的 nodes）。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求并在后端写入 SQLite；后续由调度器启动新的 execution。
+ */
+export async function retryNode(
+  daemonUrl: string,
+  nodeId: string,
+): Promise<RetryNodeResponse> {
+  const res = await fetch(`${daemonUrl}/api/v1/nodes/${nodeId}/retry`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as RetryNodeResponse
+}
+
+export type CancelNodeResponse = {
+  ok: boolean
+  execution_id?: string
+}
+
+/**
+ * 功能：取消 node 当前 running execution（`POST /api/v1/nodes/{id}/cancel`）。
+ * 参数/返回：接收 daemonUrl 与 nodeId；返回 CancelNodeResponse（best-effort）。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求并向后端进程发送取消信号；最终状态由 WS 推送收敛。
+ */
+export async function cancelNode(
+  daemonUrl: string,
+  nodeId: string,
+): Promise<CancelNodeResponse> {
+  const res = await fetch(`${daemonUrl}/api/v1/nodes/${nodeId}/cancel`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as CancelNodeResponse
+}
+
 /**
  * 功能：更新 workflow（`PATCH /api/v1/workflows/{id}`），用于切换 mode 或修改 title/workspace。
  * 参数/返回：接收 daemonUrl、workflowId 与 patch；返回更新后的 Workflow。

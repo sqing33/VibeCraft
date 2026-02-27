@@ -46,6 +46,8 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.POST("/workflows/:id/cancel", cancelWorkflowHandler(deps))
 
 	v1.PATCH("/nodes/:id", patchNodeHandler(deps))
+	v1.POST("/nodes/:id/retry", retryNodeHandler(deps))
+	v1.POST("/nodes/:id/cancel", cancelNodeHandler(deps))
 
 	v1.POST("/executions", startExecutionHandler(deps))
 	v1.POST("/executions/:id/cancel", cancelExecutionHandler(deps))
