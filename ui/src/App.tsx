@@ -1,20 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
+  approveWorkflow,
   cancelExecution,
+  cancelWorkflow,
   createWorkflow,
   daemonUrlFromEnv,
   fetchExecutionLogTail,
   fetchHealth,
+  fetchWorkflowEdges,
   fetchWorkflowNodes,
   fetchWorkflows,
+  patchNode,
+  patchWorkflow,
   startWorkflow,
   startExecution,
   wsUrlFromDaemonUrl,
+  type Edge,
   type Execution,
   type Node,
   type Workflow,
 } from './lib/daemon'
+import { DAGView } from './components/DAGView'
 import { TerminalPane, type TerminalPaneHandle } from './components/TerminalPane'
 
 type HealthState =
@@ -63,7 +70,22 @@ function App() {
   const [nodes, setNodes] = useState<Node[]>([])
   const [nodesLoading, setNodesLoading] = useState(false)
   const [nodesError, setNodesError] = useState<string | null>(null)
+  const [edges, setEdges] = useState<Edge[]>([])
+  const [edgesLoading, setEdgesLoading] = useState(false)
+  const [edgesError, setEdgesError] = useState<string | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [modeSwitching, setModeSwitching] = useState(false)
+  const [modeError, setModeError] = useState<string | null>(null)
+  const [approving, setApproving] = useState(false)
+  const [approveError, setApproveError] = useState<string | null>(null)
+  const [workflowCanceling, setWorkflowCanceling] = useState(false)
+  const [workflowCancelError, setWorkflowCancelError] = useState<string | null>(
+    null,
+  )
+  const [nodeEditPrompt, setNodeEditPrompt] = useState('')
+  const [nodeEditExpert, setNodeEditExpert] = useState('bash')
+  const [nodeEditSaving, setNodeEditSaving] = useState(false)
+  const [nodeEditError, setNodeEditError] = useState<string | null>(null)
   const [executions, setExecutions] = useState<Execution[]>([])
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(
     null,
@@ -79,6 +101,18 @@ function App() {
     if (!selectedNodeId) return null
     return nodes.find((n) => n.node_id === selectedNodeId) ?? null
   }, [nodes, selectedNodeId])
+
+  useEffect(() => {
+    if (!selectedNode || selectedNode.node_type === 'master') {
+      setNodeEditPrompt('')
+      setNodeEditExpert('bash')
+      setNodeEditError(null)
+      return
+    }
+    setNodeEditPrompt(selectedNode.prompt)
+    setNodeEditExpert(selectedNode.expert_id || 'bash')
+    setNodeEditError(null)
+  }, [selectedNode])
 
   const terminalRef = useRef<TerminalPaneHandle | null>(null)
   const selectedExecutionIdRef = useRef<string | null>(null)
@@ -155,57 +189,72 @@ function App() {
     }
   }, [daemonUrl])
 
-  const refreshNodes = useCallback(async () => {
+  const refreshGraphById = useCallback(
+    async (workflowId: string) => {
+      setNodesError(null)
+      setEdgesError(null)
+      setNodesLoading(true)
+      setEdgesLoading(true)
+      try {
+        const [ns, es] = await Promise.all([
+          fetchWorkflowNodes(daemonUrl, workflowId),
+          fetchWorkflowEdges(daemonUrl, workflowId),
+        ])
+        setNodes(ns)
+        setEdges(es)
+
+        const currentSelected = selectedNodeIdRef.current
+        const selected =
+          (currentSelected
+            ? ns.find((n) => n.node_id === currentSelected)
+            : undefined) ??
+          ns.find((n) => n.node_type === 'master') ??
+          ns[0] ??
+          null
+        setSelectedNodeId(selected?.node_id ?? null)
+        if (selected?.last_execution_id) {
+          setSelectedExecutionId(selected.last_execution_id)
+        } else {
+          setSelectedExecutionId(null)
+          terminalRef.current?.reset('No execution yet.\r\n')
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        setNodesError(message)
+        setEdgesError(message)
+      } finally {
+        setNodesLoading(false)
+        setEdgesLoading(false)
+      }
+    },
+    [daemonUrl],
+  )
+
+  const refreshGraph = useCallback(async () => {
     if (!selectedWorkflowId) return
-    setNodesError(null)
-    setNodesLoading(true)
-    try {
-      const ns = await fetchWorkflowNodes(daemonUrl, selectedWorkflowId)
-      setNodes(ns)
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      setNodesError(message)
-    } finally {
-      setNodesLoading(false)
-    }
-  }, [daemonUrl, selectedWorkflowId])
+    await refreshGraphById(selectedWorkflowId)
+  }, [refreshGraphById, selectedWorkflowId])
 
   useEffect(() => {
     if (!selectedWorkflowId) {
       setNodes([])
       setNodesLoading(false)
       setNodesError(null)
+      setEdges([])
+      setEdgesLoading(false)
+      setEdgesError(null)
       setSelectedNodeId(null)
+      setModeError(null)
+      setApproveError(null)
+      setWorkflowCancelError(null)
+      setNodeEditError(null)
+      setNodeEditPrompt('')
+      setNodeEditExpert('bash')
       return
     }
 
-    let cancelled = false
-    setNodesLoading(true)
-    setNodesError(null)
-    fetchWorkflowNodes(daemonUrl, selectedWorkflowId)
-      .then((ns) => {
-        if (cancelled) return
-        setNodes(ns)
-        setNodesLoading(false)
-
-        const preferred =
-          ns.find((n) => n.node_type === 'master') ?? ns[0] ?? null
-        setSelectedNodeId(preferred?.node_id ?? null)
-        if (preferred?.last_execution_id) {
-          setSelectedExecutionId(preferred.last_execution_id)
-        }
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return
-        const message = err instanceof Error ? err.message : String(err)
-        setNodesError(message)
-        setNodesLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [daemonUrl, selectedWorkflowId])
+    void refreshGraphById(selectedWorkflowId)
+  }, [refreshGraphById, selectedWorkflowId])
 
   const onSelectNode = useCallback((node: Node) => {
     setSelectedNodeId(node.node_id)
@@ -216,6 +265,15 @@ function App() {
       terminalRef.current?.reset('No execution yet.\r\n')
     }
   }, [])
+
+  const onSelectNodeId = useCallback(
+    (nodeId: string) => {
+      const node = nodes.find((n) => n.node_id === nodeId) ?? null
+      if (!node) return
+      onSelectNode(node)
+    },
+    [nodes, onSelectNode],
+  )
 
   const loadTailIntoTerminal = useCallback(
     async (executionId: string) => {
@@ -305,6 +363,15 @@ function App() {
           return
         }
 
+        if (env.type === 'dag.generated') {
+          const wfId = env.workflow_id
+          const currentWorkflowId = selectedWorkflowIdRef.current
+          if (typeof wfId === 'string' && currentWorkflowId === wfId) {
+            void refreshGraphById(wfId)
+          }
+          return
+        }
+
         const exId = env.execution_id
         if (!exId) return
 
@@ -370,7 +437,7 @@ function App() {
       if (reconnectTimer) window.clearTimeout(reconnectTimer)
       socket?.close()
     }
-  }, [wsUrl, loadTailIntoTerminal])
+  }, [wsUrl, loadTailIntoTerminal, refreshGraphById])
 
   const onRunDemo = async () => {
     setExecError(null)
@@ -430,12 +497,94 @@ function App() {
         return [started.execution, ...prev]
       })
       setSelectedExecutionId(started.execution.execution_id)
-      void refreshNodes()
+      void refreshGraphById(workflowId)
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
       setWfError(message)
     } finally {
       setWfStartingId(null)
+    }
+  }
+
+  const onSwitchWorkflowMode = async (mode: 'manual' | 'auto') => {
+    if (!selectedWorkflowId) return
+    setModeError(null)
+    setModeSwitching(true)
+    try {
+      const wf = await patchWorkflow(daemonUrl, selectedWorkflowId, { mode })
+      setWorkflows((prev) =>
+        prev.map((w) => (w.workflow_id === wf.workflow_id ? wf : w)),
+      )
+      void refreshGraphById(wf.workflow_id)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      setModeError(message)
+    } finally {
+      setModeSwitching(false)
+    }
+  }
+
+  const onApproveRunnable = async () => {
+    if (!selectedWorkflowId) return
+    setApproveError(null)
+    setApproving(true)
+    try {
+      const res = await approveWorkflow(daemonUrl, selectedWorkflowId)
+      setWorkflows((prev) =>
+        prev.map((w) =>
+          w.workflow_id === res.workflow.workflow_id ? res.workflow : w,
+        ),
+      )
+      if (res.nodes.length === 0) {
+        setApproveError('No runnable nodes to approve.')
+      } else {
+        setNodes((prev) => {
+          const byId = new Map(prev.map((n) => [n.node_id, n]))
+          for (const n of res.nodes) byId.set(n.node_id, n)
+          return Array.from(byId.values()).sort((a, b) => a.created_at - b.created_at)
+        })
+      }
+      void refreshGraphById(selectedWorkflowId)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      setApproveError(message)
+    } finally {
+      setApproving(false)
+    }
+  }
+
+  const onCancelWorkflow = async () => {
+    if (!selectedWorkflowId) return
+    setWorkflowCancelError(null)
+    setWorkflowCanceling(true)
+    try {
+      await cancelWorkflow(daemonUrl, selectedWorkflowId)
+      void refreshGraphById(selectedWorkflowId)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      setWorkflowCancelError(message)
+    } finally {
+      setWorkflowCanceling(false)
+    }
+  }
+
+  const onSaveNodeEdit = async () => {
+    if (!selectedNode || selectedNode.node_type === 'master') return
+    setNodeEditError(null)
+    setNodeEditSaving(true)
+    try {
+      const updated = await patchNode(daemonUrl, selectedNode.node_id, {
+        prompt: nodeEditPrompt,
+        expert_id: nodeEditExpert,
+      })
+      setNodes((prev) =>
+        prev.map((n) => (n.node_id === updated.node_id ? updated : n)),
+      )
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      setNodeEditError(message)
+    } finally {
+      setNodeEditSaving(false)
     }
   }
 
@@ -651,10 +800,10 @@ function App() {
                 <div className="detailBoxActions">
                   <button
                     className="ghostBtn"
-                    disabled={!selectedWorkflowId || nodesLoading}
-                    onClick={refreshNodes}
+                    disabled={!selectedWorkflowId || nodesLoading || edgesLoading}
+                    onClick={refreshGraph}
                   >
-                    Refresh nodes
+                    Refresh
                   </button>
                   <button
                     className="ghostBtn"
@@ -666,38 +815,171 @@ function App() {
                 </div>
               </div>
 
-              {nodesError && (
-                <div className="errorBox" style={{ marginTop: 10 }}>
-                  <div className="errorTitle">加载 nodes 失败</div>
-                  <div className="errorMsg">{nodesError}</div>
+              {selectedWorkflowId && (
+                <div className="detailControls">
+                  <div className="detailControlsLeft">
+                    <div className="detailControlsLabel">Mode</div>
+                    <select
+                      className="select selectSmall"
+                      value={
+                        selectedWorkflow?.mode === 'auto' ? 'auto' : 'manual'
+                      }
+                      disabled={!selectedWorkflow || modeSwitching}
+                      onChange={(e) =>
+                        void onSwitchWorkflowMode(
+                          e.target.value === 'auto' ? 'auto' : 'manual',
+                        )
+                      }
+                    >
+                      <option value="manual">manual</option>
+                      <option value="auto">auto</option>
+                    </select>
+                  </div>
+                  <div className="detailControlsRight">
+                    {selectedWorkflow?.mode === 'manual' && (
+                      <button
+                        className="primaryBtnInline"
+                        disabled={
+                          !selectedWorkflowId ||
+                          approving ||
+                          selectedWorkflow?.status !== 'running'
+                        }
+                        onClick={() => void onApproveRunnable()}
+                      >
+                        {approving ? 'Approving…' : 'Approve runnable'}
+                      </button>
+                    )}
+                    {selectedWorkflow?.status === 'running' && (
+                      <button
+                        className="dangerBtn"
+                        disabled={!selectedWorkflowId || workflowCanceling}
+                        onClick={() => void onCancelWorkflow()}
+                      >
+                        {workflowCanceling ? 'Canceling…' : 'Cancel workflow'}
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
 
-              <div className="nodeList">
+              {modeError && (
+                <div className="errorBox">
+                  <div className="errorTitle">切换 mode 失败</div>
+                  <div className="errorMsg">{modeError}</div>
+                </div>
+              )}
+
+              {approveError && (
+                <div className="errorBox">
+                  <div className="errorTitle">Approve 失败</div>
+                  <div className="errorMsg">{approveError}</div>
+                </div>
+              )}
+
+              {workflowCancelError && (
+                <div className="errorBox">
+                  <div className="errorTitle">Cancel workflow 失败</div>
+                  <div className="errorMsg">{workflowCancelError}</div>
+                </div>
+              )}
+
+              {(nodesError || edgesError) && (
+                <div className="errorBox">
+                  <div className="errorTitle">加载 DAG 失败</div>
+                  <div className="errorMsg">{nodesError ?? edgesError}</div>
+                </div>
+              )}
+
+              {!selectedWorkflowId ? (
+                <div className="emptyHint">点击 Kanban 卡片打开详情。</div>
+              ) : nodesLoading || edgesLoading ? (
+                <div className="emptyHint">Loading DAG…</div>
+              ) : nodes.length === 0 ? (
+                <div className="emptyHint">暂无 nodes。</div>
+              ) : (
+                <DAGView
+                  nodes={nodes}
+                  edges={edges}
+                  selectedNodeId={selectedNodeId}
+                  onSelectNodeId={onSelectNodeId}
+                />
+              )}
+
+              <div className="nodeInspector">
                 {!selectedWorkflowId ? (
-                  <div className="emptyHint">点击 Kanban 卡片打开详情。</div>
-                ) : nodesLoading ? (
-                  <div className="emptyHint">Loading nodes…</div>
-                ) : nodes.length === 0 ? (
-                  <div className="emptyHint">暂无 nodes。</div>
+                  <div className="emptyHint">-</div>
+                ) : !selectedNode ? (
+                  <div className="emptyHint">点击 DAG 节点查看详情。</div>
                 ) : (
-                  nodes.map((n) => (
-                    <button
-                      key={n.node_id}
-                      className={
-                        n.node_id === selectedNodeId
-                          ? 'nodeItem selected'
-                          : 'nodeItem'
-                      }
-                      onClick={() => onSelectNode(n)}
-                    >
-                      <div className="nodeItemTop">
-                        <span className="nodeStatus">{n.status}</span>
-                        <span className="nodeId">{n.node_id}</span>
+                  <>
+                    <div className="nodeInspectorHeader">
+                      <div className="nodeInspectorTitle">{selectedNode.title}</div>
+                      <div className="nodeInspectorSub">
+                        <code>{selectedNode.node_id}</code>
                       </div>
-                      <div className="nodeTitle">{n.title}</div>
-                    </button>
-                  ))
+                    </div>
+
+                    <div className="nodeInspectorMeta">
+                      <span className="muted">status={selectedNode.status}</span>
+                      <span className="muted">expert={selectedNode.expert_id}</span>
+                    </div>
+
+                    {selectedWorkflow?.mode === 'manual' &&
+                      selectedNode.node_type !== 'master' &&
+                      (selectedNode.status === 'draft' ||
+                        selectedNode.status === 'pending_approval' ||
+                        selectedNode.status === 'queued') && (
+                        <div className="nodeEditor">
+                          <div className="nodeEditorRow">
+                            <div className="detailControlsLabel">Expert</div>
+                            <select
+                              className="select selectSmall"
+                              value={nodeEditExpert}
+                              onChange={(e) =>
+                                setNodeEditExpert(e.target.value || 'bash')
+                              }
+                              disabled={nodeEditSaving}
+                            >
+                              <option value="bash">bash</option>
+                            </select>
+                          </div>
+                          <div className="nodeEditorRow">
+                            <div className="detailControlsLabel">Prompt</div>
+                            <textarea
+                              className="textarea"
+                              value={nodeEditPrompt}
+                              onChange={(e) => setNodeEditPrompt(e.target.value)}
+                              rows={6}
+                              spellCheck={false}
+                              disabled={nodeEditSaving}
+                            />
+                          </div>
+                          <div className="nodeEditorActions">
+                            <button
+                              className="primaryBtnInline"
+                              disabled={nodeEditSaving}
+                              onClick={() => void onSaveNodeEdit()}
+                            >
+                              {nodeEditSaving ? 'Saving…' : 'Save'}
+                            </button>
+                          </div>
+
+                          {nodeEditError && (
+                            <div className="errorBox">
+                              <div className="errorTitle">保存失败</div>
+                              <div className="errorMsg">{nodeEditError}</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                    {selectedNode.result_summary && (
+                      <div className="resultBox">
+                        <div className="resultTitle">Result summary</div>
+                        <pre className="resultText">{selectedNode.result_summary}</pre>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>

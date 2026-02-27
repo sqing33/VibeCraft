@@ -12,6 +12,7 @@ import (
 type Config struct {
 	Server    ServerConfig    `json:"server"`
 	Execution ExecutionConfig `json:"execution"`
+	Experts   []ExpertConfig  `json:"experts"`
 }
 
 type ServerConfig struct {
@@ -22,6 +23,16 @@ type ServerConfig struct {
 type ExecutionConfig struct {
 	MaxConcurrency int `json:"max_concurrency"`
 	KillGraceMs    int `json:"kill_grace_ms"`
+}
+
+type ExpertConfig struct {
+	ID        string            `json:"id"`
+	Label     string            `json:"label"`
+	RunMode   string            `json:"run_mode"`
+	Command   string            `json:"command"`
+	Args      []string          `json:"args"`
+	Env       map[string]string `json:"env"`
+	TimeoutMs int               `json:"timeout_ms"`
 }
 
 // Default 功能：返回一份可直接运行的默认配置（localhost-only）。
@@ -37,6 +48,18 @@ func Default() Config {
 		Execution: ExecutionConfig{
 			MaxConcurrency: 6,
 			KillGraceMs:    1500,
+		},
+		Experts: []ExpertConfig{
+			{
+				ID:      "bash",
+				Label:   "Bash",
+				RunMode: "oneshot",
+				Command: "bash",
+				Args:    []string{"-lc", "{{prompt}}"},
+				Env:     map[string]string{},
+				// 30min: MVP 默认超时时间（后续由 scheduler/execution 实际 enforce）。
+				TimeoutMs: 30 * 60 * 1000,
+			},
 		},
 	}
 }

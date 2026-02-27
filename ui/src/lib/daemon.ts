@@ -90,6 +90,16 @@ export type Node = {
   error_message?: string
 }
 
+export type Edge = {
+  edge_id: string
+  workflow_id: string
+  from_node_id: string
+  to_node_id: string
+  source_handle?: string
+  target_handle?: string
+  type: string
+}
+
 /**
  * 功能：启动一个 execution（默认 demo 命令）。
  * 参数/返回：daemonUrl 为必填；req 可选覆盖 command/args/cwd/env；返回 Execution。
@@ -236,4 +246,112 @@ export async function fetchWorkflowNodes(
     throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
   }
   return (await res.json()) as Node[]
+}
+
+/**
+ * 功能：读取 workflow 下的 edges（`GET /api/v1/workflows/{id}/edges`）。
+ * 参数/返回：接收 daemonUrl 与 workflowId；返回 Edge[]。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchWorkflowEdges(
+  daemonUrl: string,
+  workflowId: string,
+): Promise<Edge[]> {
+  const res = await fetch(`${daemonUrl}/api/v1/workflows/${workflowId}/edges`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as Edge[]
+}
+
+export type ApproveWorkflowResponse = {
+  workflow: Workflow
+  nodes: Node[]
+}
+
+/**
+ * 功能：批准 workflow 下所有 runnable nodes（manual 模式，`POST /api/v1/workflows/{id}/approve`）。
+ * 参数/返回：接收 daemonUrl 与 workflowId；返回 ApproveWorkflowResponse（含被推进的 nodes）。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求并在后端写入 SQLite。
+ */
+export async function approveWorkflow(
+  daemonUrl: string,
+  workflowId: string,
+): Promise<ApproveWorkflowResponse> {
+  const res = await fetch(`${daemonUrl}/api/v1/workflows/${workflowId}/approve`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as ApproveWorkflowResponse
+}
+
+/**
+ * 功能：更新 node 的 prompt/expert_id（`PATCH /api/v1/nodes/{id}`）。
+ * 参数/返回：接收 daemonUrl、nodeId 与 patch；返回更新后的 Node。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求并在后端写入 SQLite。
+ */
+export async function patchNode(
+  daemonUrl: string,
+  nodeId: string,
+  patch: { prompt?: string; expert_id?: string },
+): Promise<Node> {
+  const res = await fetch(`${daemonUrl}/api/v1/nodes/${nodeId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as Node
+}
+
+/**
+ * 功能：更新 workflow（`PATCH /api/v1/workflows/{id}`），用于切换 mode 或修改 title/workspace。
+ * 参数/返回：接收 daemonUrl、workflowId 与 patch；返回更新后的 Workflow。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求并在后端写入 SQLite。
+ */
+export async function patchWorkflow(
+  daemonUrl: string,
+  workflowId: string,
+  patch: { title?: string; workspace_path?: string; mode?: string },
+): Promise<Workflow> {
+  const res = await fetch(`${daemonUrl}/api/v1/workflows/${workflowId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as Workflow
+}
+
+/**
+ * 功能：取消 workflow（`POST /api/v1/workflows/{id}/cancel`）。
+ * 参数/返回：接收 daemonUrl 与 workflowId；成功 resolve。
+ * 失败场景：HTTP 非 2xx 时抛出 Error。
+ * 副作用：发起 HTTP 请求并触发后端取消 running execution。
+ */
+export async function cancelWorkflow(
+  daemonUrl: string,
+  workflowId: string,
+): Promise<void> {
+  const res = await fetch(`${daemonUrl}/api/v1/workflows/${workflowId}/cancel`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
 }

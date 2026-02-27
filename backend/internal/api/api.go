@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"vibe-tree/backend/internal/execution"
+	"vibe-tree/backend/internal/expert"
 	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/store"
 	"vibe-tree/backend/internal/ws"
@@ -22,6 +23,7 @@ type Deps struct {
 	Executions *execution.Manager
 	Hub        *ws.Hub
 	Store      *store.Store
+	Experts    *expert.Registry
 }
 
 // Register 功能：注册 HTTP/WS 路由到 `/api/v1` 路由组。
@@ -41,6 +43,7 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.GET("/workflows/:id/nodes", listWorkflowNodesHandler(deps))
 	v1.GET("/workflows/:id/edges", listWorkflowEdgesHandler(deps))
 	v1.POST("/workflows/:id/approve", approveWorkflowHandler(deps))
+	v1.POST("/workflows/:id/cancel", cancelWorkflowHandler(deps))
 
 	v1.PATCH("/nodes/:id", patchNodeHandler(deps))
 

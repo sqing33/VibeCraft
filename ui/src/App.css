@@ -319,6 +319,120 @@
   flex-wrap: wrap;
 }
 
+.detailControls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.detailControlsLeft,
+.detailControlsRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.detailControlsLabel {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.selectSmall {
+  width: 160px;
+}
+
+.nodeInspector {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nodeInspectorHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.nodeInspectorTitle {
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nodeInspectorSub code {
+  font-size: 12px;
+}
+
+.nodeInspectorMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.nodeEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nodeEditorRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nodeEditorActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.9);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+  font-size: 12px;
+  resize: vertical;
+}
+
+.resultBox {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.resultTitle {
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.resultText {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.78);
+  max-height: 160px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
 .nodeList {
   display: flex;
   flex-direction: column;
@@ -504,12 +618,126 @@
   cursor: not-allowed;
 }
 
+.dangerBtn {
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 80, 80, 0.35);
+  background: rgba(255, 80, 80, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.dangerBtn:hover {
+  background: rgba(255, 80, 80, 0.14);
+}
+
+.dangerBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .terminal {
   height: 420px;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: #111316;
+}
+
+.dagCanvas {
+  height: 260px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #0f1114;
+}
+
+.vibeNode {
+  width: 190px;
+  height: 58px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.vibeNode.selected {
+  border-color: rgba(98, 140, 255, 0.8);
+  box-shadow: 0 0 0 3px rgba(98, 140, 255, 0.15);
+}
+
+.vibeNodeTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vibeNodeTitle {
+  font-size: 12px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vibeNodeStatus {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.vibeNodeMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.vibeNode.running {
+  border-color: rgba(240, 195, 106, 0.55);
+  background: rgba(240, 195, 106, 0.06);
+}
+
+.vibeNode.succeeded {
+  border-color: rgba(89, 212, 153, 0.55);
+  background: rgba(89, 212, 153, 0.06);
+}
+
+.vibeNode.failed {
+  border-color: rgba(255, 80, 80, 0.55);
+  background: rgba(255, 80, 80, 0.06);
+}
+
+.vibeNode.timeout {
+  border-color: rgba(190, 140, 255, 0.55);
+  background: rgba(190, 140, 255, 0.06);
+}
+
+.vibeNode.canceled {
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.vibeNode.pending {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.vibeNode.queued {
+  border-color: rgba(98, 140, 255, 0.45);
+  background: rgba(98, 140, 255, 0.05);
+}
+
+.vibeNode.skipped {
+  opacity: 0.7;
 }
 
 @media (max-width: 860px) {

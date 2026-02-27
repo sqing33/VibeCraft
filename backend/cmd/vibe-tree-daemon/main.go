@@ -12,6 +12,7 @@ import (
 	"vibe-tree/backend/internal/api"
 	"vibe-tree/backend/internal/config"
 	"vibe-tree/backend/internal/execution"
+	"vibe-tree/backend/internal/expert"
 	"vibe-tree/backend/internal/logx"
 	"vibe-tree/backend/internal/paths"
 	"vibe-tree/backend/internal/runner"
@@ -62,6 +63,7 @@ func main() {
 	hub := ws.NewHub()
 	execRunner := runner.PTYRunner{DefaultGrace: grace}
 	execMgr := execution.NewManager(execRunner, grace, hub)
+	experts := expert.NewRegistry(cfg)
 
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
@@ -70,6 +72,7 @@ func main() {
 		Store:          stateStore,
 		Executions:     execMgr,
 		Hub:            hub,
+		Experts:        experts,
 		MaxConcurrency: cfg.Execution.MaxConcurrency,
 	})
 	logx.Info("workflow-scheduler", "start", "启动调度器", "max_concurrency", cfg.Execution.MaxConcurrency)
@@ -92,7 +95,7 @@ func main() {
 
 	engine := server.New(
 		server.Options{DevCORS: server.DevCORSFromEnv()},
-		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore},
+		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore, Experts: experts},
 	)
 	srv := &http.Server{
 		Addr:              cfg.Addr(),

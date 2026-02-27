@@ -210,14 +210,14 @@
 - [ ] 运行中切 manual 能拦截后续节点不启动
 
 ### 3.5 UI：React Flow DAG + 节点联动终端
-- [ ] 引入 React Flow + dagre 自动布局
-- [ ] DAG 节点样式：按 status 上色（running 黄、succeeded 绿、failed 红、pending 灰）
-- [ ] 点击节点：右侧切换到对应 TerminalPane（高亮标题）
-- [ ] manual 模式下：节点侧栏编辑 prompt/expert，保存即调用 PATCH
-- [ ] 顶部控制条：
+- [x] 引入 React Flow + dagre 自动布局
+- [x] DAG 节点样式：按 status 上色（running 黄、succeeded 绿、failed 红、pending 灰）
+- [x] 点击节点：右侧切换到对应 TerminalPane（高亮标题）
+- [x] manual 模式下：节点侧栏编辑 prompt/expert，保存即调用 PATCH
+- [x] 顶部控制条：
   execution breakpoint toggle（mode 切换）
   Approve all runnable（仅 manual）
-  Cancel workflow（调用 `POST /api/v1/workflows/{id}:cancel`）
+  Cancel workflow（调用 `POST /api/v1/workflows/{id}/cancel`）
 
 验收：
 - [ ] 10 节点 DAG：审批后按依赖并发执行；点击节点能准确看到对应日志
@@ -225,33 +225,33 @@
 ## Phase 4：接入真实 AI Expert（3–10 天）
 
 ### 4.1 Expert 配置系统（config.json）
-- [ ] 定义并实现 `config.json` 读取（参考 `docs/规划.md` 5.1）：
+- [x] 定义并实现 `config.json` 读取（参考 `docs/规划.md` 5.1）：
   server.host/port
   execution.max_concurrency/kill_grace_ms
   experts[]（id/label/run_mode/command/args/env/timeout_ms）
-- [ ] env 模板替换：支持 `${OPENAI_API_KEY}` 这种从环境变量注入
-- [ ] prompt 模板替换：支持 `{{prompt}}` 传参（至少 args 能用）
+- [x] env 模板替换：支持 `${OPENAI_API_KEY}` 这种从环境变量注入
+- [x] prompt 模板替换：支持 `{{prompt}}` 传参（至少 args 能用）
 
 验收：
-- [ ] 未配置时使用内置默认（至少 bash）
-- [ ] 配置错误时给出可读错误（缺字段/未知 run_mode）
+- [x] 未配置时使用内置默认（至少 bash）
+- [x] 配置错误时给出可读错误（缺字段/未知 run_mode）
 
 ### 4.2 bash expert（作为兜底与可测基线）
-- [ ] 内置 `bash` expert：`bash -lc "{{prompt}}"`
-- [ ] node 的 prompt 直接当 shell script 执行（MVP 先这么做）
+- [x] 内置 `bash` expert：`bash -lc "{{prompt}}"`
+- [x] node 的 prompt 直接当 shell script 执行（MVP 先这么做）
 
 验收：
-- [ ] worker 节点能执行真实命令（例如 `ls`, `rg`, `go test`）并把输出实时显示
+- [x] worker 节点能执行真实命令（例如 `ls`, `rg`, `go test`）并把输出实时显示
 
 ### 4.3 codex（或你常用 AI CLI）expert
-- [ ] 新增 `codex` expert（oneshot）：把 prompt 传给 CLI，收集 stdout/stderr
-- [ ] master 节点专用 prompt 模板：强制输出 DAG JSON（严格 JSON）
-- [ ] 失败处理：
+- [x] 新增 `codex` expert（oneshot）：把 prompt 传给 CLI，收集 stdout/stderr
+- [x] master 节点专用 prompt 模板：强制输出 DAG JSON（严格 JSON）
+- [x] 失败处理：
   超时 -> execution.timeout
   非零退出码 -> execution.failed（保存 stderr 摘要到 result_summary）
 
 验收：
-- [ ] 用 codex 生成 DAG；daemon 校验通过后自动落库并进入 manual pending
+- [x] 用 codex 生成 DAG；daemon 校验通过后自动落库并进入 manual pending
 
 ### 4.4 Retry/Cancel 完整闭环（按 node 粒度）
 - [ ] `POST /api/v1/nodes/{id}:retry`：创建新的 execution（保留历史）

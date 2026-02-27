@@ -45,6 +45,10 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "execution manager not configured"})
 			return
 		}
+		if deps.Experts == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "expert registry not configured"})
+			return
+		}
 
 		workflowID := c.Param("id")
 		var req startWorkflowRequest
@@ -55,9 +59,15 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 			}
 		}
 
+		startExpertID := req.ExpertID
+		startPrompt := req.Prompt
+		if startExpertID != "" && startPrompt == "" && startExpertID != "bash" {
+			startPrompt = defaultMasterPromptTemplate(workflowID)
+		}
+
 		wf, node, err := deps.Store.StartWorkflowMaster(c.Request.Context(), workflowID, store.StartWorkflowMasterParams{
-			ExpertID: req.ExpertID,
-			Prompt:   req.Prompt,
+			ExpertID: startExpertID,
+			Prompt:   startPrompt,
 		})
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -73,11 +83,31 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 		}
 
 		spec := masterStubSpec(wf, node)
+		execCtx := context.Background()
+		cancelExec := func() {}
+
+		// 若用户显式传入 prompt 或选择非 bash expert，则使用 experts 配置解析出真实执行规格；
+		// 否则沿用 stub 便于本地 MVP 验证。
+		if req.Prompt != "" || (req.ExpertID != "" && req.ExpertID != "bash") {
+			resolved, err := deps.Experts.Resolve(node.ExpertID, node.Prompt, wf.WorkspacePath)
+			if err != nil {
+				_ = deps.Store.MarkNodeAndWorkflowFailed(context.Background(), wf.ID, node.ID, err.Error())
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			spec = resolved.Spec
+			if resolved.Timeout > 0 {
+				execCtx, cancelExec = context.WithTimeout(context.Background(), resolved.Timeout)
+			}
+		}
+
 		var exec execution.Execution
-		exec, err = deps.Executions.StartOneshotWithOptions(context.Background(), spec, execution.StartOptions{
+		exec, err = deps.Executions.StartOneshotWithOptions(execCtx, spec, execution.StartOptions{
 			WorkflowID: wf.ID,
 			NodeID:     node.ID,
 			OnExit: func(final execution.Execution) {
+				cancelExec()
+
 				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 				defer cancel()
 
@@ -97,9 +127,7 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 						finalError = fmt.Sprintf("read master output: %v", err)
 						finalSummary = &finalError
 					} else if d, err := dag.ParseAndValidate(b, dag.ValidateOptions{
-						KnownExperts: map[string]struct{}{
-							"bash": {},
-						},
+						KnownExperts: deps.Experts.KnownIDs(),
 					}); err != nil {
 						finalStatus = "failed"
 						finalError = fmt.Sprintf("invalid dag: %v", err)
@@ -125,6 +153,24 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 				}
 				startedAt := final.StartedAt.UnixMilli()
 
+				if finalStatus == "failed" && finalError == "" {
+					if final.Signal != "" {
+						finalError = fmt.Sprintf("signal=%s exit_code=%d", final.Signal, final.ExitCode)
+					} else {
+						finalError = fmt.Sprintf("exit_code=%d", final.ExitCode)
+					}
+				} else if finalStatus == "canceled" && finalError == "" {
+					finalError = "canceled"
+				} else if finalStatus == "timeout" && finalError == "" {
+					finalError = "timeout"
+				}
+				if (finalStatus == "failed" || finalStatus == "timeout") && finalSummary == nil {
+					if b, err := execution.ReadLogTail(final.ID, 4000); err == nil && len(b) > 0 {
+						s := string(b)
+						finalSummary = &s
+					}
+				}
+
 				updatedWf, updatedNodes, err := deps.Store.FinalizeExecution(ctx, store.FinalizeExecutionParams{
 					ExecutionID:   final.ID,
 					WorkflowID:    final.WorkflowID,
@@ -149,6 +195,7 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 			},
 		})
 		if err != nil {
+			cancelExec()
 			_ = deps.Store.MarkNodeAndWorkflowFailed(context.Background(), wf.ID, node.ID, err.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -292,4 +339,40 @@ func summarizeOutputTail(b []byte) string {
 		return string(b)
 	}
 	return string(b[len(b)-max:])
+}
+
+func defaultMasterPromptTemplate(workflowID string) string {
+	return fmt.Sprintf(`You are the workflow master planner for vibe-tree.
+
+Output MUST be a single JSON object (no markdown, no extra text) that follows this shape:
+{
+  "workflow_title": "",
+  "nodes": [
+    {
+      "id": "n1",
+      "title": "Step 1",
+      "type": "worker",
+      "expert_id": "bash",
+      "prompt": "echo hello"
+    },
+    {
+      "id": "n2",
+      "title": "Step 2",
+      "type": "worker",
+      "expert_id": "bash",
+      "prompt": "echo world"
+    }
+  ],
+  "edges": [
+    { "from": "n1", "to": "n2", "type": "success" }
+  ]
+}
+
+Constraints:
+- nodes[].id must be unique.
+- edges[].from/to must reference existing nodes.
+- edge.type should be "success".
+- expert_id MUST be a configured expert_id (e.g. "bash").
+
+workflow_id=%s`, workflowID)
 }

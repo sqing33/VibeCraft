@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"vibe-tree/backend/internal/execution"
+	"vibe-tree/backend/internal/expert"
 	"vibe-tree/backend/internal/logx"
 	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/store"
 	"vibe-tree/backend/internal/ws"
 )
@@ -20,6 +20,7 @@ type Scheduler struct {
 
 	store          *store.Store
 	executions     *execution.Manager
+	experts        *expert.Registry
 	hub            *ws.Hub
 	maxConcurrency int
 }
@@ -28,6 +29,7 @@ type Options struct {
 	Store          *store.Store
 	Executions     *execution.Manager
 	Hub            *ws.Hub
+	Experts        *expert.Registry
 	MaxConcurrency int
 }
 
@@ -39,6 +41,7 @@ func New(opts Options) *Scheduler {
 	return &Scheduler{
 		store:          opts.Store,
 		executions:     opts.Executions,
+		experts:        opts.Experts,
 		hub:            opts.Hub,
 		maxConcurrency: opts.MaxConcurrency,
 	}
@@ -86,15 +89,27 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 }
 
 func (s *Scheduler) startNode(ctx context.Context, n store.RunnableNode) error {
-	spec, err := workerSpec(n)
+	if s.experts == nil {
+		return fmt.Errorf("expert registry not configured")
+	}
+
+	resolved, err := s.experts.Resolve(n.ExpertID, n.Prompt, n.WorkspacePath)
 	if err != nil {
 		return err
 	}
 
-	exec, err := s.executions.StartOneshotWithOptions(context.Background(), spec, execution.StartOptions{
+	execCtx := context.Background()
+	cancelExec := func() {}
+	if resolved.Timeout > 0 {
+		execCtx, cancelExec = context.WithTimeout(context.Background(), resolved.Timeout)
+	}
+
+	exec, err := s.executions.StartOneshotWithOptions(execCtx, resolved.Spec, execution.StartOptions{
 		WorkflowID: n.WorkflowID,
 		NodeID:     n.ID,
 		OnExit: func(final execution.Execution) {
+			cancelExec()
+
 			finalErr := ""
 			if final.Status == execution.StatusFailed {
 				if final.Signal != "" {
@@ -104,6 +119,8 @@ func (s *Scheduler) startNode(ctx context.Context, n store.RunnableNode) error {
 				}
 			} else if final.Status == execution.StatusCanceled {
 				finalErr = "canceled"
+			} else if final.Status == execution.StatusTimeout {
+				finalErr = "timeout"
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -115,16 +132,25 @@ func (s *Scheduler) startNode(ctx context.Context, n store.RunnableNode) error {
 			}
 			startedAt := final.StartedAt.UnixMilli()
 
+			var summary *string
+			if final.Status == execution.StatusFailed || final.Status == execution.StatusTimeout {
+				if b, err := execution.ReadLogTail(final.ID, 4000); err == nil && len(b) > 0 {
+					s := string(b)
+					summary = &s
+				}
+			}
+
 			updatedWf, updatedNodes, err := s.store.FinalizeExecution(ctx, store.FinalizeExecutionParams{
-				ExecutionID:  final.ID,
-				WorkflowID:   final.WorkflowID,
-				NodeID:       final.NodeID,
-				Status:       string(final.Status),
-				ExitCode:     final.ExitCode,
-				Signal:       final.Signal,
-				StartedAt:    startedAt,
-				EndedAt:      endedAt,
-				ErrorMessage: finalErr,
+				ExecutionID:   final.ID,
+				WorkflowID:    final.WorkflowID,
+				NodeID:        final.NodeID,
+				Status:        string(final.Status),
+				ExitCode:      final.ExitCode,
+				Signal:        final.Signal,
+				StartedAt:     startedAt,
+				EndedAt:       endedAt,
+				ErrorMessage:  finalErr,
+				ResultSummary: summary,
 			})
 			if err != nil {
 				logx.Warn("workflow-scheduler", "finalize-execution", "execution 终态落库失败", "err", err, "workflow_id", final.WorkflowID, "node_id", final.NodeID, "execution_id", final.ID)
@@ -138,6 +164,7 @@ func (s *Scheduler) startNode(ctx context.Context, n store.RunnableNode) error {
 		},
 	})
 	if err != nil {
+		cancelExec()
 		return err
 	}
 
@@ -167,19 +194,6 @@ func (s *Scheduler) startNode(ctx context.Context, n store.RunnableNode) error {
 
 	broadcastNodeUpdated(s.hub, updatedNode)
 	return nil
-}
-
-func workerSpec(n store.RunnableNode) (runner.RunSpec, error) {
-	switch n.ExpertID {
-	case "bash":
-		return runner.RunSpec{
-			Command: "bash",
-			Args:    []string{"-lc", n.Prompt},
-			Cwd:     n.WorkspacePath,
-		}, nil
-	default:
-		return runner.RunSpec{}, fmt.Errorf("unknown expert_id %q", n.ExpertID)
-	}
 }
 
 func broadcastWorkflowUpdated(hub *ws.Hub, wf store.Workflow) {

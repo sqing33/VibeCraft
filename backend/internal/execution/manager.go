@@ -91,6 +91,10 @@ func (m *Manager) StartOneshot(ctx context.Context, spec runner.RunSpec) (Execut
 // 失败场景：同 StartOneshot。
 // 副作用：同 StartOneshot，并在退出时调用 opts.OnExit（如提供）。
 func (m *Manager) StartOneshotWithOptions(ctx context.Context, spec runner.RunSpec, opts StartOptions) (Execution, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	executionID := id.New("ex_")
 	logPath, err := paths.ExecutionLogPath(executionID)
 	if err != nil {
@@ -147,7 +151,7 @@ func (m *Manager) StartOneshotWithOptions(ctx context.Context, spec runner.RunSp
 		},
 	})
 
-	go m.streamToLogAndFinalize(executionID, st, logFile, handle)
+	go m.streamToLogAndFinalize(ctx, executionID, st, logFile, handle)
 
 	return exec, nil
 }
@@ -186,10 +190,10 @@ func (m *Manager) Get(executionID string) (Execution, bool) {
 }
 
 // streamToLogAndFinalize 功能：消费 PTY 输出，写入日志文件并推送 node.log，最终收敛 execution 状态并推送 execution.exited。
-// 参数/返回：接收 executionID、状态指针、logFile 与 handle；无返回值。
+// 参数/返回：ctx 控制超时/取消语义；接收 executionID、状态指针、logFile 与 handle；无返回值。
 // 失败场景：读写错误会导致日志提前结束，但仍会等待进程退出并尽力收敛状态。
 // 副作用：写文件、推送 WS、关闭文件句柄、回收 handle。
-func (m *Manager) streamToLogAndFinalize(executionID string, st *executionState, logFile *os.File, handle runner.ProcessHandle) {
+func (m *Manager) streamToLogAndFinalize(ctx context.Context, executionID string, st *executionState, logFile *os.File, handle runner.ProcessHandle) {
 	defer func() {
 		_ = logFile.Close()
 		_ = handle.Close()
@@ -235,10 +239,19 @@ func (m *Manager) streamToLogAndFinalize(executionID string, st *executionState,
 
 	exitRes, waitErr := handle.Wait()
 
+	ctxErr := error(nil)
+	if ctx != nil {
+		ctxErr = ctx.Err()
+	}
+
 	endedAt := exitRes.EndedAt
 	status := StatusFailed
 	m.mu.Lock()
 	if st.cancelRequested {
+		status = StatusCanceled
+	} else if errors.Is(ctxErr, context.DeadlineExceeded) {
+		status = StatusTimeout
+	} else if errors.Is(ctxErr, context.Canceled) {
 		status = StatusCanceled
 	} else if waitErr == nil && exitRes.ExitCode == 0 {
 		status = StatusSucceeded

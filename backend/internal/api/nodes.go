@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -27,6 +28,10 @@ func patchNodeHandler(deps Deps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "store not configured"})
 			return
 		}
+		if deps.Experts == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "expert registry not configured"})
+			return
+		}
 
 		nodeID := c.Param("id")
 		var req patchNodeRequest
@@ -35,6 +40,19 @@ func patchNodeHandler(deps Deps) gin.HandlerFunc {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
+		}
+
+		if req.ExpertID != nil {
+			id := strings.TrimSpace(*req.ExpertID)
+			if id == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "expert_id is required"})
+				return
+			}
+			if _, ok := deps.Experts.KnownIDs()[id]; !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "unknown expert_id"})
+				return
+			}
+			*req.ExpertID = id
 		}
 
 		n, err := deps.Store.UpdateNode(c.Request.Context(), nodeID, store.UpdateNodeParams{

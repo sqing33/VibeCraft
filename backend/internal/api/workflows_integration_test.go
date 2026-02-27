@@ -14,7 +14,9 @@ import (
 	"github.com/gorilla/websocket"
 
 	"vibe-tree/backend/internal/api"
+	"vibe-tree/backend/internal/config"
 	"vibe-tree/backend/internal/execution"
+	"vibe-tree/backend/internal/expert"
 	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/scheduler"
 	"vibe-tree/backend/internal/server"
@@ -29,6 +31,7 @@ func TestWorkflowCRUD(t *testing.T) {
 	grace := 50 * time.Millisecond
 	execRunner := runner.PTYRunner{DefaultGrace: grace}
 	execMgr := execution.NewManager(execRunner, grace, hub)
+	experts := expert.NewRegistry(config.Default())
 
 	stateDBPath := filepath.Join(t.TempDir(), "state.db")
 	st, err := store.Open(context.Background(), stateDBPath)
@@ -40,7 +43,7 @@ func TestWorkflowCRUD(t *testing.T) {
 		t.Fatalf("migrate store: %v", err)
 	}
 
-	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub, Store: st})
+	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub, Store: st, Experts: experts})
 	httpSrv := httptest.NewServer(engine)
 	defer httpSrv.Close()
 
@@ -127,6 +130,7 @@ func TestStartWorkflowCreatesMasterExecution(t *testing.T) {
 	grace := 50 * time.Millisecond
 	execRunner := runner.PTYRunner{DefaultGrace: grace}
 	execMgr := execution.NewManager(execRunner, grace, hub)
+	experts := expert.NewRegistry(config.Default())
 
 	stateDBPath := filepath.Join(t.TempDir(), "state.db")
 	st, err := store.Open(context.Background(), stateDBPath)
@@ -138,7 +142,7 @@ func TestStartWorkflowCreatesMasterExecution(t *testing.T) {
 		t.Fatalf("migrate store: %v", err)
 	}
 
-	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub, Store: st})
+	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub, Store: st, Experts: experts})
 	httpSrv := httptest.NewServer(engine)
 	defer httpSrv.Close()
 
@@ -281,14 +285,20 @@ func TestStartWorkflowCreatesMasterExecution(t *testing.T) {
 	}
 }
 
-func TestManualApproveRunsWorkerNodes(t *testing.T) {
+func TestStartWorkflow_UsesConfiguredExpertWhenProvided(t *testing.T) {
 	t.Parallel()
 
 	hub := ws.NewHub()
 	grace := 50 * time.Millisecond
 	execRunner := runner.PTYRunner{DefaultGrace: grace}
 	execMgr := execution.NewManager(execRunner, grace, hub)
-	sched := scheduler.New(scheduler.Options{Store: nil, Executions: execMgr, Hub: hub, MaxConcurrency: 4})
+
+	experts := expert.NewRegistry(config.Config{
+		Experts: []config.ExpertConfig{
+			{ID: "bash", RunMode: "oneshot", Command: "bash", Args: []string{"-lc", "{{prompt}}"}, Env: map[string]string{}, TimeoutMs: 30 * 60 * 1000},
+			{ID: "planner", RunMode: "oneshot", Command: "bash", Args: []string{"-lc", "{{prompt}}"}, Env: map[string]string{}, TimeoutMs: 30 * 60 * 1000},
+		},
+	})
 
 	stateDBPath := filepath.Join(t.TempDir(), "state.db")
 	st, err := store.Open(context.Background(), stateDBPath)
@@ -299,9 +309,118 @@ func TestManualApproveRunsWorkerNodes(t *testing.T) {
 	if err := st.Migrate(context.Background()); err != nil {
 		t.Fatalf("migrate store: %v", err)
 	}
-	sched = scheduler.New(scheduler.Options{Store: st, Executions: execMgr, Hub: hub, MaxConcurrency: 4})
 
-	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub, Store: st})
+	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub, Store: st, Experts: experts})
+	httpSrv := httptest.NewServer(engine)
+	defer httpSrv.Close()
+
+	createReq := []byte(`{"title":"hello","workspace_path":".","mode":"manual"}`)
+	res, err := http.Post(httpSrv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(createReq))
+	if err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected create status: %s", res.Status)
+	}
+
+	var created store.Workflow
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	prompt := `
+cat <<'JSON'
+{
+  "workflow_title": "",
+  "nodes": [
+    { "id": "a", "title": "Alpha", "type": "worker", "expert_id": "bash", "fallback_expert_id": "bash", "complexity": "low", "quality_tier": "fast", "model": null, "routing_reason": "", "prompt": "echo '[a]'" },
+    { "id": "b", "title": "Beta", "type": "worker", "expert_id": "bash", "fallback_expert_id": "bash", "complexity": "low", "quality_tier": "fast", "model": null, "routing_reason": "", "prompt": "echo '[b]'" }
+  ],
+  "edges": [
+    { "from": "a", "to": "b", "type": "success", "source_handle": null, "target_handle": null }
+  ]
+}
+JSON
+`
+	startBody, _ := json.Marshal(map[string]string{
+		"expert_id": "planner",
+		"prompt":    prompt,
+	})
+	startRes, err := http.Post(httpSrv.URL+"/api/v1/workflows/"+created.ID+"/start", "application/json", bytes.NewReader(startBody))
+	if err != nil {
+		t.Fatalf("start workflow: %v", err)
+	}
+	defer startRes.Body.Close()
+	if startRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected start status: %s", startRes.Status)
+	}
+
+	// Wait for DAG to be applied (master exits and creates worker nodes).
+	deadline := time.Now().Add(5 * time.Second)
+	var nodes []store.Node
+	for time.Now().Before(deadline) {
+		nodesRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID + "/nodes")
+		if err != nil {
+			t.Fatalf("list nodes: %v", err)
+		}
+		var ns []store.Node
+		if err := json.NewDecoder(nodesRes.Body).Decode(&ns); err != nil {
+			nodesRes.Body.Close()
+			t.Fatalf("decode nodes: %v", err)
+		}
+		nodesRes.Body.Close()
+		if len(ns) >= 3 {
+			nodes = ns
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(nodes) != 3 {
+		t.Fatalf("expected 3 nodes (1 master + 2 workers), got %d", len(nodes))
+	}
+
+	workers := make([]store.Node, 0)
+	for i := range nodes {
+		if nodes[i].NodeType != "master" {
+			workers = append(workers, nodes[i])
+		}
+	}
+	if len(workers) != 2 {
+		t.Fatalf("expected 2 worker nodes, got %d", len(workers))
+	}
+	for _, n := range workers {
+		if n.Status != "pending_approval" {
+			t.Fatalf("expected worker node pending_approval, got %q (node_id=%s)", n.Status, n.ID)
+		}
+		if n.Title != "Alpha" && n.Title != "Beta" {
+			t.Fatalf("expected worker title Alpha/Beta, got %q (node_id=%s)", n.Title, n.ID)
+		}
+	}
+}
+
+func TestManualApproveRunsWorkerNodes(t *testing.T) {
+	t.Parallel()
+
+	hub := ws.NewHub()
+	grace := 50 * time.Millisecond
+	execRunner := runner.PTYRunner{DefaultGrace: grace}
+	execMgr := execution.NewManager(execRunner, grace, hub)
+	experts := expert.NewRegistry(config.Default())
+	sched := scheduler.New(scheduler.Options{Store: nil, Executions: execMgr, Hub: hub, Experts: experts, MaxConcurrency: 4})
+
+	stateDBPath := filepath.Join(t.TempDir(), "state.db")
+	st, err := store.Open(context.Background(), stateDBPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate store: %v", err)
+	}
+	sched = scheduler.New(scheduler.Options{Store: st, Executions: execMgr, Hub: hub, Experts: experts, MaxConcurrency: 4})
+
+	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub, Store: st, Experts: experts})
 	httpSrv := httptest.NewServer(engine)
 	defer httpSrv.Close()
 
