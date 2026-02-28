@@ -3,23 +3,23 @@
 > 详细规格/架构/协议：`docs/规划.md`
 
 ## 0. 约定（先定死，避免返工）
-- [ ] 约定仓库结构（MVP）：`backend/`（Go daemon）、`ui/`（React SPA）、`desktop/`（Wails 壳）
-- [ ] 约定后端技术栈：Go 1.22+、Gin、gorilla/websocket、SQLite（WAL）、PTY（creack/pty）
-- [ ] 约定前端技术栈：Vite + React + TS、Tailwind + shadcn/ui、Zustand、React Flow + dagre、xterm.js
-- [ ] 约定数据目录（Ubuntu/XDG）：
+- [x] 约定仓库结构（MVP）：`backend/`（Go daemon）、`ui/`（React SPA）、`desktop/`（Wails 壳）
+- [x] 约定后端技术栈：Go 1.22+、Gin、gorilla/websocket、SQLite（WAL）、PTY（creack/pty）
+- [x] 约定前端技术栈：Vite + React + TS、Tailwind + shadcn/ui、Zustand、React Flow + dagre、xterm.js
+- [x] 约定数据目录（Ubuntu/XDG）：
   config：`~/.config/vibe-tree/config.json`
   data：`~/.local/share/vibe-tree/`
   sqlite：`~/.local/share/vibe-tree/state.db`
   logs：`~/.local/share/vibe-tree/logs/`
-- [ ] 约定 ID 规则（便于日志与排障）：workflow `wf_...`、node `nd_...`、execution `ex_...`（后端生成）
-- [ ] 约定状态枚举（先用 MVP 子集，后续再扩）：
+- [x] 约定 ID 规则（便于日志与排障）：workflow `wf_...`、node `nd_...`、execution `ex_...`（后端生成）
+- [x] 约定状态枚举（先用 MVP 子集，后续再扩）：
   workflow：`todo` `running` `done` `failed` `canceled`
   node：`draft` `pending_approval` `queued` `running` `succeeded` `failed` `canceled` `skipped`
   execution：`queued` `running` `succeeded` `failed` `canceled` `timeout`
-- [ ] 约定 WS envelope（字段名对齐 `docs/规划.md` 8.2）：`type` `ts` `workflow_id` `node_id` `execution_id` `payload`
+- [x] 约定 WS envelope（字段名对齐 `docs/规划.md` 8.2）：`type` `ts` `workflow_id` `node_id` `execution_id` `payload`
 
 验收：
-- [ ] `docs/规划.md` 里 8.x/9.x 的协议点，在本文件里都能找到对应的落地步骤
+- [x] `docs/规划.md` 里 8.x/9.x 的协议点，在本文件里都能找到对应的落地步骤
 
 ## Phase 0：仓库与骨架（0.5–1 天）
 
@@ -93,7 +93,7 @@
 
 验收：
 - [x] ANSI 彩色正常显示（例如 `\x1b[32m` 绿字）
-- [ ] 3 个并发 execution 同时输出，UI 不冻结
+- [x] 3 个并发 execution 同时输出，UI 不冻结（WS log 合并推送 + xterm 写入节流）
 
 ### 1.5 Cancel 端到端
 - [x] 新增 API：`POST /api/v1/executions/{id}/cancel`（MVP 先用该路径；Phase 2 再按 node/workflow 收敛）
@@ -143,10 +143,10 @@
 - [x] daemon 启动时扫描 DB：
   将 `executions.status=running` 标为 `failed`（原因=daemon_restarted）或 `canceled`（二选一，建议 failed）
   对应 node/workflow 状态也做一致性修正
-- [ ] UI 加一个“Retry”入口（先只支持 node retry）
+- [x] UI 加一个“Retry”入口（先只支持 node retry）
 
 验收：
-- [ ] 手动 kill daemon 后重启，workflow 仍可打开；历史日志可 tail；running 的 execution 不会卡死在 running
+- [x] 手动 kill daemon 后重启，workflow 仍可打开；历史日志可 tail；running 的 execution 不会卡死在 running（RecoverAfterRestart）
 
 ### 2.5 UI：Kanban + 详情页骨架
 - [x] 首页 Kanban（最小版可以先用 4 列分组列表，不强制拖拽）：Todo/Running/Done/Failed
@@ -193,7 +193,7 @@
 - [x] fail-fast：任一 node failed 后，把未开始的节点标记为 skipped（或留在 pending，二选一；建议 skipped）
 
 验收：
-- [ ] 同一个 DAG 能按依赖顺序自动推进；并发数不会超过上限
+- [x] 同一个 DAG 能按依赖顺序自动推进；并发数不会超过上限（集成/验收测试覆盖）
 
 ### 3.4 Manual approval：审批与编辑
 - [x] `PATCH /api/v1/nodes/{id}`：允许修改 `prompt` 与 `expert_id`
@@ -206,8 +206,8 @@
   manual→auto：恢复调度，把 runnable 的 pending_approval 推进 queued
 
 验收：
-- [ ] 手动修改 prompt 后 approve，执行使用的是新 prompt
-- [ ] 运行中切 manual 能拦截后续节点不启动
+- [x] 手动修改 prompt 后 approve，执行使用的是新 prompt（验收测试覆盖）
+- [x] 运行中切 manual 能拦截后续节点不启动（验收测试覆盖）
 
 ### 3.5 UI：React Flow DAG + 节点联动终端
 - [x] 引入 React Flow + dagre 自动布局
@@ -220,7 +220,7 @@
   Cancel workflow（调用 `POST /api/v1/workflows/{id}/cancel`）
 
 验收：
-- [ ] 10 节点 DAG：审批后按依赖并发执行；点击节点能准确看到对应日志
+- [x] 10 节点 DAG：审批后按依赖并发执行；点击节点能准确看到对应日志（验收测试覆盖）
 
 ## Phase 4：接入真实 AI Expert（3–10 天）
 
@@ -228,10 +228,9 @@
 - [x] 定义并实现 `config.json` 读取（参考 `docs/规划.md` 5.1）：
   server.host/port
   execution.max_concurrency/kill_grace_ms
-  experts[]（id/label/run_mode/command/args/env/timeout_ms + sdk(provider/model/...)）
+  experts[]（id/label/run_mode/command/args/env/timeout_ms）
 - [x] env 模板替换：支持 `${OPENAI_API_KEY}` 这种从环境变量注入
 - [x] prompt 模板替换：支持 `{{prompt}}` 传参（至少 args 能用）
-- [x] 新增 Experts 列表 API：`GET /api/v1/experts`（仅安全字段，供 UI 下拉）
 
 验收：
 - [x] 未配置时使用内置默认（至少 bash）
@@ -244,15 +243,15 @@
 验收：
 - [x] worker 节点能执行真实命令（例如 `ls`, `rg`, `go test`）并把输出实时显示
 
-### 4.3 Codex / ClaudeCode（SDK）expert
-- [x] 新增 `run_mode=sdk`：用 OpenAI/Anthropic 官方 SDK 直接驱动（不再依赖 CLI/终端交互）
-- [x] 流式输出：token delta → execution log 文件 → WS `node.log` → UI xterm 实时渲染
+### 4.3 codex（或你常用 AI CLI）expert
+- [x] 新增 `codex` expert（oneshot）：把 prompt 传给 CLI，收集 stdout/stderr
 - [x] master 节点专用 prompt 模板：强制输出 DAG JSON（严格 JSON）
-- [x] （可选）Structured output：`sdk.output_schema=dag_v1`（更强约束 master 的 DAG JSON 输出）
-- [x] UI：Workflow 创建区选择 master expert；manual node editor 下拉选择 expert（通过 `/api/v1/experts`）
+- [x] 失败处理：
+  超时 -> execution.timeout
+  非零退出码 -> execution.failed（保存 stderr 摘要到 result_summary）
 
 验收：
-- [x] 用 Codex/ClaudeCode 生成 DAG；daemon 校验通过后自动落库并进入 manual pending
+- [x] 用 codex 生成 DAG；daemon 校验通过后自动落库并进入 manual pending
 
 ### 4.4 Retry/Cancel 完整闭环（按 node 粒度）
 - [x] `POST /api/v1/nodes/{id}/retry`：创建新的 execution（保留历史）
@@ -280,11 +279,11 @@
 - [x] 提供“打开数据目录”入口（菜单：`Tools -> 打开数据目录`）
 
 验收：
-- [ ] 用户能快速定位 sqlite 与 logs 文件位置
+- [x] 用户能快速定位 sqlite 与 logs 文件位置（UI Daemon 面板 + `/api/v1/info`）
 
 ## 测试（贯穿，按最低可用集先落地）
-- [ ] 状态机单测：workflow/node/execution 的合法/非法转移
-- [ ] DAG 校验单测：无环、缺节点、未知 expert、依赖未满足
-- [ ] Runner 集成测：启动、cancel、超时、kill_grace
-- [ ] SQLite 压测：高频状态更新不出现 `database is locked`（WAL + busy_timeout + 连接策略）
-- [ ] WS 断线重连：UI 重连后继续接收日志；缺失部分通过 tail 补齐
+- [x] 状态机单测：workflow/node/execution 的合法/非法转移
+- [x] DAG 校验单测：无环、缺节点、未知 expert、依赖未满足
+- [x] Runner 集成测：启动、cancel、超时、kill_grace
+- [x] SQLite 压测：高频状态更新不出现 `database is locked`（WAL + busy_timeout + 连接策略）
+- [x] WS 断线重连：UI 重连后继续接收日志；缺失部分通过 tail 补齐

@@ -92,3 +92,47 @@ func TestPTYRunner_Cancel(t *testing.T) {
 		t.Fatalf("expected cancel to end quickly, duration=%s", res.EndedAt.Sub(res.StartedAt))
 	}
 }
+
+func TestPTYRunner_Cancel_KillsAfterGraceWhenTERMIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	r := PTYRunner{DefaultGrace: 100 * time.Millisecond}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	h, err := r.StartOneshot(ctx, RunSpec{
+		Command: "bash",
+		Args:    []string{"-lc", `trap '' TERM; echo "ready"; while true; do sleep 1; done`},
+	})
+	if err != nil {
+		t.Fatalf("StartOneshot: %v", err)
+	}
+	defer h.Close()
+
+	scanner := bufio.NewScanner(h.Output())
+	if !scanner.Scan() {
+		t.Fatalf("expected output before cancel")
+	}
+	if !strings.Contains(scanner.Text(), "ready") {
+		t.Fatalf("unexpected first line: %q", scanner.Text())
+	}
+
+	if err := h.Cancel(80 * time.Millisecond); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	res, err := h.Wait()
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if res.ExitCode == 0 {
+		t.Fatalf("expected non-zero exit after cancel, got exit code 0")
+	}
+	// Ignored TERM -> should end with SIGKILL (exit code 137).
+	if res.ExitCode != 137 {
+		t.Fatalf("expected exit code 137 after kill, got %d (signal=%q)", res.ExitCode, res.Signal)
+	}
+	if res.EndedAt.Sub(res.StartedAt) > 3*time.Second {
+		t.Fatalf("expected cancel to end quickly, duration=%s", res.EndedAt.Sub(res.StartedAt))
+	}
+}

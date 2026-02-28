@@ -22,13 +22,11 @@ type Registry struct {
 }
 
 type PublicExpert struct {
-	ID           string `json:"id"`
-	Label        string `json:"label"`
-	RunMode      string `json:"run_mode"`
-	Provider     string `json:"provider,omitempty"`
-	Model        string `json:"model,omitempty"`
-	OutputSchema string `json:"output_schema,omitempty"`
-	TimeoutMs    int    `json:"timeout_ms"`
+	ID        string `json:"id"`
+	Label     string `json:"label"`
+	Provider  string `json:"provider"`
+	Model     string `json:"model"`
+	TimeoutMs int    `json:"timeout_ms"`
 }
 
 // NewRegistry 功能：从运行配置构建 expert 注册表（按 id 去重，后者覆盖前者）。
@@ -72,29 +70,14 @@ func (r *Registry) ListPublic() []PublicExpert {
 		if label == "" {
 			label = id
 		}
-
-		runMode := strings.TrimSpace(e.RunMode)
-		if runMode == "" {
-			runMode = "oneshot"
-		}
-
-		provider := ""
-		model := ""
-		outputSchema := ""
-		if runMode == "sdk" && e.SDK != nil {
-			provider = strings.TrimSpace(e.SDK.Provider)
-			model = strings.TrimSpace(e.SDK.Model)
-			outputSchema = strings.TrimSpace(e.SDK.OutputSchema)
-		}
-
+		provider := strings.TrimSpace(e.Provider)
+		model := strings.TrimSpace(e.Model)
 		out = append(out, PublicExpert{
-			ID:           id,
-			Label:        label,
-			RunMode:      runMode,
-			Provider:     provider,
-			Model:        model,
-			OutputSchema: outputSchema,
-			TimeoutMs:    e.TimeoutMs,
+			ID:        id,
+			Label:     label,
+			Provider:  provider,
+			Model:     model,
+			TimeoutMs: e.TimeoutMs,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -103,9 +86,9 @@ func (r *Registry) ListPublic() []PublicExpert {
 	return out
 }
 
-// Resolve 功能：将 expert_id + prompt 解析为可执行的 RunSpec（支持 `{{prompt}}` 与 `${ENV}` 模板替换）。
+// Resolve 功能：将 expert_id + prompt 解析为 SDK 驱动的 RunSpec（支持 `{{prompt}}/{{workspace}}` 与 `${ENV}` 模板替换）。
 // 参数/返回：expertID 为选择的专家；prompt 为 node 的 prompt；cwd 为工作目录；返回 Resolved（含 RunSpec 与超时）。
-// 失败场景：expert 不存在、command 缺失、SDK 配置缺失、run_mode 不支持或 env 模板缺失时返回 error。
+// 失败场景：expert 不存在、provider/model 缺失或 env 模板缺失时返回 error。
 // 副作用：读取当前进程环境变量（用于 `${VAR}` 注入）。
 func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 	if r == nil {
@@ -120,10 +103,22 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 		return Resolved{}, fmt.Errorf("unknown expert_id %q", expertID)
 	}
 
-	runMode := strings.TrimSpace(e.RunMode)
-	if runMode == "" {
-		runMode = "oneshot"
+	provider := strings.TrimSpace(e.Provider)
+	if provider == "" {
+		return Resolved{}, fmt.Errorf("expert %q: provider is required", expertID)
 	}
+
+	model := strings.TrimSpace(e.Model)
+	if provider != "demo" && provider != "process" && model == "" {
+		return Resolved{}, fmt.Errorf("expert %q: model is required (provider=%s)", expertID, provider)
+	}
+
+	finalPrompt := prompt
+	if strings.TrimSpace(e.PromptTemplate) != "" {
+		finalPrompt = strings.ReplaceAll(e.PromptTemplate, "{{prompt}}", prompt)
+		finalPrompt = strings.ReplaceAll(finalPrompt, "{{workspace}}", cwd)
+	}
+
 	env := make(map[string]string, len(e.Env))
 	for k, v := range e.Env {
 		expanded, err := expandEnvTemplate(v)
@@ -138,20 +133,25 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 		timeout = 0
 	}
 
-	switch runMode {
-	case "oneshot":
-		if e.SDK != nil {
-			return Resolved{}, fmt.Errorf("expert %q: sdk config is not allowed when run_mode=oneshot", expertID)
+	switch provider {
+	case "process":
+		if strings.TrimSpace(e.BaseURL) != "" || strings.TrimSpace(e.OutputSchema) != "" || strings.TrimSpace(e.SystemPrompt) != "" || strings.TrimSpace(e.Model) != "" {
+			return Resolved{}, fmt.Errorf("expert %q: provider=process does not support model/system_prompt/base_url/output_schema", expertID)
 		}
-
 		cmd := strings.TrimSpace(e.Command)
 		if cmd == "" {
-			return Resolved{}, fmt.Errorf("expert %q: command is required", expertID)
+			return Resolved{}, fmt.Errorf("expert %q: command is required (provider=process)", expertID)
 		}
 
 		args := make([]string, 0, len(e.Args))
 		for _, a := range e.Args {
-			args = append(args, strings.ReplaceAll(a, "{{prompt}}", prompt))
+			a = strings.ReplaceAll(a, "{{prompt}}", finalPrompt)
+			a = strings.ReplaceAll(a, "{{workspace}}", cwd)
+			args = append(args, a)
+		}
+
+		if strings.TrimSpace(e.RunMode) != "" && strings.TrimSpace(e.RunMode) != "oneshot" {
+			return Resolved{}, fmt.Errorf("expert %q: unsupported run_mode %q (provider=process)", expertID, strings.TrimSpace(e.RunMode))
 		}
 
 		return Resolved{
@@ -163,58 +163,47 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 			},
 			Timeout: timeout,
 		}, nil
-	case "sdk":
-		if strings.TrimSpace(e.Command) != "" || len(e.Args) > 0 {
-			return Resolved{}, fmt.Errorf("expert %q: legacy CLI fields (command/args) are not supported when run_mode=sdk", expertID)
-		}
-		if e.SDK == nil {
-			return Resolved{}, fmt.Errorf("expert %q: sdk config is required", expertID)
+	case "openai", "anthropic", "demo":
+		// LLM/Demo 走 SDK 驱动；禁止 legacy CLI 字段悄悄生效。
+		if strings.TrimSpace(e.Command) != "" || len(e.Args) > 0 || strings.TrimSpace(e.RunMode) != "" {
+			return Resolved{}, fmt.Errorf("expert %q: legacy CLI fields (run_mode/command/args) are not supported when provider=%s", expertID, provider)
 		}
 
-		provider := strings.TrimSpace(e.SDK.Provider)
-		if provider == "" {
-			return Resolved{}, fmt.Errorf("expert %q: sdk.provider is required", expertID)
-		}
-		model := strings.TrimSpace(e.SDK.Model)
-		if model == "" {
-			return Resolved{}, fmt.Errorf("expert %q: sdk.model is required (provider=%s)", expertID, provider)
-		}
-
-		baseURL := strings.TrimSpace(e.SDK.BaseURL)
+		baseURL := strings.TrimSpace(e.BaseURL)
 		if baseURL != "" {
 			expanded, err := expandEnvTemplate(baseURL)
 			if err != nil {
-				return Resolved{}, fmt.Errorf("expert %q: sdk.base_url: %w", expertID, err)
+				return Resolved{}, fmt.Errorf("expert %q: base_url: %w", expertID, err)
 			}
 			baseURL = expanded
 		}
 
-		outputSchema := strings.TrimSpace(e.SDK.OutputSchema)
+		outputSchema := strings.TrimSpace(e.OutputSchema)
 		if outputSchema != "" && strings.ToLower(outputSchema) != "dag_v1" {
-			return Resolved{}, fmt.Errorf("expert %q: sdk.output_schema %q is not supported", expertID, outputSchema)
+			return Resolved{}, fmt.Errorf("expert %q: output_schema %q is not supported", expertID, outputSchema)
 		}
 
 		return Resolved{
 			Spec: runner.RunSpec{
 				Command: "sdk:" + provider,
-				Args:    []string{model},
+				Args:    []string{"model=" + model},
 				Env:     env,
 				Cwd:     cwd,
 				SDK: &runner.SDKSpec{
 					Provider:        provider,
 					Model:           model,
-					Prompt:          prompt,
-					Instructions:    e.SDK.Instructions,
+					Prompt:          finalPrompt,
+					Instructions:    strings.TrimSpace(e.SystemPrompt),
 					BaseURL:         baseURL,
-					MaxOutputTokens: e.SDK.MaxOutputTokens,
-					Temperature:     e.SDK.Temperature,
+					MaxOutputTokens: e.MaxOutputTokens,
+					Temperature:     e.Temperature,
 					OutputSchema:    outputSchema,
 				},
 			},
 			Timeout: timeout,
 		}, nil
 	default:
-		return Resolved{}, fmt.Errorf("unsupported run_mode %q (expert=%s)", runMode, expertID)
+		return Resolved{}, fmt.Errorf("expert %q: unsupported provider %q", expertID, provider)
 	}
 }
 

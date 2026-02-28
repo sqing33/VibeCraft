@@ -26,24 +26,46 @@ type ExecutionConfig struct {
 }
 
 type ExpertConfig struct {
-	ID        string            `json:"id"`
-	Label     string            `json:"label"`
-	RunMode   string            `json:"run_mode"`
-	Command   string            `json:"command"`
-	Args      []string          `json:"args"`
-	Env       map[string]string `json:"env"`
-	TimeoutMs int               `json:"timeout_ms"`
-	SDK       *ExpertSDKConfig  `json:"sdk,omitempty"`
-}
+	ID    string `json:"id"`
+	Label string `json:"label"`
 
-type ExpertSDKConfig struct {
-	Provider        string   `json:"provider"`
-	Model           string   `json:"model"`
-	BaseURL         string   `json:"base_url,omitempty"`
-	Instructions    string   `json:"instructions,omitempty"`
-	MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
+	// Provider 表示该 expert 的执行后端（SDK 驱动，不再启动外部 CLI）。
+	// 支持值：
+	// - "openai"：Codex（OpenAI SDK）
+	// - "anthropic"：ClaudeCode（Anthropic SDK）
+	// - "demo"：内置演示（不依赖外部网络/密钥）
+	// - "process"：本地进程执行（兼容 bash 等 worker）
+	Provider string `json:"provider"`
+
+	// Model 为 SDK 调用的模型名；demo 可留空。
+	Model string `json:"model"`
+
+	// BaseURL 可选：覆盖 SDK 的 base URL（支持 `${ENV}` 注入）。
+	BaseURL string `json:"base_url,omitempty"`
+
+	// PromptTemplate 可选：支持 `{{prompt}}` 与 `{{workspace}}` 占位。
+	// 留空表示直接使用节点 prompt。
+	PromptTemplate string `json:"prompt_template"`
+
+	// SystemPrompt 可选：作为 system 角色注入（不同 provider 语义略有差异，MVP 先按通用文本处理）。
+	SystemPrompt string `json:"system_prompt"`
+
+	// MaxOutputTokens/Temperature 为可选采样参数（0 表示由 SDK/模型默认值决定）。
+	MaxOutputTokens int      `json:"max_output_tokens"`
 	Temperature     *float64 `json:"temperature,omitempty"`
-	OutputSchema    string   `json:"output_schema,omitempty"`
+
+	// OutputSchema 可选：structured output schema 名称（MVP：仅支持 "dag_v1"）。
+	OutputSchema string `json:"output_schema,omitempty"`
+
+	// Env 用于注入敏感配置（如 API Key），支持 `${ENV}` 模板替换。
+	Env map[string]string `json:"env"`
+
+	TimeoutMs int `json:"timeout_ms"`
+
+	// Deprecated：旧版 CLI/PTY 配置字段（SDK 驱动后不再生效，仅用于给出更清晰的报错信息）。
+	RunMode string   `json:"run_mode,omitempty"`
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
 }
 
 // Default 功能：返回一份可直接运行的默认配置（localhost-only）。
@@ -62,56 +84,51 @@ func Default() Config {
 		},
 		Experts: []ExpertConfig{
 			{
-				ID:      "master",
-				Label:   "Master Planner (Anthropic SDK)",
-				RunMode: "sdk",
-				SDK: &ExpertSDKConfig{
-					Provider:        "anthropic",
-					Model:           "claude-3-7-sonnet-latest",
-					MaxOutputTokens: 4096,
-					OutputSchema:    "dag_v1",
-				},
-				Env: map[string]string{
-					"ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
-				},
+				ID:           "master",
+				Label:        "Master Planner",
+				Provider:     "anthropic",
+				Model:        "claude-3-7-sonnet-latest",
+				SystemPrompt: "You are the workflow master planner for vibe-tree. Output MUST be a single JSON object (no markdown, no extra text).",
+				Env:          map[string]string{"ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"},
+				OutputSchema: "dag_v1",
+				// 30min：AI 节点默认超时（可按节点覆盖）。
 				TimeoutMs: 30 * 60 * 1000,
 			},
 			{
-				ID:      "bash",
-				Label:   "Bash",
-				RunMode: "oneshot",
-				Command: "bash",
-				Args:    []string{"-lc", "{{prompt}}"},
-				Env:     map[string]string{},
-				// 30min: MVP 默认超时时间（后续由 scheduler/execution 实际 enforce）。
+				ID:       "bash",
+				Label:    "Bash",
+				Provider: "process",
+				Command:  "bash",
+				Args:     []string{"-lc", "{{prompt}}"},
+				Env:      map[string]string{},
+				// 30min：bash 节点默认超时（后续由 scheduler/execution 实际 enforce）。
 				TimeoutMs: 30 * 60 * 1000,
 			},
 			{
-				ID:      "codex",
-				Label:   "Codex (OpenAI SDK)",
-				RunMode: "sdk",
-				SDK: &ExpertSDKConfig{
-					Provider:        "openai",
-					Model:           "gpt-5-codex",
-					MaxOutputTokens: 8192,
-				},
-				Env: map[string]string{
-					"OPENAI_API_KEY": "${OPENAI_API_KEY}",
-				},
+				ID:       "demo",
+				Label:    "Demo",
+				Provider: "demo",
+				Env:      map[string]string{},
+				// 30s：演示执行默认超时（不会触发网络请求）。
+				TimeoutMs: 30 * 1000,
+			},
+			{
+				ID:       "codex",
+				Label:    "Codex",
+				Provider: "openai",
+				Model:    "gpt-5-codex",
+				SystemPrompt: "You are Codex. Respond in plain text suitable for a terminal. Do not use markdown unless explicitly requested.",
+				Env:      map[string]string{"OPENAI_API_KEY": "${OPENAI_API_KEY}"},
+				// 30min：AI 节点默认超时（可按节点覆盖）。
 				TimeoutMs: 30 * 60 * 1000,
 			},
 			{
-				ID:      "claudecode",
-				Label:   "ClaudeCode (Anthropic SDK)",
-				RunMode: "sdk",
-				SDK: &ExpertSDKConfig{
-					Provider:        "anthropic",
-					Model:           "claude-3-7-sonnet-latest",
-					MaxOutputTokens: 4096,
-				},
-				Env: map[string]string{
-					"ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
-				},
+				ID:       "claudecode",
+				Label:    "ClaudeCode",
+				Provider: "anthropic",
+				Model:    "claude-3-7-sonnet-latest",
+				SystemPrompt: "You are Claude. Respond in plain text suitable for a terminal. Do not use markdown unless explicitly requested.",
+				Env:      map[string]string{"ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"},
 				TimeoutMs: 30 * 60 * 1000,
 			},
 		},

@@ -76,6 +76,8 @@ func (r SDKRunner) StartOneshot(ctx context.Context, spec RunSpec) (ProcessHandl
 			return r.streamOpenAI(runCtx, *spec.SDK, spec.Env, pw)
 		case "anthropic":
 			return r.streamAnthropic(runCtx, *spec.SDK, spec.Env, pw)
+		case "demo":
+			return r.streamDemo(runCtx, *spec.SDK, pw)
 		default:
 			return fmt.Errorf("unsupported sdk provider %q", provider)
 		}
@@ -328,6 +330,47 @@ func (r SDKRunner) streamAnthropic(ctx context.Context, sdk SDKSpec, env map[str
 		return err
 	}
 	return nil
+}
+
+func (r SDKRunner) streamDemo(ctx context.Context, sdk SDKSpec, out io.Writer) error {
+	_ = ctx // demo does not need ctx right now; keep signature consistent for future cancellation points.
+	_ = sdk
+
+	// 输出一个稳定 DAG，便于本地链路验证（不依赖网络/密钥）。
+	_, err := io.WriteString(out, `{
+  "workflow_title": "",
+  "nodes": [
+    {
+      "id": "n1",
+      "title": "Step 1",
+      "type": "worker",
+      "expert_id": "bash",
+      "fallback_expert_id": "bash",
+      "complexity": "low",
+      "quality_tier": "fast",
+      "model": null,
+      "routing_reason": "demo",
+      "prompt": "echo '[n1] hello'; sleep 0.02; echo '[n1] done'"
+    },
+    {
+      "id": "n2",
+      "title": "Step 2",
+      "type": "worker",
+      "expert_id": "bash",
+      "fallback_expert_id": "bash",
+      "complexity": "low",
+      "quality_tier": "fast",
+      "model": null,
+      "routing_reason": "demo",
+      "prompt": "echo '[n2] hello'; sleep 0.02; echo '[n2] done'"
+    }
+  ],
+  "edges": [
+    { "from": "n1", "to": "n2", "type": "success", "source_handle": null, "target_handle": null }
+  ]
+}
+`)
+	return err
 }
 
 func builtinOutputSchema(name string) (map[string]any, error) {

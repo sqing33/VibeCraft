@@ -13,7 +13,6 @@ import (
 
 	"vibe-tree/backend/internal/api"
 	"vibe-tree/backend/internal/execution"
-	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/server"
 	"vibe-tree/backend/internal/ws"
 )
@@ -23,8 +22,7 @@ func TestWebSocketBroadcastExecutionLifecycle(t *testing.T) {
 
 	hub := ws.NewHub()
 	grace := 200 * time.Millisecond
-	execRunner := runner.PTYRunner{DefaultGrace: grace}
-	execMgr := execution.NewManager(execRunner, grace, hub)
+	execMgr := newTestExecMgr(grace, hub)
 
 	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub})
 	httpSrv := httptest.NewServer(engine)
@@ -103,8 +101,7 @@ func TestCancelExecutionBroadcastsCanceledExit(t *testing.T) {
 
 	hub := ws.NewHub()
 	grace := 100 * time.Millisecond
-	execRunner := runner.PTYRunner{DefaultGrace: grace}
-	execMgr := execution.NewManager(execRunner, grace, hub)
+	execMgr := newTestExecMgr(grace, hub)
 
 	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub})
 	httpSrv := httptest.NewServer(engine)

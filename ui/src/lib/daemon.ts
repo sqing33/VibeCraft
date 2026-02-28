@@ -1,16 +1,31 @@
-const DEFAULT_DAEMON_URL = 'http://127.0.0.1:7777'
+const DEFAULT_DAEMON_URL_DEV = 'http://127.0.0.1:7777'
+
+function normalizeBaseUrl(raw: string): string {
+  const url = raw.trim()
+  if (!url) return ''
+  return url.endsWith('/') ? url.slice(0, -1) : url
+}
 
 /**
  * 功能：从环境变量读取并规范化 daemon base URL。
  * 参数/返回：无入参；返回形如 `http://127.0.0.1:7777` 的字符串。
- * 失败场景：无（缺失时回退默认值）。
+ * 失败场景：无（缺失时：dev 回退默认值；prod 回退同源 origin）。
  * 副作用：读取 `import.meta.env.VITE_DAEMON_URL`。
  */
 export function daemonUrlFromEnv(): string {
   const raw = (import.meta.env.VITE_DAEMON_URL as string | undefined) ?? ''
-  const url = raw.trim()
-  if (!url) return DEFAULT_DAEMON_URL
-  return url.endsWith('/') ? url.slice(0, -1) : url
+  const fromEnv = normalizeBaseUrl(raw)
+  if (fromEnv) return fromEnv
+
+  // Web 版本（daemon 静态托管 ui/dist）默认使用同源，避免端口变化导致前端连错。
+  if (!import.meta.env.DEV) {
+    const origin =
+      typeof window !== 'undefined' ? normalizeBaseUrl(window.location.origin) : ''
+    if (origin) return origin
+  }
+
+  // dev server（Vite）下默认连接本地 daemon。
+  return DEFAULT_DAEMON_URL_DEV
 }
 
 /**
@@ -48,6 +63,57 @@ export async function fetchHealth(
   if (!('ok' in body) || (body as { ok?: unknown }).ok !== true) {
     throw new Error('unexpected response shape')
   }
+}
+
+export type DaemonInfo = {
+  version: {
+    commit: string
+    built_at?: string
+  }
+  paths: {
+    config_path: string
+    data_dir: string
+    logs_dir: string
+    state_db_path: string
+  }
+  now_ms: number
+}
+
+/**
+ * 功能：读取 daemon info（`GET /api/v1/info`），用于展示版本与数据目录路径。
+ * 参数/返回：接收 daemonUrl；返回 DaemonInfo。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchInfo(daemonUrl: string): Promise<DaemonInfo> {
+  const res = await fetch(`${daemonUrl}/api/v1/info`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as DaemonInfo
+}
+
+export type PublicExpert = {
+  id: string
+  label: string
+  run_mode: string
+  timeout_ms: number
+}
+
+/**
+ * 功能：读取 experts 列表（`GET /api/v1/experts`），用于 UI 下拉选择。
+ * 参数/返回：接收 daemonUrl；返回 PublicExpert[]。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchExperts(daemonUrl: string): Promise<PublicExpert[]> {
+  const res = await fetch(`${daemonUrl}/api/v1/experts`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as PublicExpert[]
 }
 
 export type Execution = {
@@ -98,31 +164,6 @@ export type Edge = {
   source_handle?: string
   target_handle?: string
   type: string
-}
-
-export type Expert = {
-  id: string
-  label: string
-  run_mode: string
-  provider?: string
-  model?: string
-  output_schema?: string
-  timeout_ms: number
-}
-
-/**
- * 功能：拉取已配置 experts 列表（`GET /api/v1/experts`）。
- * 参数/返回：接收 daemonUrl；返回 Expert[]（不含敏感字段）。
- * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
- * 副作用：发起 HTTP 请求。
- */
-export async function fetchExperts(daemonUrl: string): Promise<Expert[]> {
-  const res = await fetch(`${daemonUrl}/api/v1/experts`)
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
-  }
-  return (await res.json()) as Expert[]
 }
 
 /**
@@ -244,12 +285,9 @@ export type StartWorkflowResponse = {
 export async function startWorkflow(
   daemonUrl: string,
   workflowId: string,
-  req?: { prompt?: string; expert_id?: string },
 ): Promise<StartWorkflowResponse> {
   const res = await fetch(`${daemonUrl}/api/v1/workflows/${workflowId}/start`, {
     method: 'POST',
-    headers: req ? { 'Content-Type': 'application/json' } : undefined,
-    body: req ? JSON.stringify(req) : undefined,
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')

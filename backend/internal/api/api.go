@@ -34,6 +34,7 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
+	v1.GET("/info", infoHandler(deps))
 	v1.GET("/experts", listExpertsHandler(deps))
 
 	v1.GET("/workflows", listWorkflowsHandler(deps))

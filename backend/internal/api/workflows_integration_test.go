@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -19,171 +17,11 @@ import (
 	"vibe-tree/backend/internal/config"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/expert"
-	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/scheduler"
 	"vibe-tree/backend/internal/server"
 	"vibe-tree/backend/internal/store"
 	"vibe-tree/backend/internal/ws"
 )
-
-type mockSDKRunner struct{}
-
-func (r mockSDKRunner) StartOneshot(ctx context.Context, spec runner.RunSpec) (runner.ProcessHandle, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	runCtx, cancel := context.WithCancel(ctx)
-	pr, pw := io.Pipe()
-
-	h := &mockPipeHandle{
-		ctx:       runCtx,
-		cancel:    cancel,
-		outR:      pr,
-		outW:      pw,
-		startedAt: time.Now(),
-		done:      make(chan struct{}),
-	}
-
-	go h.run(func() error {
-		// 输出一个稳定的 DAG，保证后续 worker 节点（bash）链路可测试。
-		_, err := io.WriteString(pw, `{
-  "workflow_title": "",
-  "nodes": [
-    {
-      "id": "n1",
-      "title": "Step 1",
-      "type": "worker",
-      "expert_id": "bash",
-      "fallback_expert_id": "bash",
-      "complexity": "low",
-      "quality_tier": "fast",
-      "model": null,
-      "routing_reason": "mock sdk runner",
-      "prompt": "echo '[n1] hello'; sleep 0.02; echo '[n1] done'"
-    },
-    {
-      "id": "n2",
-      "title": "Step 2",
-      "type": "worker",
-      "expert_id": "bash",
-      "fallback_expert_id": "bash",
-      "complexity": "low",
-      "quality_tier": "fast",
-      "model": null,
-      "routing_reason": "mock sdk runner",
-      "prompt": "echo '[n2] hello'; sleep 0.02; echo '[n2] done'"
-    },
-    {
-      "id": "n3",
-      "title": "Step 3",
-      "type": "worker",
-      "expert_id": "bash",
-      "fallback_expert_id": "bash",
-      "complexity": "low",
-      "quality_tier": "fast",
-      "model": null,
-      "routing_reason": "mock sdk runner",
-      "prompt": "echo '[n3] hello'; sleep 0.02; echo '[n3] done'"
-    }
-  ],
-  "edges": [
-    { "from": "n1", "to": "n2", "type": "success", "source_handle": null, "target_handle": null },
-    { "from": "n2", "to": "n3", "type": "success", "source_handle": null, "target_handle": null }
-  ]
-}
-`)
-		return err
-	})
-
-	return h, nil
-}
-
-type mockPipeHandle struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	outR *io.PipeReader
-	outW *io.PipeWriter
-
-	startedAt time.Time
-
-	done chan struct{}
-
-	finishOnce sync.Once
-	mu         sync.Mutex
-	exitRes    runner.ExitResult
-	waitErr    error
-}
-
-func (h *mockPipeHandle) PID() int { return 0 }
-
-func (h *mockPipeHandle) Output() io.ReadCloser { return h.outR }
-
-func (h *mockPipeHandle) Wait() (runner.ExitResult, error) {
-	<-h.done
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.exitRes, h.waitErr
-}
-
-func (h *mockPipeHandle) Cancel(_ time.Duration) error {
-	if h.cancel != nil {
-		h.cancel()
-	}
-	h.finish(0, context.Canceled)
-	return nil
-}
-
-func (h *mockPipeHandle) WriteInput(_ []byte) (int, error) { return 0, io.ErrClosedPipe }
-
-func (h *mockPipeHandle) Close() error {
-	if h.cancel != nil {
-		h.cancel()
-	}
-	h.finish(0, nil)
-	if h.outR != nil {
-		_ = h.outR.Close()
-	}
-	return nil
-}
-
-func (h *mockPipeHandle) run(fn func() error) {
-	err := fn()
-	exitCode := 0
-	if err != nil {
-		exitCode = 1
-	}
-	h.finish(exitCode, err)
-}
-
-func (h *mockPipeHandle) finish(exitCode int, err error) {
-	h.finishOnce.Do(func() {
-		if h.outW != nil {
-			_ = h.outW.CloseWithError(err)
-		}
-
-		h.mu.Lock()
-		h.exitRes = runner.ExitResult{
-			ExitCode:  exitCode,
-			Signal:    "",
-			StartedAt: h.startedAt,
-			EndedAt:   time.Now(),
-		}
-		h.waitErr = err
-		h.mu.Unlock()
-
-		close(h.done)
-	})
-}
-
-func newTestExecMgr(grace time.Duration, hub *ws.Hub) *execution.Manager {
-	execRunner := runner.MultiRunner{
-		Process: runner.PTYRunner{DefaultGrace: grace},
-		SDK:     mockSDKRunner{},
-	}
-	return execution.NewManager(execRunner, grace, hub)
-}
 
 func TestWorkflowCRUD(t *testing.T) {
 	t.Parallel()
@@ -453,8 +291,8 @@ func TestStartWorkflow_UsesConfiguredExpertWhenProvided(t *testing.T) {
 
 	experts := expert.NewRegistry(config.Config{
 		Experts: []config.ExpertConfig{
-			{ID: "bash", RunMode: "oneshot", Command: "bash", Args: []string{"-lc", "{{prompt}}"}, Env: map[string]string{}, TimeoutMs: 30 * 60 * 1000},
-			{ID: "planner", RunMode: "oneshot", Command: "bash", Args: []string{"-lc", "{{prompt}}"}, Env: map[string]string{}, TimeoutMs: 30 * 60 * 1000},
+			{ID: "bash", Provider: "process", Command: "bash", Args: []string{"-lc", "{{prompt}}"}, Env: map[string]string{}, TimeoutMs: 30 * 60 * 1000},
+			{ID: "planner", Provider: "process", Command: "bash", Args: []string{"-lc", "{{prompt}}"}, Env: map[string]string{}, TimeoutMs: 30 * 60 * 1000},
 		},
 	})
 
@@ -677,6 +515,221 @@ func TestManualApproveRunsWorkerNodes(t *testing.T) {
 
 	// All worker nodes succeeded => workflow done.
 	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		getWfRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID)
+		if err != nil {
+			t.Fatalf("get workflow: %v", err)
+		}
+		var wf store.Workflow
+		if err := json.NewDecoder(getWfRes.Body).Decode(&wf); err != nil {
+			getWfRes.Body.Close()
+			t.Fatalf("decode workflow: %v", err)
+		}
+		getWfRes.Body.Close()
+		if wf.Status == "done" {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for workflow to be done")
+}
+
+func TestSchedulerRespectsMaxConcurrency(t *testing.T) {
+	t.Parallel()
+
+	hub := ws.NewHub()
+	grace := 50 * time.Millisecond
+	execMgr := newTestExecMgr(grace, hub)
+	experts := expert.NewRegistry(config.Default())
+
+	stateDBPath := filepath.Join(t.TempDir(), "state.db")
+	st, err := store.Open(context.Background(), stateDBPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate store: %v", err)
+	}
+
+	sched := scheduler.New(scheduler.Options{Store: st, Executions: execMgr, Hub: hub, Experts: experts, MaxConcurrency: 1})
+
+	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub, Store: st, Experts: experts})
+	httpSrv := httptest.NewServer(engine)
+	defer httpSrv.Close()
+
+	createReq := []byte(`{"title":"auto","workspace_path":".","mode":"auto"}`)
+	res, err := http.Post(httpSrv.URL+"/api/v1/workflows", "application/json", bytes.NewReader(createReq))
+	if err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected create status: %s", res.Status)
+	}
+	var created store.Workflow
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	prompt := `
+cat <<'JSON'
+{
+  "workflow_title": "",
+  "nodes": [
+    { "id": "a", "title": "Alpha", "type": "worker", "expert_id": "bash", "fallback_expert_id": "bash", "complexity": "low", "quality_tier": "fast", "model": null, "routing_reason": "", "prompt": "echo '[a] start'; sleep 0.6; echo '[a] end'" },
+    { "id": "b", "title": "Beta", "type": "worker", "expert_id": "bash", "fallback_expert_id": "bash", "complexity": "low", "quality_tier": "fast", "model": null, "routing_reason": "", "prompt": "echo '[b] start'; sleep 0.6; echo '[b] end'" }
+  ],
+  "edges": []
+}
+JSON
+`
+	startBody, _ := json.Marshal(map[string]string{
+		"expert_id": "bash",
+		"prompt":    prompt,
+	})
+	startRes, err := http.Post(httpSrv.URL+"/api/v1/workflows/"+created.ID+"/start", "application/json", bytes.NewReader(startBody))
+	if err != nil {
+		t.Fatalf("start workflow: %v", err)
+	}
+	startRes.Body.Close()
+	if startRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected start status: %s", startRes.Status)
+	}
+
+	// Wait for DAG to be applied (master exits and creates queued worker nodes).
+	waitDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(waitDeadline) {
+		nodesRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID + "/nodes")
+		if err != nil {
+			t.Fatalf("list nodes: %v", err)
+		}
+		var ns []store.Node
+		if err := json.NewDecoder(nodesRes.Body).Decode(&ns); err != nil {
+			nodesRes.Body.Close()
+			t.Fatalf("decode nodes: %v", err)
+		}
+		nodesRes.Body.Close()
+
+		queued := 0
+		workers := 0
+		for _, n := range ns {
+			if n.NodeType == "master" {
+				continue
+			}
+			workers++
+			if n.Status == "queued" {
+				queued++
+			}
+		}
+		if workers == 2 && queued == 2 {
+			goto dagReady
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for queued worker nodes")
+
+dagReady:
+
+	// First tick should start exactly 1 worker node.
+	if err := sched.Tick(context.Background()); err != nil {
+		t.Fatalf("scheduler tick: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		running, err := st.CountRunningWorkerNodes(context.Background())
+		if err != nil {
+			t.Fatalf("count running nodes: %v", err)
+		}
+		if running > 1 {
+			t.Fatalf("expected running<=1, got %d", running)
+		}
+		if running == 1 {
+			goto oneRunning
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for a running node")
+
+oneRunning:
+
+	// Second tick during running should not start another node.
+	if err := sched.Tick(context.Background()); err != nil {
+		t.Fatalf("scheduler tick 2: %v", err)
+	}
+	running, err := st.CountRunningWorkerNodes(context.Background())
+	if err != nil {
+		t.Fatalf("count running nodes after tick2: %v", err)
+	}
+	if running > 1 {
+		t.Fatalf("expected running<=1 after tick2, got %d", running)
+	}
+
+	// Wait for the first worker to finish; ensure the other is still queued.
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		nodesRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID + "/nodes")
+		if err != nil {
+			t.Fatalf("list nodes: %v", err)
+		}
+		var ns []store.Node
+		if err := json.NewDecoder(nodesRes.Body).Decode(&ns); err != nil {
+			nodesRes.Body.Close()
+			t.Fatalf("decode nodes: %v", err)
+		}
+		nodesRes.Body.Close()
+
+		succeeded := 0
+		queued := 0
+		running := 0
+		for _, n := range ns {
+			if n.NodeType == "master" {
+				continue
+			}
+			switch n.Status {
+			case "succeeded":
+				succeeded++
+			case "queued":
+				queued++
+			case "running":
+				running++
+			}
+		}
+		if succeeded == 1 && queued == 1 && running == 0 {
+			goto firstFinished
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for first worker to finish")
+
+firstFinished:
+
+	// Third tick should start the remaining queued worker.
+	if err := sched.Tick(context.Background()); err != nil {
+		t.Fatalf("scheduler tick 3: %v", err)
+	}
+
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		running, err := st.CountRunningWorkerNodes(context.Background())
+		if err != nil {
+			t.Fatalf("count running nodes: %v", err)
+		}
+		if running > 1 {
+			t.Fatalf("expected running<=1, got %d", running)
+		}
+		if running == 1 {
+			goto secondStarted
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for second worker to start")
+
+secondStarted:
+
+	// Wait for the workflow to complete.
+	deadline = time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		getWfRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID)
 		if err != nil {

@@ -10,6 +10,7 @@ import {
   fetchExperts,
   fetchExecutionLogTail,
   fetchHealth,
+  fetchInfo,
   fetchWorkflowEdges,
   fetchWorkflowNodes,
   fetchWorkflows,
@@ -20,9 +21,10 @@ import {
   startExecution,
   wsUrlFromDaemonUrl,
   type Edge,
-  type Expert,
   type Execution,
   type Node,
+  type PublicExpert,
+  type DaemonInfo,
   type Workflow,
 } from './lib/daemon'
 import { DAGView } from './components/DAGView'
@@ -44,6 +46,34 @@ type WsEnvelope = {
   payload?: unknown
 }
 
+function normalizeBaseUrl(raw: string): string {
+  const url = (raw ?? '').trim()
+  if (!url) return ''
+  return url.endsWith('/') ? url.slice(0, -1) : url
+}
+
+function formatExpertOption(e: PublicExpert): string {
+  const id = (e.id ?? '').trim()
+  const label = (e.label ?? '').trim()
+  if (!label || label === id) return id || 'unknown'
+  return `${label} (${id})`
+}
+
+async function copyToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const el = document.createElement('textarea')
+    el.value = text
+    el.style.position = 'fixed'
+    el.style.left = '-9999px'
+    document.body.appendChild(el)
+    el.select()
+    document.execCommand('copy')
+    document.body.removeChild(el)
+  }
+}
+
 function workflowIdFromHash(): string | null {
   const raw = window.location.hash ?? ''
   const m = raw.match(/^#\/workflows\/([^/]+)$/)
@@ -58,17 +88,32 @@ function workflowIdFromHash(): string | null {
  * 副作用：发起 HTTP/WS 请求、维护本地状态、向终端写入输出。
  */
 function App() {
-  const daemonUrl = useMemo(() => daemonUrlFromEnv(), [])
-  const wsUrl = useMemo(() => wsUrlFromDaemonUrl(daemonUrl), [daemonUrl])
+  const [daemonUrl, setDaemonUrl] = useState(() => {
+    const saved = normalizeBaseUrl(
+      window.localStorage.getItem('vibe-tree.daemon_url') ?? '',
+    )
+    return saved || daemonUrlFromEnv()
+  })
+  const [daemonUrlInput, setDaemonUrlInput] = useState(() => daemonUrl)
+  const [daemonUrlError, setDaemonUrlError] = useState<string | null>(null)
+
+  const wsUrl = useMemo(() => {
+    try {
+      return wsUrlFromDaemonUrl(daemonUrl)
+    } catch {
+      return ''
+    }
+  }, [daemonUrl])
   const [health, setHealth] = useState<HealthState>({ status: 'checking' })
   const [wsState, setWsState] = useState<WsState>('connecting')
-  const [experts, setExperts] = useState<Expert[]>([])
+  const [info, setInfo] = useState<DaemonInfo | null>(null)
+  const [infoError, setInfoError] = useState<string | null>(null)
+  const [experts, setExperts] = useState<PublicExpert[]>([])
   const [expertsError, setExpertsError] = useState<string | null>(null)
   const [workflows, setWorkflows] = useState<Workflow[]>([])
   const [wfTitle, setWfTitle] = useState('')
   const [wfWorkspace, setWfWorkspace] = useState('.')
   const [wfMode, setWfMode] = useState<'manual' | 'auto'>('manual')
-  const [wfStartExpert, setWfStartExpert] = useState('bash')
   const [wfError, setWfError] = useState<string | null>(null)
   const [wfStartingId, setWfStartingId] = useState<string | null>(null)
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(
@@ -102,6 +147,43 @@ function App() {
   )
   const [execError, setExecError] = useState<string | null>(null)
 
+  const onApplyDaemonUrl = useCallback(() => {
+    setDaemonUrlError(null)
+    const normalized = normalizeBaseUrl(daemonUrlInput)
+    if (!normalized) {
+      setDaemonUrlError('Daemon URL is required.')
+      return
+    }
+    try {
+      const parsed = new URL(normalized)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        setDaemonUrlError('Daemon URL must start with http:// or https://.')
+        return
+      }
+    } catch {
+      setDaemonUrlError('Invalid daemon URL.')
+      return
+    }
+
+    window.localStorage.setItem('vibe-tree.daemon_url', normalized)
+    setDaemonUrl(normalized)
+    setDaemonUrlInput(normalized)
+  }, [daemonUrlInput])
+
+  const onResetDaemonUrl = useCallback(() => {
+    window.localStorage.removeItem('vibe-tree.daemon_url')
+    const next = daemonUrlFromEnv()
+    setDaemonUrlError(null)
+    setDaemonUrl(next)
+    setDaemonUrlInput(next)
+  }, [])
+
+  const expertsById = useMemo(() => {
+    const map = new Map<string, PublicExpert>()
+    for (const e of experts) map.set(e.id, e)
+    return map
+  }, [experts])
+
   const selectedWorkflow = useMemo(() => {
     if (!selectedWorkflowId) return null
     return workflows.find((w) => w.workflow_id === selectedWorkflowId) ?? null
@@ -115,19 +197,55 @@ function App() {
   useEffect(() => {
     if (!selectedNode || selectedNode.node_type === 'master') {
       setNodeEditPrompt('')
-      setNodeEditExpert('bash')
+      setNodeEditExpert(expertsById.has('bash') ? 'bash' : (experts[0]?.id ?? 'bash'))
       setNodeEditError(null)
       return
     }
     setNodeEditPrompt(selectedNode.prompt)
-    setNodeEditExpert(selectedNode.expert_id || 'bash')
+    setNodeEditExpert(selectedNode.expert_id || (expertsById.has('bash') ? 'bash' : (experts[0]?.id ?? 'bash')))
     setNodeEditError(null)
-  }, [selectedNode])
+  }, [experts, expertsById, selectedNode])
 
   const terminalRef = useRef<TerminalPaneHandle | null>(null)
+  const terminalPendingRef = useRef<string>('')
+  const terminalFlushRafRef = useRef<number | null>(null)
   const selectedExecutionIdRef = useRef<string | null>(null)
   const selectedWorkflowIdRef = useRef<string | null>(null)
   const selectedNodeIdRef = useRef<string | null>(null)
+
+  const flushTerminalPending = useCallback(() => {
+    if (terminalFlushRafRef.current != null) {
+      window.cancelAnimationFrame(terminalFlushRafRef.current)
+      terminalFlushRafRef.current = null
+    }
+    const chunk = terminalPendingRef.current
+    if (!chunk) return
+    terminalPendingRef.current = ''
+    terminalRef.current?.write(chunk)
+  }, [])
+
+  const enqueueTerminalWrite = useCallback(
+    (chunk: string) => {
+      if (!chunk) return
+      terminalPendingRef.current += chunk
+
+      // 防止极端情况下 buffer 无上限增长（例如 WS 断线后瞬间补齐大量输出）。
+      if (terminalPendingRef.current.length >= 512 * 1024) {
+        flushTerminalPending()
+        return
+      }
+
+      if (terminalFlushRafRef.current != null) return
+      terminalFlushRafRef.current = window.requestAnimationFrame(() => {
+        terminalFlushRafRef.current = null
+        const data = terminalPendingRef.current
+        if (!data) return
+        terminalPendingRef.current = ''
+        terminalRef.current?.write(data)
+      })
+    },
+    [flushTerminalPending],
+  )
 
   useEffect(() => {
     selectedExecutionIdRef.current = selectedExecutionId
@@ -142,6 +260,16 @@ function App() {
   }, [selectedNodeId])
 
   useEffect(() => {
+    return () => {
+      terminalPendingRef.current = ''
+      if (terminalFlushRafRef.current != null) {
+        window.cancelAnimationFrame(terminalFlushRafRef.current)
+        terminalFlushRafRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
     const onHashChange = () => setSelectedWorkflowId(workflowIdFromHash())
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
@@ -149,42 +277,50 @@ function App() {
 
   useEffect(() => {
     const abortController = new AbortController()
+    let cancelled = false
+
+    setInfo(null)
+    setInfoError(null)
+    setExperts([])
+    setExpertsError(null)
+    setDaemonUrlError(null)
 
     fetchHealth(daemonUrl, abortController.signal)
-      .then(() => setHealth({ status: 'ok' }))
+      .then(() => {
+        if (cancelled) return
+        setHealth({ status: 'ok' })
+
+        fetchInfo(daemonUrl)
+          .then((res) => {
+            if (cancelled) return
+            setInfo(res)
+          })
+          .catch((err: unknown) => {
+            if (cancelled) return
+            const message = err instanceof Error ? err.message : String(err)
+            setInfoError(message)
+          })
+
+        fetchExperts(daemonUrl)
+          .then((list) => {
+            if (cancelled) return
+            setExperts(list)
+          })
+          .catch((err: unknown) => {
+            if (cancelled) return
+            const message = err instanceof Error ? err.message : String(err)
+            setExpertsError(message)
+          })
+      })
       .catch((err: unknown) => {
         if (abortController.signal.aborted) return
         const message = err instanceof Error ? err.message : String(err)
         setHealth({ status: 'error', message })
       })
 
-    return () => abortController.abort()
-  }, [daemonUrl])
-
-  useEffect(() => {
-    let cancelled = false
-    fetchExperts(daemonUrl)
-      .then((xs) => {
-        if (cancelled) return
-        setExperts(xs)
-        setExpertsError(null)
-        setWfStartExpert((prev) => {
-          if (prev && prev !== 'bash') return prev
-          if (xs.some((e) => e.id === 'codex')) return 'codex'
-          if (xs.some((e) => e.id === 'claudecode')) return 'claudecode'
-          if (xs.some((e) => e.id === 'bash')) return 'bash'
-          return xs[0]?.id ?? 'bash'
-        })
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return
-        const message = err instanceof Error ? err.message : String(err)
-        setExpertsError(message)
-        setExperts([])
-      })
-
     return () => {
       cancelled = true
+      abortController.abort()
     }
   }, [daemonUrl])
 
@@ -253,6 +389,11 @@ function App() {
           setSelectedExecutionId(selected.last_execution_id)
         } else {
           setSelectedExecutionId(null)
+          terminalPendingRef.current = ''
+          if (terminalFlushRafRef.current != null) {
+            window.cancelAnimationFrame(terminalFlushRafRef.current)
+            terminalFlushRafRef.current = null
+          }
           terminalRef.current?.reset('No execution yet.\r\n')
         }
       } catch (err: unknown) {
@@ -299,6 +440,11 @@ function App() {
       setSelectedExecutionId(node.last_execution_id)
     } else {
       setSelectedExecutionId(null)
+      terminalPendingRef.current = ''
+      if (terminalFlushRafRef.current != null) {
+        window.cancelAnimationFrame(terminalFlushRafRef.current)
+        terminalFlushRafRef.current = null
+      }
       terminalRef.current?.reset('No execution yet.\r\n')
     }
   }, [])
@@ -314,6 +460,11 @@ function App() {
 
   const loadTailIntoTerminal = useCallback(
     async (executionId: string) => {
+      terminalPendingRef.current = ''
+      if (terminalFlushRafRef.current != null) {
+        window.cancelAnimationFrame(terminalFlushRafRef.current)
+        terminalFlushRafRef.current = null
+      }
       terminalRef.current?.reset('Loading log…\r\n')
       try {
         const text = await fetchExecutionLogTail(daemonUrl, executionId, 200000)
@@ -336,6 +487,11 @@ function App() {
     // 参数/返回：依赖 wsUrl 与 loadTailIntoTerminal；无返回值。
     // 失败场景：WS 握手失败或异常断开时进入重连循环（UI 仍可通过 tail 回放）。
     // 副作用：创建 WebSocket、注册事件回调、更新本地状态与终端输出。
+    if (!wsUrl) {
+      setWsState('disconnected')
+      return
+    }
+
     let stopped = false
     let socket: WebSocket | null = null
     let reconnectTimer: number | undefined
@@ -416,7 +572,7 @@ function App() {
           const payload = env.payload as { chunk?: unknown } | undefined
           const chunk = typeof payload?.chunk === 'string' ? payload.chunk : ''
           if (exId === selectedExecutionIdRef.current) {
-            terminalRef.current?.write(chunk)
+            enqueueTerminalWrite(chunk)
           }
           return
         }
@@ -474,7 +630,7 @@ function App() {
       if (reconnectTimer) window.clearTimeout(reconnectTimer)
       socket?.close()
     }
-  }, [wsUrl, loadTailIntoTerminal, refreshGraphById])
+  }, [wsUrl, loadTailIntoTerminal, refreshGraphById, enqueueTerminalWrite])
 
   const onRunDemo = async () => {
     setExecError(null)
@@ -521,11 +677,7 @@ function App() {
     setWfStartingId(workflowId)
     openWorkflow(workflowId)
     try {
-      const started = await startWorkflow(
-        daemonUrl,
-        workflowId,
-        wfStartExpert ? { expert_id: wfStartExpert } : undefined,
-      )
+      const started = await startWorkflow(daemonUrl, workflowId)
       setWorkflows((prev) =>
         prev.map((wf) =>
           wf.workflow_id === started.workflow.workflow_id ? started.workflow : wf,
@@ -692,7 +844,35 @@ function App() {
         <div className="row">
           <div className="label">URL</div>
           <div className="value">
-            <code>{daemonUrl}</code>
+            <div className="selectedRow">
+              <code className="pathCode">{daemonUrl}</code>
+              <button
+                className="ghostBtn"
+                onClick={() => void copyToClipboard(daemonUrl)}
+              >
+                Copy
+              </button>
+            </div>
+            <div className="actionsRow daemonUrlRow">
+              <input
+                className="input"
+                value={daemonUrlInput}
+                onChange={(e) => setDaemonUrlInput(e.target.value)}
+                placeholder="http://127.0.0.1:7777"
+              />
+              <button className="primaryBtnInline" onClick={onApplyDaemonUrl}>
+                Apply
+              </button>
+              <button className="ghostBtn" onClick={onResetDaemonUrl}>
+                Reset
+              </button>
+            </div>
+            {daemonUrlError && (
+              <div className="errorBox" style={{ marginTop: 10 }}>
+                <div className="errorTitle">Daemon URL 无效</div>
+                <div className="errorMsg">{daemonUrlError}</div>
+              </div>
+            )}
           </div>
         </div>
         <div className="row">
@@ -708,6 +888,127 @@ function App() {
                   请确认后端已启动，且端口配置一致（默认 7777）。
                 </div>
               </div>
+            )}
+          </div>
+        </div>
+
+        <div className="row">
+          <div className="label">WS</div>
+          <div className="value">
+            <div className="selectedRow">
+              {wsState === 'connected' && (
+                <span className="ok">connected</span>
+              )}
+              {wsState === 'connecting' && (
+                <span className="muted">connecting…</span>
+              )}
+              {wsState === 'disconnected' && (
+                <span className="warn">disconnected</span>
+              )}
+              <code className="pathCode">{wsUrl}</code>
+            </div>
+          </div>
+        </div>
+
+        <div className="row">
+          <div className="label">Version</div>
+          <div className="value">
+            {info ? (
+              <div className="selectedRow">
+                <code>{info.version.commit}</code>
+                {info.version.built_at && (
+                  <span className="muted">{info.version.built_at}</span>
+                )}
+              </div>
+            ) : infoError ? (
+              <div className="errorBox">
+                <div className="errorTitle">Info 获取失败</div>
+                <div className="errorMsg">{infoError}</div>
+              </div>
+            ) : (
+              <span className="muted">Loading…</span>
+            )}
+          </div>
+        </div>
+
+        {info && (
+          <>
+            <div className="row">
+              <div className="label">Config</div>
+              <div className="value">
+                <div className="selectedRow">
+                  <code className="pathCode">{info.paths.config_path}</code>
+                  <button
+                    className="ghostBtn"
+                    onClick={() => void copyToClipboard(info.paths.config_path)}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="row">
+              <div className="label">Data</div>
+              <div className="value">
+                <div className="selectedRow">
+                  <code className="pathCode">{info.paths.data_dir}</code>
+                  <button
+                    className="ghostBtn"
+                    onClick={() => void copyToClipboard(info.paths.data_dir)}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="row">
+              <div className="label">Logs</div>
+              <div className="value">
+                <div className="selectedRow">
+                  <code className="pathCode">{info.paths.logs_dir}</code>
+                  <button
+                    className="ghostBtn"
+                    onClick={() => void copyToClipboard(info.paths.logs_dir)}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="row">
+              <div className="label">SQLite</div>
+              <div className="value">
+                <div className="selectedRow">
+                  <code className="pathCode">{info.paths.state_db_path}</code>
+                  <button
+                    className="ghostBtn"
+                    onClick={() => void copyToClipboard(info.paths.state_db_path)}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        <div className="row">
+          <div className="label">Experts</div>
+          <div className="value">
+            {experts.length > 0 ? (
+              <div className="selectedRow">
+                <span className="muted">{experts.length} configured</span>
+                <span className="wfMeta">
+                  {experts.map((e) => e.id).join(', ')}
+                </span>
+              </div>
+            ) : expertsError ? (
+              <div className="errorBox">
+                <div className="errorTitle">Experts 获取失败</div>
+                <div className="errorMsg">{expertsError}</div>
+              </div>
+            ) : (
+              <span className="muted">Loading…</span>
             )}
           </div>
         </div>
@@ -751,35 +1052,6 @@ function App() {
               <option value="manual">manual</option>
               <option value="auto">auto</option>
             </select>
-          </div>
-        </div>
-        <div className="row">
-          <div className="label">Master expert</div>
-          <div className="value">
-            <select
-              className="select"
-              value={wfStartExpert}
-              onChange={(e) => setWfStartExpert(e.target.value || 'bash')}
-            >
-              {(experts.length > 0
-                ? experts
-                : [
-                    {
-                      id: 'bash',
-                      label: 'bash',
-                      run_mode: 'oneshot',
-                      timeout_ms: 0,
-                    },
-                  ]
-              ).map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.label || e.id}
-                </option>
-              ))}
-            </select>
-            {expertsError && (
-              <div className="hint">Experts 加载失败：{expertsError}</div>
-            )}
           </div>
         </div>
         <div className="row">
@@ -1035,8 +1307,7 @@ function App() {
                       <span className="muted">expert={selectedNode.expert_id}</span>
                     </div>
 
-                    {selectedWorkflow?.mode === 'manual' &&
-                      selectedNode.node_type !== 'master' &&
+                    {selectedNode.node_type !== 'master' &&
                       (selectedNode.status === 'draft' ||
                         selectedNode.status === 'pending_approval' ||
                         selectedNode.status === 'queued' ||
@@ -1054,21 +1325,15 @@ function App() {
                               }
                               disabled={nodeEditSaving}
                             >
-                              {(experts.length > 0
-                                ? experts
-                                : [
-                                    {
-                                      id: 'bash',
-                                      label: 'bash',
-                                      run_mode: 'oneshot',
-                                      timeout_ms: 0,
-                                    },
-                                  ]
-                              ).map((e) => (
-                                <option key={e.id} value={e.id}>
-                                  {e.label || e.id}
-                                </option>
-                              ))}
+                              {experts.length > 0 ? (
+                                experts.map((e) => (
+                                  <option key={e.id} value={e.id}>
+                                    {formatExpertOption(e)}
+                                  </option>
+                                ))
+                              ) : (
+                                <option value="bash">bash</option>
+                              )}
                             </select>
                           </div>
                           <div className="nodeEditorRow">

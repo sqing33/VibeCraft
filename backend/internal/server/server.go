@@ -79,22 +79,47 @@ func requestLogger() gin.HandlerFunc {
 }
 
 func maybeServeUIBuild(r *gin.Engine) {
-	distDir := strings.TrimSpace(os.Getenv("VIBE_TREE_UI_DIST"))
-	if distDir == "" {
-		distDir = filepath.Join("ui", "dist")
+	envDistDir := strings.TrimSpace(os.Getenv("VIBE_TREE_UI_DIST"))
+	candidates := make([]string, 0, 2)
+	if envDistDir != "" {
+		candidates = append(candidates, envDistDir)
+	} else {
+		// 默认候选：
+		// - 从 repo root 启动（`./ui/dist`）
+		// - 从 backend 目录启动（`../ui/dist`）
+		candidates = append(candidates, filepath.Join("ui", "dist"))
+		candidates = append(candidates, filepath.Join("..", "ui", "dist"))
 	}
 
-	absDist, err := filepath.Abs(distDir)
-	if err != nil {
-		absDist = distDir
-	}
+	var absDist string
+	var indexPath string
+	for _, distDir := range candidates {
+		distDir = strings.TrimSpace(distDir)
+		if distDir == "" {
+			continue
+		}
 
-	indexPath := filepath.Join(absDist, "index.html")
-	if _, err := os.Stat(indexPath); err != nil {
+		d, err := filepath.Abs(distDir)
+		if err != nil {
+			d = distDir
+		}
+
+		p := filepath.Join(d, "index.html")
+		if _, err := os.Stat(p); err == nil {
+			absDist = d
+			indexPath = p
+			break
+		}
+	}
+	if absDist == "" || indexPath == "" {
 		return
 	}
 
-	logx.Info("ui", "serve-ui", "启用 UI 静态资源", "dist", absDist)
+	source := "default"
+	if envDistDir != "" {
+		source = "env"
+	}
+	logx.Info("ui", "serve-ui", "启用 UI 静态资源", "dist", absDist, "source", source)
 
 	assetsDir := filepath.Join(absDist, "assets")
 	if st, err := os.Stat(assetsDir); err == nil && st.IsDir() {

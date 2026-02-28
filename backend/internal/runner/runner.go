@@ -7,11 +7,20 @@ import (
 )
 
 type RunSpec struct {
+	// Command/Args/Env/Cwd 功能：本地进程（PTY）执行字段。
+	// 参数/返回：Command 为空时视为无效 spec。
+	// 失败场景：进程启动失败、权限不足或命令不存在时返回 error。
+	// 副作用：启动子进程并产生输出流（由 Runner 决定）。
 	Command string
 	Args    []string
 	Env     map[string]string
 	Cwd     string
-	SDK     *SDKSpec
+
+	// SDK 功能：当不为空时表示走 SDK 驱动（OpenAI/Anthropic/Demo），不启动外部 CLI。
+	// 参数/返回：Provider/Model/Prompt 等字段由 expert.Resolve 填充。
+	// 失败场景：provider 不支持、鉴权失败或网络错误时返回 error。
+	// 副作用：可能发起外部网络请求并产生输出流。
+	SDK *SDKSpec
 }
 
 type SDKSpec struct {
@@ -44,3 +53,4 @@ type ProcessHandle interface {
 type Runner interface {
 	StartOneshot(ctx context.Context, spec RunSpec) (ProcessHandle, error)
 }
+

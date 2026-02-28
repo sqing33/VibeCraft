@@ -2,6 +2,7 @@ package execution
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -201,31 +202,44 @@ func (m *Manager) streamToLogAndFinalize(ctx context.Context, executionID string
 
 	writer := bufio.NewWriterSize(logFile, 64*1024)
 	lastFlush := time.Now()
+	lastBroadcast := time.Time{}
 
 	workflowID := st.exec.WorkflowID
 	nodeID := st.exec.NodeID
 
 	output := handle.Output()
-	buf := make([]byte, 4096)
+	buf := make([]byte, 16*1024)
+
+	var broadcastBuf bytes.Buffer
+	broadcastBuf.Grow(32 * 1024)
+
 	for {
 		n, err := output.Read(buf)
 		if n > 0 {
 			_, _ = writer.Write(buf[:n])
+			_, _ = broadcastBuf.Write(buf[:n])
+
 			now := time.Now()
 			if now.Sub(lastFlush) >= 100*time.Millisecond {
 				_ = writer.Flush()
 				lastFlush = now
 			}
-			m.broadcast(ws.Envelope{
-				Type:        "node.log",
-				Ts:          time.Now().UnixMilli(),
-				WorkflowID:  workflowID,
-				NodeID:      nodeID,
-				ExecutionID: executionID,
-				Payload: nodeLogPayload{
-					Chunk: string(buf[:n]),
-				},
-			})
+
+			// 降低 WS 事件频率：按时间或字节数合并 chunk，减少 UI JSON.parse/xterm 写入压力。
+			if now.Sub(lastBroadcast) >= 50*time.Millisecond || broadcastBuf.Len() >= 16*1024 {
+				m.broadcast(ws.Envelope{
+					Type:        "node.log",
+					Ts:          now.UnixMilli(),
+					WorkflowID:  workflowID,
+					NodeID:      nodeID,
+					ExecutionID: executionID,
+					Payload: nodeLogPayload{
+						Chunk: broadcastBuf.String(),
+					},
+				})
+				broadcastBuf.Reset()
+				lastBroadcast = now
+			}
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -236,6 +250,18 @@ func (m *Manager) streamToLogAndFinalize(ctx context.Context, executionID string
 	}
 
 	_ = writer.Flush()
+	if broadcastBuf.Len() > 0 {
+		m.broadcast(ws.Envelope{
+			Type:        "node.log",
+			Ts:          time.Now().UnixMilli(),
+			WorkflowID:  workflowID,
+			NodeID:      nodeID,
+			ExecutionID: executionID,
+			Payload: nodeLogPayload{
+				Chunk: broadcastBuf.String(),
+			},
+		})
+	}
 
 	exitRes, waitErr := handle.Wait()
 
