@@ -82,7 +82,7 @@ func TestValidateRejectsUnknownExpert(t *testing.T) {
 
 	d := DAG{
 		Nodes: []DAGNode{
-			{ID: "a", ExpertID: "codex", Prompt: "echo hi"},
+			{ID: "a", ExpertID: "claudecode", Prompt: "echo hi"},
 		},
 	}
 	if err := Validate(d, ValidateOptions{KnownExperts: map[string]struct{}{"bash": {}}}); err == nil {

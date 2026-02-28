@@ -33,6 +33,17 @@ type ExpertConfig struct {
 	Args      []string          `json:"args"`
 	Env       map[string]string `json:"env"`
 	TimeoutMs int               `json:"timeout_ms"`
+	SDK       *ExpertSDKConfig  `json:"sdk,omitempty"`
+}
+
+type ExpertSDKConfig struct {
+	Provider        string   `json:"provider"`
+	Model           string   `json:"model"`
+	BaseURL         string   `json:"base_url,omitempty"`
+	Instructions    string   `json:"instructions,omitempty"`
+	MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
+	Temperature     *float64 `json:"temperature,omitempty"`
+	OutputSchema    string   `json:"output_schema,omitempty"`
 }
 
 // Default 功能：返回一份可直接运行的默认配置（localhost-only）。
@@ -51,6 +62,21 @@ func Default() Config {
 		},
 		Experts: []ExpertConfig{
 			{
+				ID:      "master",
+				Label:   "Master Planner (Anthropic SDK)",
+				RunMode: "sdk",
+				SDK: &ExpertSDKConfig{
+					Provider:        "anthropic",
+					Model:           "claude-3-7-sonnet-latest",
+					MaxOutputTokens: 4096,
+					OutputSchema:    "dag_v1",
+				},
+				Env: map[string]string{
+					"ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
+				},
+				TimeoutMs: 30 * 60 * 1000,
+			},
+			{
 				ID:      "bash",
 				Label:   "Bash",
 				RunMode: "oneshot",
@@ -58,6 +84,34 @@ func Default() Config {
 				Args:    []string{"-lc", "{{prompt}}"},
 				Env:     map[string]string{},
 				// 30min: MVP 默认超时时间（后续由 scheduler/execution 实际 enforce）。
+				TimeoutMs: 30 * 60 * 1000,
+			},
+			{
+				ID:      "codex",
+				Label:   "Codex (OpenAI SDK)",
+				RunMode: "sdk",
+				SDK: &ExpertSDKConfig{
+					Provider:        "openai",
+					Model:           "gpt-5-codex",
+					MaxOutputTokens: 8192,
+				},
+				Env: map[string]string{
+					"OPENAI_API_KEY": "${OPENAI_API_KEY}",
+				},
+				TimeoutMs: 30 * 60 * 1000,
+			},
+			{
+				ID:      "claudecode",
+				Label:   "ClaudeCode (Anthropic SDK)",
+				RunMode: "sdk",
+				SDK: &ExpertSDKConfig{
+					Provider:        "anthropic",
+					Model:           "claude-3-7-sonnet-latest",
+					MaxOutputTokens: 4096,
+				},
+				Env: map[string]string{
+					"ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
+				},
 				TimeoutMs: 30 * 60 * 1000,
 			},
 		},

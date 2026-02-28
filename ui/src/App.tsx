@@ -7,6 +7,7 @@ import {
   cancelWorkflow,
   createWorkflow,
   daemonUrlFromEnv,
+  fetchExperts,
   fetchExecutionLogTail,
   fetchHealth,
   fetchWorkflowEdges,
@@ -19,6 +20,7 @@ import {
   startExecution,
   wsUrlFromDaemonUrl,
   type Edge,
+  type Expert,
   type Execution,
   type Node,
   type Workflow,
@@ -60,10 +62,13 @@ function App() {
   const wsUrl = useMemo(() => wsUrlFromDaemonUrl(daemonUrl), [daemonUrl])
   const [health, setHealth] = useState<HealthState>({ status: 'checking' })
   const [wsState, setWsState] = useState<WsState>('connecting')
+  const [experts, setExperts] = useState<Expert[]>([])
+  const [expertsError, setExpertsError] = useState<string | null>(null)
   const [workflows, setWorkflows] = useState<Workflow[]>([])
   const [wfTitle, setWfTitle] = useState('')
   const [wfWorkspace, setWfWorkspace] = useState('.')
   const [wfMode, setWfMode] = useState<'manual' | 'auto'>('manual')
+  const [wfStartExpert, setWfStartExpert] = useState('bash')
   const [wfError, setWfError] = useState<string | null>(null)
   const [wfStartingId, setWfStartingId] = useState<string | null>(null)
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(
@@ -154,6 +159,33 @@ function App() {
       })
 
     return () => abortController.abort()
+  }, [daemonUrl])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchExperts(daemonUrl)
+      .then((xs) => {
+        if (cancelled) return
+        setExperts(xs)
+        setExpertsError(null)
+        setWfStartExpert((prev) => {
+          if (prev && prev !== 'bash') return prev
+          if (xs.some((e) => e.id === 'codex')) return 'codex'
+          if (xs.some((e) => e.id === 'claudecode')) return 'claudecode'
+          if (xs.some((e) => e.id === 'bash')) return 'bash'
+          return xs[0]?.id ?? 'bash'
+        })
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        const message = err instanceof Error ? err.message : String(err)
+        setExpertsError(message)
+        setExperts([])
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [daemonUrl])
 
   const loadWorkflows = useCallback(async () => {
@@ -489,7 +521,11 @@ function App() {
     setWfStartingId(workflowId)
     openWorkflow(workflowId)
     try {
-      const started = await startWorkflow(daemonUrl, workflowId)
+      const started = await startWorkflow(
+        daemonUrl,
+        workflowId,
+        wfStartExpert ? { expert_id: wfStartExpert } : undefined,
+      )
       setWorkflows((prev) =>
         prev.map((wf) =>
           wf.workflow_id === started.workflow.workflow_id ? started.workflow : wf,
@@ -715,6 +751,35 @@ function App() {
               <option value="manual">manual</option>
               <option value="auto">auto</option>
             </select>
+          </div>
+        </div>
+        <div className="row">
+          <div className="label">Master expert</div>
+          <div className="value">
+            <select
+              className="select"
+              value={wfStartExpert}
+              onChange={(e) => setWfStartExpert(e.target.value || 'bash')}
+            >
+              {(experts.length > 0
+                ? experts
+                : [
+                    {
+                      id: 'bash',
+                      label: 'bash',
+                      run_mode: 'oneshot',
+                      timeout_ms: 0,
+                    },
+                  ]
+              ).map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.label || e.id}
+                </option>
+              ))}
+            </select>
+            {expertsError && (
+              <div className="hint">Experts 加载失败：{expertsError}</div>
+            )}
           </div>
         </div>
         <div className="row">
@@ -989,7 +1054,21 @@ function App() {
                               }
                               disabled={nodeEditSaving}
                             >
-                              <option value="bash">bash</option>
+                              {(experts.length > 0
+                                ? experts
+                                : [
+                                    {
+                                      id: 'bash',
+                                      label: 'bash',
+                                      run_mode: 'oneshot',
+                                      timeout_ms: 0,
+                                    },
+                                  ]
+                              ).map((e) => (
+                                <option key={e.id} value={e.id}>
+                                  {e.label || e.id}
+                                </option>
+                              ))}
                             </select>
                           </div>
                           <div className="nodeEditorRow">

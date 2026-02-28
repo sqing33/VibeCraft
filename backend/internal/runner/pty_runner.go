@@ -24,6 +24,9 @@ type PTYRunner struct {
 // 失败场景：命令为空、子进程启动失败或 PTY 初始化失败时返回 error。
 // 副作用：启动子进程并创建 PTY 设备；ctx 取消时会触发默认 grace 的取消逻辑。
 func (r PTYRunner) StartOneshot(ctx context.Context, spec RunSpec) (ProcessHandle, error) {
+	if spec.SDK != nil {
+		return nil, errors.New("sdk spec is not supported by PTYRunner")
+	}
 	if strings.TrimSpace(spec.Command) == "" {
 		return nil, errors.New("command is required")
 	}

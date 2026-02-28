@@ -61,7 +61,10 @@ func main() {
 	}
 
 	hub := ws.NewHub()
-	execRunner := runner.PTYRunner{DefaultGrace: grace}
+	execRunner := runner.MultiRunner{
+		Process: runner.PTYRunner{DefaultGrace: grace},
+		SDK:     runner.NewSDKRunner(),
+	}
 	execMgr := execution.NewManager(execRunner, grace, hub)
 	experts := expert.NewRegistry(cfg)
 

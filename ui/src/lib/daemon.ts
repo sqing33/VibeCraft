@@ -100,6 +100,31 @@ export type Edge = {
   type: string
 }
 
+export type Expert = {
+  id: string
+  label: string
+  run_mode: string
+  provider?: string
+  model?: string
+  output_schema?: string
+  timeout_ms: number
+}
+
+/**
+ * 功能：拉取已配置 experts 列表（`GET /api/v1/experts`）。
+ * 参数/返回：接收 daemonUrl；返回 Expert[]（不含敏感字段）。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchExperts(daemonUrl: string): Promise<Expert[]> {
+  const res = await fetch(`${daemonUrl}/api/v1/experts`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as Expert[]
+}
+
 /**
  * 功能：启动一个 execution（默认 demo 命令）。
  * 参数/返回：daemonUrl 为必填；req 可选覆盖 command/args/cwd/env；返回 Execution。
@@ -219,9 +244,12 @@ export type StartWorkflowResponse = {
 export async function startWorkflow(
   daemonUrl: string,
   workflowId: string,
+  req?: { prompt?: string; expert_id?: string },
 ): Promise<StartWorkflowResponse> {
   const res = await fetch(`${daemonUrl}/api/v1/workflows/${workflowId}/start`, {
     method: 'POST',
+    headers: req ? { 'Content-Type': 'application/json' } : undefined,
+    body: req ? JSON.stringify(req) : undefined,
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')

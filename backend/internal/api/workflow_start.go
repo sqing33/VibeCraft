@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,7 +18,6 @@ import (
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/logx"
 	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/store"
 )
 
@@ -59,10 +60,14 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 			}
 		}
 
-		startExpertID := req.ExpertID
-		startPrompt := req.Prompt
-		if startExpertID != "" && startPrompt == "" && startExpertID != "bash" {
-			startPrompt = defaultMasterPromptTemplate(workflowID)
+		startExpertID := strings.TrimSpace(req.ExpertID)
+		if startExpertID == "" {
+			startExpertID = "master"
+		}
+
+		startPrompt := strings.TrimSpace(req.Prompt)
+		if startPrompt == "" && startExpertID != "bash" {
+			startPrompt = defaultMasterPromptTemplate(workflowID, deps.Experts.KnownIDs())
 		}
 
 		wf, node, err := deps.Store.StartWorkflowMaster(c.Request.Context(), workflowID, store.StartWorkflowMasterParams{
@@ -82,23 +87,18 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 			return
 		}
 
-		spec := masterStubSpec(wf, node)
+		resolved, err := deps.Experts.Resolve(node.ExpertID, node.Prompt, wf.WorkspacePath)
+		if err != nil {
+			_ = deps.Store.MarkNodeAndWorkflowFailed(context.Background(), wf.ID, node.ID, err.Error())
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		spec := resolved.Spec
 		execCtx := context.Background()
 		cancelExec := func() {}
-
-		// 若用户显式传入 prompt 或选择非 bash expert，则使用 experts 配置解析出真实执行规格；
-		// 否则沿用 stub 便于本地 MVP 验证。
-		if req.Prompt != "" || (req.ExpertID != "" && req.ExpertID != "bash") {
-			resolved, err := deps.Experts.Resolve(node.ExpertID, node.Prompt, wf.WorkspacePath)
-			if err != nil {
-				_ = deps.Store.MarkNodeAndWorkflowFailed(context.Background(), wf.ID, node.ID, err.Error())
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-			spec = resolved.Spec
-			if resolved.Timeout > 0 {
-				execCtx, cancelExec = context.WithTimeout(context.Background(), resolved.Timeout)
-			}
+		if resolved.Timeout > 0 {
+			execCtx, cancelExec = context.WithTimeout(context.Background(), resolved.Timeout)
 		}
 
 		var exec execution.Execution
@@ -269,70 +269,6 @@ func listWorkflowNodesHandler(deps Deps) gin.HandlerFunc {
 	}
 }
 
-func masterStubSpec(wf store.Workflow, node store.Node) runner.RunSpec {
-	cwd := wf.WorkspacePath
-
-	return runner.RunSpec{
-		Command: "bash",
-		Args: []string{
-			"-lc",
-			`printf '\033[36m[vibe-tree]\033[0m master node started\n'
-printf 'workflow_id=%s node_id=%s\n' "` + wf.ID + `" "` + node.ID + `"
-for i in {1..40}; do printf '\033[32m[%03d]\033[0m planning...\n' "$i"; sleep 0.02; done
-printf '\033[36m[vibe-tree]\033[0m master node finished\n'
-cat <<'JSON'
-{
-  "workflow_title": "",
-  "nodes": [
-    {
-      "id": "n1",
-      "title": "Step 1",
-      "type": "worker",
-      "expert_id": "bash",
-      "fallback_expert_id": "bash",
-      "complexity": "low",
-      "quality_tier": "fast",
-      "model": null,
-      "routing_reason": "bash 可直接执行 shell 命令，便于 MVP 验证链路",
-      "prompt": "echo '[n1] hello'; sleep 0.05; echo '[n1] done'"
-    },
-    {
-      "id": "n2",
-      "title": "Step 2",
-      "type": "worker",
-      "expert_id": "bash",
-      "fallback_expert_id": "bash",
-      "complexity": "low",
-      "quality_tier": "fast",
-      "model": null,
-      "routing_reason": "bash 可直接执行 shell 命令，便于 MVP 验证链路",
-      "prompt": "echo '[n2] hello'; sleep 0.05; echo '[n2] done'"
-    },
-    {
-      "id": "n3",
-      "title": "Step 3",
-      "type": "worker",
-      "expert_id": "bash",
-      "fallback_expert_id": "bash",
-      "complexity": "low",
-      "quality_tier": "fast",
-      "model": null,
-      "routing_reason": "bash 可直接执行 shell 命令，便于 MVP 验证链路",
-      "prompt": "echo '[n3] hello'; sleep 0.05; echo '[n3] done'"
-    }
-  ],
-  "edges": [
-    { "from": "n1", "to": "n2", "type": "success", "source_handle": null, "target_handle": null },
-    { "from": "n2", "to": "n3", "type": "success", "source_handle": null, "target_handle": null }
-  ]
-}
-JSON
-`,
-		},
-		Cwd: cwd,
-	}
-}
-
 func summarizeOutputTail(b []byte) string {
 	const max = 4000
 	if len(b) <= max {
@@ -341,7 +277,14 @@ func summarizeOutputTail(b []byte) string {
 	return string(b[len(b)-max:])
 }
 
-func defaultMasterPromptTemplate(workflowID string) string {
+func defaultMasterPromptTemplate(workflowID string, knownExperts map[string]struct{}) string {
+	expertIDs := make([]string, 0, len(knownExperts))
+	for id := range knownExperts {
+		expertIDs = append(expertIDs, id)
+	}
+	sort.Strings(expertIDs)
+	known := strings.Join(expertIDs, ", ")
+
 	return fmt.Sprintf(`You are the workflow master planner for vibe-tree.
 
 Output MUST be a single JSON object (no markdown, no extra text) that follows this shape:
@@ -353,6 +296,11 @@ Output MUST be a single JSON object (no markdown, no extra text) that follows th
       "title": "Step 1",
       "type": "worker",
       "expert_id": "bash",
+      "fallback_expert_id": "bash",
+      "complexity": "low",
+      "quality_tier": "fast",
+      "model": null,
+      "routing_reason": "",
       "prompt": "echo hello"
     },
     {
@@ -360,6 +308,11 @@ Output MUST be a single JSON object (no markdown, no extra text) that follows th
       "title": "Step 2",
       "type": "worker",
       "expert_id": "bash",
+      "fallback_expert_id": "bash",
+      "complexity": "low",
+      "quality_tier": "fast",
+      "model": null,
+      "routing_reason": "",
       "prompt": "echo world"
     }
   ],
@@ -372,7 +325,7 @@ Constraints:
 - nodes[].id must be unique.
 - edges[].from/to must reference existing nodes.
 - edge.type should be "success".
-- expert_id MUST be a configured expert_id (e.g. "bash").
+- expert_id MUST be one of configured expert_id values: %s
 
-workflow_id=%s`, workflowID)
+workflow_id=%s`, known, workflowID)
 }

@@ -26,6 +26,7 @@
 | `backend/cmd/vibe-tree-daemon/main.go` | daemon 进程入口，负责加载配置、启动 HTTP Server、处理优雅退出 |
 | `backend/internal/server/server.go` | Gin Engine 装配：恢复中间件、请求日志、dev CORS，并挂载 `internal/api` 路由；可选挂载 UI 静态资源（`ui/dist` 或 `VIBE_TREE_UI_DIST`） |
 | `backend/internal/api/api.go` | HTTP/WS handlers：health、workflow CRUD、execution start/log/cancel、WebSocket 升级入口 |
+| `backend/internal/api/experts.go` | Experts 列表 API：`GET /api/v1/experts`（仅安全字段，供 UI 下拉） |
 | `backend/internal/api/workflows.go` | Workflow HTTP handlers：create/list/get/patch，并广播 `workflow.updated` |
 | `backend/internal/api/workflow_start.go` | Workflow start/nodes handlers：创建 master node + execution，并提供 nodes 查询 |
 | `backend/internal/api/workflow_cancel.go` | Workflow cancel handler：取消 workflow（取消 running execution + 标记未开始节点 canceled） |
@@ -33,8 +34,11 @@
 | `backend/internal/config/config.go` | 配置读取逻辑，处理默认值、XDG 路径、环境变量覆盖 |
 | `backend/internal/expert/expert.go` | Expert 注册表：基于 config 解析 `expert_id` -> RunSpec（`{{prompt}}`/`${ENV}` 模板替换、timeout），并提供已知 expert 集合 |
 | `backend/internal/runner/pty_runner.go` | PTY runner：启动子进程、流式输出、Cancel（SIGTERM→grace→SIGKILL） |
+| `backend/internal/runner/sdk_runner.go` | SDK runner：OpenAI/Anthropic 官方 SDK 流式输出（替代 AI CLI/终端交互） |
+| `backend/internal/runner/multi_runner.go` | MultiRunner：在 PTY runner 与 SDK runner 之间按 spec 路由 |
 | `backend/internal/execution/manager.go` | Execution 管理：启动/取消、日志落盘、WS 推送 `execution.*`/`node.log` |
 | `backend/internal/dag/dag.go` | DAG 解析与校验：从 master 输出提取第一个 JSON 对象并做 MVP 约束校验（无环/引用存在/expert 校验） |
+| `backend/internal/dag/schema.go` | DAG JSON Schema（dag_v1）：用于 structured output（可选） |
 | `backend/internal/scheduler/scheduler.go` | Workflow 调度器：依赖 + 并发上限 + fail-fast（启动 queued worker nodes 并收敛终态） |
 | `backend/internal/ws/hub.go` | WebSocket hub：连接管理与广播（配合 log tail 断线补齐） |
 | `backend/internal/store/sqlite.go` | SQLite state DB 打开与 pragma 初始化（WAL/busy_timeout/foreign_keys） |
@@ -65,12 +69,14 @@
 |---|---|
 | daemon 启动入口 | `backend/cmd/vibe-tree-daemon/main.go` |
 | 健康检查 API | `backend/internal/api/api.go` |
+| experts 列表 API | `backend/internal/api/experts.go`, `backend/internal/expert/expert.go`, `ui/src/lib/daemon.ts`, `ui/src/App.tsx` |
 | dev CORS 配置 | `backend/internal/server/server.go` |
 | 请求日志格式 | `backend/internal/server/server.go` |
 | daemon 地址默认值 | `backend/internal/config/config.go`, `ui/src/lib/daemon.ts` |
 | XDG 配置路径 | `backend/internal/config/config.go` |
 | XDG 日志路径 | `backend/internal/paths/paths.go` |
 | Expert 配置/模板解析 | `backend/internal/config/config.go`, `backend/internal/expert/expert.go` |
+| SDK runner | `backend/internal/runner/sdk_runner.go`, `backend/internal/runner/multi_runner.go`, `backend/cmd/vibe-tree-daemon/main.go` |
 | execution timeout 语义 | `backend/internal/execution/manager.go`, `backend/internal/scheduler/scheduler.go` |
 | SQLite state.db 初始化 | `backend/cmd/vibe-tree-daemon/main.go`, `backend/internal/store/sqlite.go`, `backend/internal/store/migrate.go` |
 | Workflow CRUD API | `backend/internal/api/workflows.go`, `backend/internal/store/workflows.go` |
@@ -82,6 +88,7 @@
 | execution log tail API | `backend/internal/api/api.go`, `backend/internal/execution/logtail.go` |
 | WebSocket 推送 | `backend/internal/api/api.go`, `backend/internal/ws/hub.go`, `backend/internal/ws/envelope.go` |
 | PTY runner | `backend/internal/runner/pty_runner.go` |
+| DAG structured output schema | `backend/internal/dag/schema.go`, `backend/internal/runner/sdk_runner.go` |
 | execution cancel API | `backend/internal/api/api.go`, `backend/internal/execution/manager.go` |
 | DAG JSON 提取/校验 | `backend/internal/dag/dag.go`, `backend/internal/api/workflow_start.go` |
 | DAG 落库（nodes/edges） | `backend/internal/store/dag.go`, `backend/internal/api/workflow_start.go` |

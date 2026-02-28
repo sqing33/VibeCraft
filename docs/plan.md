@@ -228,9 +228,10 @@
 - [x] 定义并实现 `config.json` 读取（参考 `docs/规划.md` 5.1）：
   server.host/port
   execution.max_concurrency/kill_grace_ms
-  experts[]（id/label/run_mode/command/args/env/timeout_ms）
+  experts[]（id/label/run_mode/command/args/env/timeout_ms + sdk(provider/model/...)）
 - [x] env 模板替换：支持 `${OPENAI_API_KEY}` 这种从环境变量注入
 - [x] prompt 模板替换：支持 `{{prompt}}` 传参（至少 args 能用）
+- [x] 新增 Experts 列表 API：`GET /api/v1/experts`（仅安全字段，供 UI 下拉）
 
 验收：
 - [x] 未配置时使用内置默认（至少 bash）
@@ -243,15 +244,15 @@
 验收：
 - [x] worker 节点能执行真实命令（例如 `ls`, `rg`, `go test`）并把输出实时显示
 
-### 4.3 codex（或你常用 AI CLI）expert
-- [x] 新增 `codex` expert（oneshot）：把 prompt 传给 CLI，收集 stdout/stderr
+### 4.3 Codex / ClaudeCode（SDK）expert
+- [x] 新增 `run_mode=sdk`：用 OpenAI/Anthropic 官方 SDK 直接驱动（不再依赖 CLI/终端交互）
+- [x] 流式输出：token delta → execution log 文件 → WS `node.log` → UI xterm 实时渲染
 - [x] master 节点专用 prompt 模板：强制输出 DAG JSON（严格 JSON）
-- [x] 失败处理：
-  超时 -> execution.timeout
-  非零退出码 -> execution.failed（保存 stderr 摘要到 result_summary）
+- [x] （可选）Structured output：`sdk.output_schema=dag_v1`（更强约束 master 的 DAG JSON 输出）
+- [x] UI：Workflow 创建区选择 master expert；manual node editor 下拉选择 expert（通过 `/api/v1/experts`）
 
 验收：
-- [x] 用 codex 生成 DAG；daemon 校验通过后自动落库并进入 manual pending
+- [x] 用 Codex/ClaudeCode 生成 DAG；daemon 校验通过后自动落库并进入 manual pending
 
 ### 4.4 Retry/Cancel 完整闭环（按 node 粒度）
 - [x] `POST /api/v1/nodes/{id}/retry`：创建新的 execution（保留历史）

@@ -11,6 +11,18 @@ type RunSpec struct {
 	Args    []string
 	Env     map[string]string
 	Cwd     string
+	SDK     *SDKSpec
+}
+
+type SDKSpec struct {
+	Provider        string
+	Model           string
+	Prompt          string
+	Instructions    string
+	BaseURL         string
+	MaxOutputTokens int
+	Temperature     *float64
+	OutputSchema    string
 }
 
 type ExitResult struct {
