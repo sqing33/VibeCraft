@@ -62,6 +62,7 @@
 | `ui/src/app/components/LLMSettingsTab.tsx` | 系统设置「模型」Tab：编辑 Sources（base_url+key）与 Models（model+source+SDK），保存后刷新 experts                                    |
 | `ui/src/lib/daemon.ts`                     | daemon URL/WS URL 解析与 health/workflow/execution API 封装                                                                           |
 | `scripts/dev.sh`                           | 本地开发一键启动脚本（并行拉起 backend 与 UI）                                                                                        |
+| `backend/.air.toml`                        | 后端热重载配置（Air）：本地开发时监听 Go 源码变更并自动重建/重启 daemon                                                                |
 | `scripts/web.sh`                           | Web 单进程启动脚本（构建 UI 并由 daemon 静态托管 `ui/dist`）                                                                          |
 | `desktop/main.go`                          | Wails 桌面入口：嵌入 `frontend/src`，注册 Menu，并 Bind `App` 方法供前端调用                                                          |
 | `desktop/app.go`                           | Desktop 业务逻辑：解析 daemon host/port，确保 daemon 可用（必要时子进程拉起），并提供“打开数据目录”等动作                             |

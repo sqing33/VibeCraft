@@ -10,6 +10,13 @@
 ./scripts/dev.sh
 ```
 
+后端默认支持热重载：脚本会优先使用 Air 启动 daemon；如果本机未安装 `air`，会自动执行 `go install github.com/air-verse/air@latest` 下载并安装（需要本机已安装 Go 且可联网）。
+
+如需显式禁用 Air（排障/最小依赖）：
+```bash
+VIBE_TREE_NO_AIR=1 ./scripts/dev.sh
+```
+
 默认 daemon：`http://127.0.0.1:7777`  
 默认 UI dev server：Vite 输出的本地地址（终端会打印）。
 
