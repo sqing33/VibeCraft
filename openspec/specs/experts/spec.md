@@ -3,7 +3,6 @@
 ## Purpose
 
 Expert 是可执行的专家配置，定义了 provider、model、command、环境变量、超时策略等。Expert 注册表负责加载配置、解析模板、路由到正确的 runner。
-
 ## Requirements
 
 ### Configuration Loading
@@ -68,3 +67,13 @@ The system MUST provide `KnownExpertIDs()` returning the set of registered exper
 
 - **WHEN** DAG validation checks a node's expert_id
 - **THEN** it verifies the ID exists in the set returned by `KnownExpertIDs()`
+
+### Requirement: Expert registry supports runtime reload
+
+The system MUST support reloading the in-memory expert registry at runtime after configuration updates (e.g. after saving LLM settings), without requiring a daemon restart.
+
+#### Scenario: Reload updates listExperts API
+
+- **WHEN** the daemon accepts an LLM settings update that changes model profiles
+- **THEN** subsequent `GET /api/v1/experts` responses reflect the updated expert set
+

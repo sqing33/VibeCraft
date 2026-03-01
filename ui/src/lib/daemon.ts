@@ -116,6 +116,119 @@ export async function fetchExperts(daemonUrl: string): Promise<PublicExpert[]> {
   return (await res.json()) as PublicExpert[]
 }
 
+export type LLMSettings = {
+  sources: LLMSource[]
+  models: LLMModelProfile[]
+}
+
+export type LLMSource = {
+  id: string
+  label: string
+  provider: string
+  base_url?: string
+  has_key: boolean
+  masked_key?: string
+}
+
+export type LLMModelProfile = {
+  id: string
+  label: string
+  provider: string
+  model: string
+  source_id: string
+}
+
+export type PutLLMSettingsRequest = {
+  sources: Array<{
+    id: string
+    label: string
+    provider: string
+    base_url?: string
+    api_key?: string
+  }>
+  models: Array<{
+    id: string
+    label: string
+    provider: string
+    model: string
+    source_id: string
+  }>
+}
+
+/**
+ * 功能：读取 LLM settings（`GET /api/v1/settings/llm`），用于 UI 设置页编辑 Sources/Models。
+ * 参数/返回：接收 daemonUrl；返回 LLMSettings。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchLLMSettings(daemonUrl: string): Promise<LLMSettings> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/llm`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as LLMSettings
+}
+
+/**
+ * 功能：保存 LLM settings（`PUT /api/v1/settings/llm`）。
+ * 参数/返回：接收 daemonUrl 与整包 settings payload；返回保存后的 LLMSettings（masked）。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求并触发后端写盘与 expert registry 热更新。
+ */
+export async function putLLMSettings(
+  daemonUrl: string,
+  req: PutLLMSettingsRequest,
+): Promise<LLMSettings> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/llm`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as LLMSettings
+}
+
+export type LLMTestRequest = {
+  provider: string
+  model: string
+  base_url?: string
+  source_id?: string
+  api_key?: string
+  prompt?: string
+}
+
+export type LLMTestResponse = {
+  ok: boolean
+  output: string
+  latency_ms: number
+}
+
+/**
+ * 功能：对指定模型配置做一次短 SDK 测试（`POST /api/v1/settings/llm/test`）。
+ * 参数/返回：接收 daemonUrl 与测试参数；返回 LLMTestResponse。
+ * 失败场景：HTTP 非 2xx 或后端执行失败时抛出 Error。
+ * 副作用：发起 HTTP 请求，并触发一次真实 SDK 调用（可能计费）。
+ */
+export async function postLLMTest(
+  daemonUrl: string,
+  req: LLMTestRequest,
+): Promise<LLMTestResponse> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/llm/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as LLMTestResponse
+}
+
 export type Execution = {
   execution_id: string
   status: string

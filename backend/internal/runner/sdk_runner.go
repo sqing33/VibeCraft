@@ -215,9 +215,9 @@ func (r SDKRunner) streamOpenAI(ctx context.Context, sdk SDKSpec, env map[string
 		opts = append(opts, openai_option.WithProject(v))
 	}
 	if baseURL := strings.TrimSpace(sdk.BaseURL); baseURL != "" {
-		opts = append(opts, openai_option.WithBaseURL(baseURL))
+		opts = append(opts, openai_option.WithBaseURL(NormalizeBaseURL("openai", baseURL)))
 	} else if baseURL := strings.TrimSpace(env["OPENAI_BASE_URL"]); baseURL != "" {
-		opts = append(opts, openai_option.WithBaseURL(baseURL))
+		opts = append(opts, openai_option.WithBaseURL(NormalizeBaseURL("openai", baseURL)))
 	}
 
 	stream := r.openaiClient.Responses.NewStreaming(ctx, body, opts...)
@@ -289,9 +289,9 @@ func (r SDKRunner) streamAnthropic(ctx context.Context, sdk SDKSpec, env map[str
 		opts = append(opts, anthropic_option.WithAPIKey(v))
 	}
 	if baseURL := strings.TrimSpace(sdk.BaseURL); baseURL != "" {
-		opts = append(opts, anthropic_option.WithBaseURL(baseURL))
+		opts = append(opts, anthropic_option.WithBaseURL(NormalizeBaseURL("anthropic", baseURL)))
 	} else if baseURL := strings.TrimSpace(env["ANTHROPIC_BASE_URL"]); baseURL != "" {
-		opts = append(opts, anthropic_option.WithBaseURL(baseURL))
+		opts = append(opts, anthropic_option.WithBaseURL(NormalizeBaseURL("anthropic", baseURL)))
 	}
 
 	stream := r.anthropicClient.Messages.NewStreaming(ctx, body, opts...)

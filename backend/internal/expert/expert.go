@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"vibe-tree/backend/internal/config"
@@ -18,6 +19,7 @@ type Resolved struct {
 }
 
 type Registry struct {
+	mu      sync.RWMutex
 	experts map[string]config.ExpertConfig
 }
 
@@ -44,11 +46,33 @@ func NewRegistry(cfg config.Config) *Registry {
 	return &Registry{experts: m}
 }
 
+// Reload 功能：使用新的运行配置刷新 registry（原子替换 experts map）。
+// 参数/返回：cfg 为最新 Config；无返回值。
+// 失败场景：无（非法条目在 Resolve 时返回错误）。
+// 副作用：更新内存中的 experts 集合。
+func (r *Registry) Reload(cfg config.Config) {
+	if r == nil {
+		return
+	}
+	m := make(map[string]config.ExpertConfig, len(cfg.Experts))
+	for _, e := range cfg.Experts {
+		if strings.TrimSpace(e.ID) == "" {
+			continue
+		}
+		m[e.ID] = e
+	}
+	r.mu.Lock()
+	r.experts = m
+	r.mu.Unlock()
+}
+
 // KnownIDs 功能：返回已注册的 expert_id 集合（用于 DAG 校验等）。
 // 参数/返回：无入参；返回 set（map[string]struct{}）。
 // 失败场景：无。
 // 副作用：无。
 func (r *Registry) KnownIDs() map[string]struct{} {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := make(map[string]struct{}, len(r.experts))
 	for id := range r.experts {
 		out[id] = struct{}{}
@@ -64,6 +88,8 @@ func (r *Registry) ListPublic() []PublicExpert {
 	if r == nil {
 		return nil
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := make([]PublicExpert, 0, len(r.experts))
 	for id, e := range r.experts {
 		label := strings.TrimSpace(e.Label)
@@ -98,7 +124,9 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 		return Resolved{}, fmt.Errorf("expert_id is required")
 	}
 
+	r.mu.RLock()
 	e, ok := r.experts[expertID]
+	r.mu.RUnlock()
 	if !ok {
 		return Resolved{}, fmt.Errorf("unknown expert_id %q", expertID)
 	}

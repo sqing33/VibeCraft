@@ -13,6 +13,7 @@ type Config struct {
 	Server    ServerConfig    `json:"server"`
 	Execution ExecutionConfig `json:"execution"`
 	Experts   []ExpertConfig  `json:"experts"`
+	LLM       *LLMSettings    `json:"llm,omitempty"`
 }
 
 type ServerConfig struct {
@@ -66,6 +67,35 @@ type ExpertConfig struct {
 	RunMode string   `json:"run_mode,omitempty"`
 	Command string   `json:"command,omitempty"`
 	Args    []string `json:"args,omitempty"`
+}
+
+type LLMSettings struct {
+	Sources []LLMSourceConfig `json:"sources"`
+	Models  []LLMModelConfig  `json:"models"`
+}
+
+type LLMSourceConfig struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Provider string `json:"provider"`
+
+	BaseURL string `json:"base_url,omitempty"`
+	APIKey  string `json:"api_key,omitempty"`
+}
+
+type LLMModelConfig struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Provider string `json:"provider"`
+
+	Model    string `json:"model"`
+	SourceID string `json:"source_id"`
+
+	SystemPrompt    string   `json:"system_prompt,omitempty"`
+	MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
+	Temperature     *float64 `json:"temperature,omitempty"`
+	OutputSchema    string   `json:"output_schema,omitempty"`
+	TimeoutMs       int      `json:"timeout_ms,omitempty"`
 }
 
 // Default 功能：返回一份可直接运行的默认配置（localhost-only）。
@@ -184,6 +214,32 @@ func Load() (Config, string, error) {
 	}
 
 	applyEnvOverrides(&cfg)
+	return cfg, path, nil
+}
+
+// LoadPersisted 功能：读取 config.json（不应用环境变量覆盖），用于“写盘前读现状”场景。
+// 参数/返回：无入参；返回 Config、配置文件路径与错误信息。
+// 失败场景：文件读取失败、JSON 解析失败或路径解析失败时返回 error。
+// 副作用：读取磁盘文件与 home 目录信息（间接）。
+func LoadPersisted() (Config, string, error) {
+	path, err := Path()
+	if err != nil {
+		return Config{}, "", err
+	}
+
+	cfg := Default()
+
+	if b, err := os.ReadFile(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return cfg, path, nil
+		}
+		return Config{}, "", fmt.Errorf("read config %s: %w", path, err)
+	} else if len(b) > 0 {
+		if err := json.Unmarshal(b, &cfg); err != nil {
+			return Config{}, "", fmt.Errorf("parse config %s: %w", path, err)
+		}
+	}
+
 	return cfg, path, nil
 }
 

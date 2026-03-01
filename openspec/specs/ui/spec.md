@@ -162,3 +162,49 @@ When no persisted theme value exists, the UI MUST initialize with light theme.
 
 - **WHEN** local storage does not contain a saved theme key
 - **THEN** the UI loads in light theme
+
+### Requirement: Settings uses tab navigation and includes LLM configuration
+
+The UI MUST present the existing System Settings as a tabbed view.
+The UI MUST provide at least two tabs:
+
+- `连接与诊断`: contains daemon URL switching and diagnostics (version/paths/experts).
+- `模型`: contains LLM Sources / Model Profiles configuration.
+
+#### Scenario: User switches settings tabs
+
+- **WHEN** user opens System Settings
+- **THEN** the UI shows multiple tabs including `连接与诊断` and `模型`
+- **AND** switching tabs updates the visible settings content
+
+### Requirement: UI can edit and save LLM settings
+
+In the `模型` tab, the UI MUST provide two sections:
+
+- **Sources**: manage API sources (base URL + API key) without binding a model.
+- **Models**: manage model profiles (model name, selected source, SDK provider: `codex(openai)` or `claudecode(anthropic)`).
+
+The UI MUST save changes by calling `PUT /api/v1/settings/llm`.
+After saving succeeds, the UI MUST refresh experts by calling `GET /api/v1/experts` so that workflow/node dropdowns can use the latest models.
+
+#### Scenario: User adds a source and model and saves
+
+- **WHEN** user creates a new Source and a new Model Profile referencing it
+- **AND** user clicks Save
+- **THEN** the UI calls `PUT /api/v1/settings/llm`
+- **AND** the UI shows a success toast
+- **AND** the UI refreshes the experts list via `GET /api/v1/experts`
+
+### Requirement: Model profiles can be tested from the settings UI
+
+In the `模型` settings tab, each model profile card MUST provide a `测试` button located to the left of the delete button.
+
+When clicked, the UI MUST call `POST /api/v1/settings/llm/test` using the model card's current draft provider/model/base_url/api_key values.
+
+The UI MUST show success or failure feedback to the user (e.g. toast).
+
+#### Scenario: User tests a model profile
+
+- **WHEN** user clicks `测试` on a model card with complete configuration
+- **THEN** the UI calls `POST /api/v1/settings/llm/test`
+- **AND** the UI displays the result to the user
