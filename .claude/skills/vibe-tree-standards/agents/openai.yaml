@@ -1,0 +1,3 @@
+interface:
+  display_name: "Vibe Tree Standards"
+  short_description: "规范 vibe-tree 的日志、注释、提交命名，并先读项目结构索引"

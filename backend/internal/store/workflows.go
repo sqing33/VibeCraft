@@ -30,15 +30,16 @@ const (
 )
 
 type Workflow struct {
-	ID            string  `json:"workflow_id"`
-	Title         string  `json:"title"`
-	WorkspacePath string  `json:"workspace_path"`
-	Mode          string  `json:"mode"`
-	Status        string  `json:"status"`
-	CreatedAt     int64   `json:"created_at"`
-	UpdatedAt     int64   `json:"updated_at"`
-	ErrorMessage  *string `json:"error_message,omitempty"`
-	Summary       *string `json:"summary,omitempty"`
+	ID                string  `json:"workflow_id"`
+	Title             string  `json:"title"`
+	WorkspacePath     string  `json:"workspace_path"`
+	Mode              string  `json:"mode"`
+	Status            string  `json:"status"`
+	CreatedAt         int64   `json:"created_at"`
+	UpdatedAt         int64   `json:"updated_at"`
+	RunningNodesCount int64   `json:"running_nodes_count"`
+	ErrorMessage      *string `json:"error_message,omitempty"`
+	Summary           *string `json:"summary,omitempty"`
 }
 
 type CreateWorkflowParams struct {
@@ -126,9 +127,15 @@ func (s *Store) ListWorkflows(ctx context.Context, limit int) ([]Workflow, error
 
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT id, title, workspace_path, mode, status, created_at, updated_at, error_message, summary
-		 FROM workflows
-		 ORDER BY updated_at DESC
+		`SELECT w.id, w.title, w.workspace_path, w.mode, w.status, w.created_at, w.updated_at, COALESCE(rn.running_nodes_count, 0) AS running_nodes_count, w.error_message, w.summary
+		 FROM workflows w
+		 LEFT JOIN (
+		   SELECT workflow_id, COUNT(1) AS running_nodes_count
+		   FROM nodes
+		   WHERE status = 'running'
+		   GROUP BY workflow_id
+		 ) rn ON rn.workflow_id = w.id
+		 ORDER BY w.updated_at DESC
 		 LIMIT ?;`,
 		limit,
 	)
@@ -148,6 +155,7 @@ func (s *Store) ListWorkflows(ctx context.Context, limit int) ([]Workflow, error
 			&wf.Status,
 			&wf.CreatedAt,
 			&wf.UpdatedAt,
+			&wf.RunningNodesCount,
 			&wf.ErrorMessage,
 			&wf.Summary,
 		); err != nil {
@@ -173,9 +181,15 @@ func (s *Store) GetWorkflow(ctx context.Context, workflowID string) (Workflow, e
 	var wf Workflow
 	err := s.db.QueryRowContext(
 		ctx,
-		`SELECT id, title, workspace_path, mode, status, created_at, updated_at, error_message, summary
-		 FROM workflows
-		 WHERE id = ?
+		`SELECT w.id, w.title, w.workspace_path, w.mode, w.status, w.created_at, w.updated_at, COALESCE(rn.running_nodes_count, 0) AS running_nodes_count, w.error_message, w.summary
+		 FROM workflows w
+		 LEFT JOIN (
+		   SELECT workflow_id, COUNT(1) AS running_nodes_count
+		   FROM nodes
+		   WHERE status = 'running'
+		   GROUP BY workflow_id
+		 ) rn ON rn.workflow_id = w.id
+		 WHERE w.id = ?
 		 LIMIT 1;`,
 		workflowID,
 	).Scan(
@@ -186,6 +200,7 @@ func (s *Store) GetWorkflow(ctx context.Context, workflowID string) (Workflow, e
 		&wf.Status,
 		&wf.CreatedAt,
 		&wf.UpdatedAt,
+		&wf.RunningNodesCount,
 		&wf.ErrorMessage,
 		&wf.Summary,
 	)
@@ -355,9 +370,15 @@ func getWorkflowTx(ctx context.Context, tx *sql.Tx, workflowID string) (Workflow
 	var wf Workflow
 	err := tx.QueryRowContext(
 		ctx,
-		`SELECT id, title, workspace_path, mode, status, created_at, updated_at, error_message, summary
-		 FROM workflows
-		 WHERE id = ?
+		`SELECT w.id, w.title, w.workspace_path, w.mode, w.status, w.created_at, w.updated_at, COALESCE(rn.running_nodes_count, 0) AS running_nodes_count, w.error_message, w.summary
+		 FROM workflows w
+		 LEFT JOIN (
+		   SELECT workflow_id, COUNT(1) AS running_nodes_count
+		   FROM nodes
+		   WHERE status = 'running'
+		   GROUP BY workflow_id
+		 ) rn ON rn.workflow_id = w.id
+		 WHERE w.id = ?
 		 LIMIT 1;`,
 		workflowID,
 	).Scan(
@@ -368,6 +389,7 @@ func getWorkflowTx(ctx context.Context, tx *sql.Tx, workflowID string) (Workflow
 		&wf.Status,
 		&wf.CreatedAt,
 		&wf.UpdatedAt,
+		&wf.RunningNodesCount,
 		&wf.ErrorMessage,
 		&wf.Summary,
 	)

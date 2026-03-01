@@ -7,10 +7,29 @@ import {
   useImperativeHandle,
   useRef,
 } from 'react'
+import { cn } from '@/lib/utils'
+import { type ThemeMode, useThemeStore } from '@/stores/themeStore'
 
 export type TerminalPaneHandle = {
   write: (data: string) => void
   reset: (data?: string) => void
+}
+
+function terminalTheme(mode: ThemeMode) {
+  if (mode === 'dark') {
+    return {
+      background: '#0b0f14',
+      foreground: '#d8e1ea',
+      cursor: '#d8e1ea',
+      selectionBackground: '#243547',
+    }
+  }
+  return {
+    background: '#f5f7fb',
+    foreground: '#1f2937',
+    cursor: '#111827',
+    selectionBackground: '#bfdbfe',
+  }
 }
 
 /**
@@ -23,6 +42,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle>(function TerminalPane
   _props,
   ref,
 ) {
+  const theme = useThemeStore((s) => s.theme)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -54,7 +74,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle>(function TerminalPane
       fontSize: 12,
       fontFamily:
         "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-      theme: { background: '#111316' },
+      theme: terminalTheme(theme),
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -81,5 +101,19 @@ export const TerminalPane = forwardRef<TerminalPaneHandle>(function TerminalPane
     }
   }, [])
 
-  return <div className="terminal" ref={containerRef} />
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    term.options.theme = terminalTheme(theme)
+  }, [theme])
+
+  return (
+    <div
+      className={cn(
+        'h-[420px] overflow-hidden rounded-xl border',
+        theme === 'dark' ? 'bg-[#0b0f14]' : 'bg-[#f5f7fb]',
+      )}
+      ref={containerRef}
+    />
+  )
 })

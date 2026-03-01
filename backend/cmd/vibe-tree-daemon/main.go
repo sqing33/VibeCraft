@@ -11,6 +11,7 @@ import (
 
 	"vibe-tree/backend/internal/api"
 	"vibe-tree/backend/internal/config"
+	"vibe-tree/backend/internal/dotenv"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/expert"
 	"vibe-tree/backend/internal/logx"
@@ -23,6 +24,16 @@ import (
 )
 
 func main() {
+	if res, err := dotenv.Load(); err != nil {
+		logx.Warn("daemon", "dotenv", "加载 .env 失败（已继续启动）", "path", res.Path, "reason", res.FailureReason, "err", err)
+	} else if res.Attempted && res.Loaded {
+		logx.Info("daemon", "dotenv", "加载 .env 成功", "path", res.Path, "keys", res.Keys)
+	} else if res.Attempted && res.FailureReason == "not_found" {
+		logx.Info("daemon", "dotenv", "未找到 .env，已跳过", "path", res.Path)
+	} else if res.SkippedReason == "disabled" {
+		logx.Info("daemon", "dotenv", "dotenv 已禁用（VIBE_TREE_DOTENV=0）")
+	}
+
 	cfg, cfgPath, err := config.Load()
 	if err != nil {
 		logx.Error("daemon", "load-config", "加载配置失败", "err", err)

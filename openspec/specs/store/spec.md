@@ -1,0 +1,73 @@
+# 存储层
+
+## Purpose
+
+SQLite + 文件的混合存储策略。SQLite 存储结构化元数据和审计事件，文件系统存储高频日志流。
+
+## Requirements
+
+### SQLite Configuration
+
+The system MUST enable WAL mode (Write-Ahead Logging). The system MUST configure `_busy_timeout=5000` (milliseconds). The system MUST enable `_foreign_keys=on`. The system MUST enforce single connection pool: `SetMaxOpenConns(1)` and `SetMaxIdleConns(1)`. The system MUST prohibit any external I/O (network/PTY) within transactions to keep write lock duration minimal.
+
+#### Scenario: Database initialization
+
+- **WHEN** daemon opens state.db for the first time
+- **THEN** WAL mode is enabled
+- **AND** busy_timeout is set to 5000ms
+- **AND** foreign keys are enabled
+- **AND** connection pool is limited to 1
+
+#### Scenario: No lock contention under concurrent writes
+
+- **WHEN** multiple goroutines simultaneously update node statuses
+- **THEN** all writes succeed without "database is locked" errors
+- **AND** busy_timeout handles contention transparently
+
+### Database Schema
+
+The system MUST maintain 5 tables: `workflows` (id, title, workspace_path, mode, status, created_at, updated_at, error_message, summary), `nodes` (id, workflow_id, node_type, expert_id, title, prompt, status, created_at, updated_at, last_execution_id, result_summary, result_json, error_message), `edges` (id, workflow_id, from_node_id, to_node_id, source_handle, target_handle, type), `executions` (id, node_id, attempt, pid, exit_code, status, log_path, started_at, ended_at, error_message), `events` (id, workflow_id, entity_type, entity_id, type, ts, payload_json). The system MUST create index `idx_events_workflow_ts ON events(workflow_id, ts)`.
+
+#### Scenario: Tables and indexes exist after init
+
+- **WHEN** migration runs on a fresh database
+- **THEN** all 5 tables are created with correct columns
+- **AND** the events index is created
+
+### Schema Migration
+
+The system MUST use `PRAGMA user_version` to manage schema versions. Each schema change MUST increment user_version.
+
+#### Scenario: Schema upgrade on daemon restart
+
+- **WHEN** daemon starts with an older user_version
+- **THEN** pending migrations are applied in order
+- **AND** user_version is updated to the latest version
+
+### Audit Events
+
+The system MUST use the events table as append-only audit log. The system MUST record event types: `workflow.updated`, `dag.generated`, `node.log`, `prompt.updated`, `node.updated`, `status.changed`. The system MUST NOT store high-frequency log chunks in the events table.
+
+#### Scenario: Prompt update audit
+
+- **WHEN** user modifies a node's prompt via PATCH API
+- **THEN** an event with type `prompt.updated` is written
+- **AND** the payload contains old and new prompt values
+
+### File Storage Layout
+
+The system MUST use data directory `~/.local/share/vibe-tree/`. The database file MUST be at `~/.local/share/vibe-tree/state.db`. Log files MUST be stored under `~/.local/share/vibe-tree/logs/`. Each execution MUST have its own log file: `{execution_id}.log`.
+
+#### Scenario: Execution log file creation
+
+- **WHEN** a new execution starts
+- **THEN** a log file is created at `~/.local/share/vibe-tree/logs/{execution_id}.log`
+
+### ID Generation
+
+The system MUST use prefixed IDs: `wf_` for workflows, `nd_` for nodes, `ex_` for executions. IDs MUST use short random strings (MVP).
+
+#### Scenario: Generate workflow ID
+
+- **WHEN** a new workflow is created
+- **THEN** its ID starts with `wf_` followed by a random string

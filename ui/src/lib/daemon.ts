@@ -136,6 +136,7 @@ export type Workflow = {
   status: string
   created_at: number
   updated_at: number
+  running_nodes_count?: number
   error_message?: string
   summary?: string
 }
@@ -249,6 +250,24 @@ export async function fetchWorkflows(daemonUrl: string): Promise<Workflow[]> {
 }
 
 /**
+ * 功能：读取 workflow 详情（`GET /api/v1/workflows/{id}`）。
+ * 参数/返回：接收 daemonUrl 与 workflowId；返回 Workflow。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchWorkflow(
+  daemonUrl: string,
+  workflowId: string,
+): Promise<Workflow> {
+  const res = await fetch(`${daemonUrl}/api/v1/workflows/${workflowId}`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as Workflow
+}
+
+/**
  * 功能：创建 workflow（`POST /api/v1/workflows`）。
  * 参数/返回：接收 daemonUrl 与创建参数；返回创建后的 Workflow。
  * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
@@ -285,9 +304,12 @@ export type StartWorkflowResponse = {
 export async function startWorkflow(
   daemonUrl: string,
   workflowId: string,
+  req?: { prompt?: string; expert_id?: string },
 ): Promise<StartWorkflowResponse> {
   const res = await fetch(`${daemonUrl}/api/v1/workflows/${workflowId}/start`, {
     method: 'POST',
+    headers: req ? { 'Content-Type': 'application/json' } : undefined,
+    body: req ? JSON.stringify(req) : undefined,
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')

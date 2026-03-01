@@ -12,6 +12,7 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import type { Edge, Node } from '../lib/daemon'
+import { cn } from '@/lib/utils'
 
 type VibeNodeData = {
   title: string
@@ -23,40 +24,68 @@ type VibeNodeData = {
 const NODE_WIDTH = 190
 const NODE_HEIGHT = 58
 
+function formatNodeStatus(status: string): string {
+  if (status === 'running') return '进行中'
+  if (status === 'succeeded') return '成功'
+  if (status === 'failed') return '失败'
+  if (status === 'timeout') return '超时'
+  if (status === 'canceled') return '已取消'
+  if (status === 'pending_approval') return '待审批'
+  if (status === 'queued') return '排队中'
+  if (status === 'skipped') return '已跳过'
+  if (status === 'draft') return '草稿'
+  return status
+}
+
+function formatNodeType(nodeType: string): string {
+  if (nodeType === 'master') return '主节点'
+  if (nodeType === 'worker') return '工作节点'
+  return nodeType
+}
+
 function statusClass(status: string): string {
+  const base =
+    'flex h-[58px] w-[190px] flex-col justify-between gap-1 rounded-xl border px-3 py-2 text-xs shadow-sm'
   switch (status) {
     case 'running':
-      return 'vibeNode running'
+      return cn(base, 'border-amber-400/50 bg-amber-500/10')
     case 'succeeded':
-      return 'vibeNode succeeded'
+      return cn(base, 'border-emerald-400/50 bg-emerald-500/10')
     case 'failed':
-      return 'vibeNode failed'
+      return cn(base, 'border-red-400/50 bg-red-500/10 animate-pulse')
     case 'timeout':
-      return 'vibeNode timeout'
+      return cn(base, 'border-fuchsia-400/50 bg-fuchsia-500/10')
     case 'canceled':
-      return 'vibeNode canceled'
+      return cn(base, 'border-border/60 bg-muted/20 opacity-80')
     case 'pending_approval':
-      return 'vibeNode pending'
+      return cn(base, 'border-border/60 bg-muted/10')
     case 'queued':
-      return 'vibeNode queued'
+      return cn(base, 'border-sky-400/50 bg-sky-500/10')
     case 'skipped':
-      return 'vibeNode skipped'
+      return cn(base, 'border-border/40 bg-muted/10 opacity-70')
     default:
-      return 'vibeNode'
+      return cn(base, 'border-border/60 bg-card')
   }
 }
 
 const VibeNode = memo(function VibeNode(props: NodeProps<VibeNodeData>) {
   const { data, selected } = props
   return (
-    <div className={selected ? `${statusClass(data.status)} selected` : statusClass(data.status)}>
-      <div className="vibeNodeTop">
-        <span className="vibeNodeTitle">{data.title || '(untitled)'}</span>
-        <span className="vibeNodeStatus">{data.status}</span>
+    <div
+      className={cn(
+        statusClass(data.status),
+        selected ? 'ring-2 ring-ring ring-offset-2 ring-offset-background' : null,
+      )}
+    >
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="truncate font-semibold">{data.title || '（未命名）'}</span>
+        <span className="shrink-0 text-[10px] text-muted-foreground">
+          {formatNodeStatus(data.status)}
+        </span>
       </div>
-      <div className="vibeNodeMeta">
-        <span className="vibeNodeType">{data.node_type}</span>
-        <span className="vibeNodeExpert">{data.expert_id}</span>
+      <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+        <span className="truncate">{formatNodeType(data.node_type)}</span>
+        <span className="truncate">{data.expert_id}</span>
       </div>
     </div>
   )
@@ -147,7 +176,7 @@ function DAGViewInner(props: DAGViewInnerProps) {
   }, [fitView, nodes.length, edges.length])
 
   return (
-    <div className="dagCanvas">
+    <div className="h-[320px] overflow-hidden rounded-xl border bg-muted/20">
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}
@@ -157,7 +186,7 @@ function DAGViewInner(props: DAGViewInnerProps) {
         onNodeClick={(_ev, node) => onSelectNodeId(node.id)}
         fitView
       >
-        <Background gap={18} size={0.6} color="rgba(255,255,255,0.08)" />
+        <Background gap={18} size={0.6} color="rgba(255,255,255,0.06)" />
         <Controls />
       </ReactFlow>
     </div>
