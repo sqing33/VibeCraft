@@ -43,6 +43,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle>(function TerminalPane
   ref,
 ) {
   const theme = useThemeStore((s) => s.theme)
+  const initialThemeRef = useRef<ThemeMode>(theme)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -74,7 +75,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle>(function TerminalPane
       fontSize: 12,
       fontFamily:
         "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-      theme: terminalTheme(theme),
+      theme: terminalTheme(initialThemeRef.current),
     })
     const fit = new FitAddon()
     term.loadAddon(fit)

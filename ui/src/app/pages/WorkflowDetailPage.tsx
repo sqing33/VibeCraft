@@ -1,20 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, RefreshCcw } from 'lucide-react'
+import {
+  Alert,
+  Button,
+  Chip,
+  Select,
+  SelectItem,
+  Skeleton,
+} from '@heroui/react'
 
 import { DAGView } from '@/components/DAGView'
 import { TerminalPane, type TerminalPaneHandle } from '@/components/TerminalPane'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Skeleton } from '@/components/ui/skeleton'
-import { toast } from '@/components/ui/use-toast'
+import { toast } from '@/lib/toast'
 import {
   approveWorkflow,
   cancelNode,
@@ -37,6 +34,16 @@ import { useDaemonStore } from '@/stores/daemonStore'
 
 type WorkflowDetailPageProps = {
   workflowId: string
+}
+
+function selectionToString(keys: unknown): string {
+  if (keys === 'all') return ''
+  if (keys instanceof Set) {
+    const first = keys.values().next().value
+    if (typeof first === 'string') return first
+    if (typeof first === 'number') return String(first)
+  }
+  return ''
 }
 
 function formatMode(mode: string): string {
@@ -449,15 +456,26 @@ export function WorkflowDetailPage(props: WorkflowDetailPageProps) {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <Button variant="secondary" onClick={goHome}>
-            <ChevronLeft className="mr-2 h-4 w-4" />
+          <Button
+            color="secondary"
+            variant="flat"
+            onPress={goHome}
+            startContent={
+              <ChevronLeft
+                className="h-4 w-4"
+                aria-hidden="true"
+                focusable="false"
+              />
+            }
+          >
             返回
           </Button>
         </div>
-        <Alert variant="destructive">
-          <AlertTitle>无法连接守护进程</AlertTitle>
-          <AlertDescription>{health.message}</AlertDescription>
-        </Alert>
+        <Alert
+          color="danger"
+          title="无法连接守护进程"
+          description={health.message}
+        />
       </div>
     )
   }
@@ -470,69 +488,101 @@ export function WorkflowDetailPage(props: WorkflowDetailPageProps) {
           <div className="truncate text-sm text-muted-foreground">{workflowId}</div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" onClick={goHome}>
-            <ChevronLeft className="mr-2 h-4 w-4" />
+          <Button
+            color="secondary"
+            variant="flat"
+            onPress={goHome}
+            startContent={
+              <ChevronLeft
+                className="h-4 w-4"
+                aria-hidden="true"
+                focusable="false"
+              />
+            }
+          >
             返回
           </Button>
           <Button
-            variant="secondary"
-            onClick={() => void refreshAll()}
-            disabled={workflowLoading || graphLoading}
+            color="secondary"
+            variant="flat"
+            onPress={() => void refreshAll()}
+            isDisabled={workflowLoading || graphLoading}
+            startContent={
+              <RefreshCcw
+                className="h-4 w-4"
+                aria-hidden="true"
+                focusable="false"
+              />
+            }
           >
-            <RefreshCcw className="mr-2 h-4 w-4" />
             刷新
           </Button>
         </div>
       </div>
 
       {workflowError ? (
-        <Alert variant="destructive">
-          <AlertTitle>加载工作流失败</AlertTitle>
-          <AlertDescription>{workflowError}</AlertDescription>
-        </Alert>
+        <Alert
+          color="danger"
+          title="加载工作流失败"
+          description={workflowError}
+        />
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_440px]">
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-card p-3">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">
+              <Chip variant="flat" size="sm">
                 {workflow ? formatStatus(workflow.status) : '...'}
-              </Badge>
-              {workflow ? <Badge variant="outline">{formatMode(workflow.mode)}</Badge> : null}
-              <Badge variant="secondary">连接：{wsText(wsState)}</Badge>
+              </Chip>
+              {workflow ? (
+                <Chip variant="bordered" size="sm">
+                  {formatMode(workflow.mode)}
+                </Chip>
+              ) : null}
+              <Chip variant="flat" size="sm">
+                连接：{wsText(wsState)}
+              </Chip>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
               {workflow ? (
                 <Select
-                  value={workflow.mode === 'auto' ? 'auto' : 'manual'}
-                  onValueChange={(v) => void onSwitchMode(v)}
-                  disabled={modeSwitching}
+                  aria-label="模式"
+                  className="w-[160px]"
+                  placeholder="选择模式"
+                  selectionMode="single"
+                  disallowEmptySelection
+                  selectedKeys={
+                    new Set([workflow.mode === 'auto' ? 'auto' : 'manual'])
+                  }
+                  onSelectionChange={(keys) =>
+                    void onSwitchMode(selectionToString(keys))
+                  }
+                  isDisabled={modeSwitching}
                 >
-                  <SelectTrigger className="w-[160px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="manual">手动</SelectItem>
-                    <SelectItem value="auto">自动</SelectItem>
-                  </SelectContent>
+                  <SelectItem key="manual">手动</SelectItem>
+                  <SelectItem key="auto">自动</SelectItem>
                 </Select>
               ) : (
-                <Skeleton className="h-9 w-[160px]" />
+                <Skeleton className="h-9 w-[160px] rounded-md" />
               )}
 
               {workflow?.mode === 'manual' ? (
-                <Button onClick={() => void onApproveRunnable()} disabled={approving}>
+                <Button
+                  color="primary"
+                  onPress={() => void onApproveRunnable()}
+                  isDisabled={approving}
+                >
                   {approving ? '审批中…' : '批准可运行节点'}
                 </Button>
               ) : null}
 
               {workflow?.status === 'running' ? (
                 <Button
-                  variant="destructive"
-                  onClick={() => void onCancelWorkflow()}
-                  disabled={cancelingWorkflow}
+                  color="danger"
+                  onPress={() => void onCancelWorkflow()}
+                  isDisabled={cancelingWorkflow}
                 >
                   {cancelingWorkflow ? '取消中…' : '取消工作流'}
                 </Button>
@@ -540,11 +590,8 @@ export function WorkflowDetailPage(props: WorkflowDetailPageProps) {
             </div>
           </div>
 
-          {graphError ? (
-            <Alert variant="destructive">
-              <AlertTitle>加载 DAG 失败</AlertTitle>
-              <AlertDescription>{graphError}</AlertDescription>
-            </Alert>
+      {graphError ? (
+            <Alert color="danger" title="加载 DAG 失败" description={graphError} />
           ) : null}
 
           {graphLoading && nodes.length === 0 ? (
@@ -575,7 +622,9 @@ export function WorkflowDetailPage(props: WorkflowDetailPageProps) {
                 </div>
               </div>
               {selectedNode ? (
-                <Badge variant="secondary">{formatStatus(selectedNode.status)}</Badge>
+                <Chip variant="flat" size="sm">
+                  {formatStatus(selectedNode.status)}
+                </Chip>
               ) : null}
             </div>
 
@@ -591,24 +640,27 @@ export function WorkflowDetailPage(props: WorkflowDetailPageProps) {
                     <div className="space-y-2">
                       <div className="text-xs font-medium text-muted-foreground">专家</div>
                       <Select
-                        value={nodeEditExpert}
-                        onValueChange={(v) => setNodeEditExpert(v)}
-                        disabled={nodeEditSaving}
+                        aria-label="专家"
+                        placeholder="选择专家"
+                        selectionMode="single"
+                        disallowEmptySelection
+                        selectedKeys={
+                          nodeEditExpert ? new Set([nodeEditExpert]) : new Set([])
+                        }
+                        onSelectionChange={(keys) =>
+                          setNodeEditExpert(selectionToString(keys))
+                        }
+                        isDisabled={nodeEditSaving}
                       >
-                        <SelectTrigger>
-                          <SelectValue placeholder="选择专家" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {experts.length > 0 ? (
-                            experts.map((e) => (
-                              <SelectItem key={e.id} value={e.id}>
-                                {formatExpertOption(e)}
-                              </SelectItem>
-                            ))
-                          ) : (
-                            <SelectItem value="master">主控专家（master）</SelectItem>
-                          )}
-                        </SelectContent>
+                        {experts.length > 0 ? (
+                          experts.map((e) => (
+                            <SelectItem key={e.id}>
+                              {formatExpertOption(e)}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <SelectItem key="master">主控专家（master）</SelectItem>
+                        )}
                       </Select>
                     </div>
 
@@ -624,7 +676,11 @@ export function WorkflowDetailPage(props: WorkflowDetailPageProps) {
                     </div>
 
                     <div className="flex items-center justify-end">
-                      <Button onClick={() => void onSaveNodeEdit()} disabled={nodeEditSaving}>
+                      <Button
+                        color="primary"
+                        onPress={() => void onSaveNodeEdit()}
+                        isDisabled={nodeEditSaving}
+                      >
                         {nodeEditSaving ? '保存中…' : '保存'}
                       </Button>
                     </div>
@@ -634,9 +690,9 @@ export function WorkflowDetailPage(props: WorkflowDetailPageProps) {
                 <div className="flex flex-wrap gap-2">
                   {selectedNode && canCancelNode(selectedNode) ? (
                     <Button
-                      variant="destructive"
-                      onClick={() => void onCancelNode()}
-                      disabled={nodeCanceling}
+                      color="danger"
+                      onPress={() => void onCancelNode()}
+                      isDisabled={nodeCanceling}
                     >
                       {nodeCanceling ? '取消中…' : '取消节点'}
                     </Button>
@@ -644,9 +700,10 @@ export function WorkflowDetailPage(props: WorkflowDetailPageProps) {
 
                   {selectedNode && canRetryNode(selectedNode) ? (
                     <Button
-                      variant="secondary"
-                      onClick={() => void onRetryNode()}
-                      disabled={nodeRetrying}
+                      color="secondary"
+                      variant="flat"
+                      onPress={() => void onRetryNode()}
+                      isDisabled={nodeRetrying}
                     >
                       {nodeRetrying ? '重试中…' : '重试'}
                     </Button>
@@ -674,7 +731,9 @@ export function WorkflowDetailPage(props: WorkflowDetailPageProps) {
           <div className="rounded-xl border bg-card p-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-semibold">终端</div>
-              <Badge variant="outline">{selectedExecutionId ?? '无执行记录'}</Badge>
+              <Chip variant="bordered" size="sm">
+                {selectedExecutionId ?? '无执行记录'}
+              </Chip>
             </div>
             <div className="mt-3">
               <TerminalPane ref={terminalRef} />

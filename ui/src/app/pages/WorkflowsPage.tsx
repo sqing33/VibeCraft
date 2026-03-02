@@ -1,27 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Plus, Play } from 'lucide-react'
-
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import {
+  Alert,
+  Button,
+  Chip,
+  Input,
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
   Select,
-  SelectContent,
   SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Skeleton } from '@/components/ui/skeleton'
-import { toast } from '@/components/ui/use-toast'
+  Skeleton,
+} from '@heroui/react'
+
+import { toast } from '@/lib/toast'
 import {
   createWorkflow,
   fetchWorkflows,
@@ -81,6 +75,16 @@ type StartAdvancedState = {
   prompt: string
 }
 
+function selectionToString(keys: unknown): string {
+  if (keys === 'all') return ''
+  if (keys instanceof Set) {
+    const first = keys.values().next().value
+    if (typeof first === 'string') return first
+    if (typeof first === 'number') return String(first)
+  }
+  return ''
+}
+
 function EmptyKanban() {
   return (
     <div className="grid gap-3 md:grid-cols-4">
@@ -88,11 +92,11 @@ function EmptyKanban() {
         <div key={c.key} className="space-y-3 rounded-xl border bg-card p-3">
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold">{c.title}</div>
-            <Skeleton className="h-4 w-8" />
+            <Skeleton className="h-4 w-8 rounded-md" />
           </div>
           <div className="space-y-2">
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full rounded-md" />
+            <Skeleton className="h-16 w-full rounded-md" />
           </div>
         </div>
       ))}
@@ -237,15 +241,9 @@ export function WorkflowsPage() {
 
   const content =
     health.status === 'error' ? (
-      <Alert variant="destructive">
-        <AlertTitle>无法连接守护进程</AlertTitle>
-        <AlertDescription>{health.message}</AlertDescription>
-      </Alert>
+      <Alert color="danger" title="无法连接守护进程" description={health.message} />
     ) : error ? (
-      <Alert variant="destructive">
-        <AlertTitle>加载工作流失败</AlertTitle>
-        <AlertDescription>{error}</AlertDescription>
-      </Alert>
+      <Alert color="danger" title="加载工作流失败" description={error} />
     ) : loading && workflows.length === 0 ? (
       <EmptyKanban />
     ) : (
@@ -256,7 +254,9 @@ export function WorkflowsPage() {
             <div key={col.key} className="space-y-3 rounded-xl border bg-card p-3">
               <div className="flex items-center justify-between">
                 <div className="text-sm font-semibold">{col.title}</div>
-                <Badge variant="secondary">{list.length}</Badge>
+                <Chip variant="flat" size="sm">
+                  {list.length}
+                </Chip>
               </div>
               <div className="space-y-2">
                 {list.length === 0 ? (
@@ -281,18 +281,22 @@ export function WorkflowsPage() {
                             </div>
                           </div>
                           <div className="flex shrink-0 flex-col items-end gap-1">
-                            <Badge variant="secondary">{formatWorkflowStatus(wf.status)}</Badge>
-                            <Badge variant="outline">{formatMode(wf.mode)}</Badge>
+                            <Chip variant="flat" size="sm">
+                              {formatWorkflowStatus(wf.status)}
+                            </Chip>
+                            <Chip variant="bordered" size="sm">
+                              {formatMode(wf.mode)}
+                            </Chip>
                           </div>
                         </div>
                         <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
                           <span>{formatRelativeTime(wf.updated_at)}</span>
                           <span className="inline-flex items-center gap-2">
-                            <Badge variant="secondary">
+                            <Chip variant="flat" size="sm">
                               {(typeof wf.running_nodes_count === 'number'
                                 ? wf.running_nodes_count
                                 : 0) + ' 运行中'}
-                            </Badge>
+                            </Chip>
                             <span className="inline-flex items-center gap-1">
                               <span className="hidden sm:inline">查看</span>
                               <ChevronRight className="h-4 w-4 opacity-70" />
@@ -304,18 +308,21 @@ export function WorkflowsPage() {
                       {wf.status === 'todo' ? (
                         <div className="mt-3 flex flex-wrap gap-2">
                           <Button
+                            color="primary"
                             size="sm"
-                            disabled={startingId === wf.workflow_id}
-                            onClick={() => void onStart(wf.workflow_id)}
+                            isDisabled={startingId === wf.workflow_id}
+                            onPress={() => void onStart(wf.workflow_id)}
+                            startContent={
+                              <Play className="h-4 w-4" aria-hidden="true" focusable="false" />
+                            }
                           >
-                            <Play className="mr-2 h-4 w-4" />
                             {startingId === wf.workflow_id ? '启动中…' : '启动'}
                           </Button>
                           <Button
                             size="sm"
-                            variant="secondary"
-                            disabled={startingId === wf.workflow_id}
-                            onClick={() => openAdvanced(wf.workflow_id)}
+                            variant="flat"
+                            isDisabled={startingId === wf.workflow_id}
+                            onPress={() => openAdvanced(wf.workflow_id)}
                           >
                             高级
                           </Button>
@@ -342,62 +349,68 @@ export function WorkflowsPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Dialog open={newOpen} onOpenChange={setNewOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" /> 新建
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>创建工作流</DialogTitle>
-              </DialogHeader>
+          <Button
+            color="primary"
+            onPress={() => setNewOpen(true)}
+            startContent={<Plus className="h-4 w-4" aria-hidden="true" focusable="false" />}
+          >
+            新建
+          </Button>
 
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">标题</div>
-                  <Input
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    placeholder="未命名"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">工作目录</div>
-                  <Input
-                    value={newWorkspace}
-                    onChange={(e) => setNewWorkspace(e.target.value)}
-                    placeholder="."
-                  />
-                </div>
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">模式</div>
-                  <Select
-                    value={newMode}
-                    onValueChange={(v) =>
-                      setNewMode(v === 'auto' ? 'auto' : 'manual')
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择模式" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="manual">手动</SelectItem>
-                      <SelectItem value="auto">自动</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
+          <Modal isOpen={newOpen} onOpenChange={setNewOpen} size="lg">
+            <ModalContent>
+              {() => (
+                <>
+                  <ModalHeader>创建工作流</ModalHeader>
+                  <ModalBody className="space-y-4">
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">标题</div>
+                      <Input
+                        value={newTitle}
+                        onValueChange={setNewTitle}
+                        placeholder="未命名"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">工作目录</div>
+                      <Input
+                        value={newWorkspace}
+                        onValueChange={setNewWorkspace}
+                        placeholder="."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">模式</div>
+                      <Select
+                        aria-label="模式"
+                        placeholder="选择模式"
+                        selectionMode="single"
+                        disallowEmptySelection
+                        selectedKeys={new Set([newMode])}
+                        onSelectionChange={(keys) =>
+                          setNewMode(selectionToString(keys) === 'auto' ? 'auto' : 'manual')
+                        }
+                      >
+                        <SelectItem key="manual">手动</SelectItem>
+                        <SelectItem key="auto">自动</SelectItem>
+                      </Select>
+                    </div>
+                  </ModalBody>
+                  <ModalFooter>
+                    <Button
+                      color="primary"
+                      onPress={() => void onCreate()}
+                      isDisabled={creating}
+                    >
+                      {creating ? '创建中…' : '创建'}
+                    </Button>
+                  </ModalFooter>
+                </>
+              )}
+            </ModalContent>
+          </Modal>
 
-              <DialogFooter>
-                <Button onClick={() => void onCreate()} disabled={creating}>
-                  {creating ? '创建中…' : '创建'}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          <Button variant="secondary" onClick={() => void refresh()}>
+          <Button color="secondary" variant="flat" onPress={() => void refresh()}>
             刷新
           </Button>
         </div>
@@ -405,53 +418,57 @@ export function WorkflowsPage() {
 
       {content}
 
-      <Dialog open={advanced.open} onOpenChange={(o) => setAdvanced((s) => ({ ...s, open: o }))}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>高级启动</DialogTitle>
-          </DialogHeader>
+      <Modal
+        isOpen={advanced.open}
+        onOpenChange={(o) => setAdvanced((s) => ({ ...s, open: o }))}
+        size="xl"
+      >
+        <ModalContent>
+          {() => (
+            <>
+              <ModalHeader>高级启动</ModalHeader>
+              <ModalBody className="space-y-4">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">主控专家</div>
+                  <Select
+                    aria-label="主控专家"
+                    placeholder="选择专家"
+                    selectionMode="single"
+                    selectedKeys={advanced.expertId ? new Set([advanced.expertId]) : new Set([])}
+                    onSelectionChange={(keys) =>
+                      setAdvanced((s) => ({ ...s, expertId: selectionToString(keys) }))
+                    }
+                  >
+                    {experts.length > 0 ? (
+                      experts.map((e) => (
+                        <SelectItem key={e.id}>{formatExpertOption(e)}</SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem key="master">主控专家（master）</SelectItem>
+                    )}
+                  </Select>
+                </div>
 
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <div className="text-sm font-medium">主控专家</div>
-              <Select
-                value={advanced.expertId}
-                onValueChange={(v) => setAdvanced((s) => ({ ...s, expertId: v }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="选择专家" />
-                </SelectTrigger>
-                <SelectContent>
-                  {experts.length > 0 ? (
-                    experts.map((e) => (
-                      <SelectItem key={e.id} value={e.id}>
-                        {formatExpertOption(e)}
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <SelectItem value="master">主控专家（master）</SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <div className="text-sm font-medium">主控提示词（可选）</div>
-              <textarea
-                className="min-h-[120px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                value={advanced.prompt}
-                onChange={(e) => setAdvanced((s) => ({ ...s, prompt: e.target.value }))}
-                placeholder="留空则使用默认模板"
-                spellCheck={false}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button onClick={() => void onStartAdvanced()}>启动</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">主控提示词（可选）</div>
+                  <textarea
+                    className="min-h-[120px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    value={advanced.prompt}
+                    onChange={(e) => setAdvanced((s) => ({ ...s, prompt: e.target.value }))}
+                    placeholder="留空则使用默认模板"
+                    spellCheck={false}
+                  />
+                </div>
+              </ModalBody>
+              <ModalFooter>
+                <Button color="primary" onPress={() => void onStartAdvanced()}>
+                  启动
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
     </div>
   )
 }

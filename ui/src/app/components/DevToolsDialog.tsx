@@ -1,18 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bug, Play, XCircle } from 'lucide-react'
-
-import { Button } from '@/components/ui/button'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog'
-import { Badge } from '@/components/ui/badge'
-import { Skeleton } from '@/components/ui/skeleton'
-import { toast } from '@/components/ui/use-toast'
+  Button,
+  Chip,
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalHeader,
+  Skeleton,
+} from '@heroui/react'
+
+import { toast } from '@/lib/toast'
 import {
   cancelExecution,
   fetchExecutionLogTail,
@@ -177,88 +175,119 @@ export function DevToolsDialog() {
   if (!import.meta.env.DEV) return null
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label="开发工具">
-          <Bug />
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-5xl">
-        <DialogHeader>
-          <DialogTitle>开发工具</DialogTitle>
-          <DialogDescription>仅开发环境可见（生产构建中隐藏）</DialogDescription>
-        </DialogHeader>
+    <>
+      <Button
+        variant="light"
+        size="sm"
+        isIconOnly
+        aria-label="开发工具"
+        onPress={() => setOpen(true)}
+      >
+        <Bug className="h-4 w-4" aria-hidden="true" focusable="false" />
+      </Button>
 
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">连接：{wsText(wsState)}</Badge>
-              <Badge variant="outline">{daemonUrl}</Badge>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button onClick={() => void onRunDemo()} disabled={starting}>
-                <Play className="mr-2 h-4 w-4" />
-                {starting ? '启动中…' : '运行示例'}
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={() => void onCancelSelected()}
-                disabled={!selectedExecutionId || canceling}
-              >
-                <XCircle className="mr-2 h-4 w-4" />
-                {canceling ? '取消中…' : '取消执行'}
-              </Button>
-            </div>
-          </div>
+      <Modal isOpen={open} onOpenChange={setOpen} size="5xl" scrollBehavior="inside">
+        <ModalContent>
+          {() => (
+            <>
+              <ModalHeader className="flex flex-col gap-1">
+                <div>开发工具</div>
+                <div className="text-sm font-normal text-muted-foreground">
+                  仅开发环境可见（生产构建中隐藏）
+                </div>
+              </ModalHeader>
 
-          <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
-            <div className="rounded-xl border bg-card p-3">
-              <div className="text-sm font-semibold">执行列表</div>
-              <div className="mt-3 space-y-2">
-                {executions.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">
-                    点击“运行示例”开始一次执行。
+              <ModalBody>
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Chip variant="flat" size="sm">
+                        连接：{wsText(wsState)}
+                      </Chip>
+                      <Chip variant="bordered" size="sm">
+                        {daemonUrl}
+                      </Chip>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        color="primary"
+                        onPress={() => void onRunDemo()}
+                        isDisabled={starting}
+                        startContent={
+                          <Play className="h-4 w-4" aria-hidden="true" focusable="false" />
+                        }
+                      >
+                        {starting ? '启动中…' : '运行示例'}
+                      </Button>
+                      <Button
+                        color="danger"
+                        onPress={() => void onCancelSelected()}
+                        isDisabled={!selectedExecutionId || canceling}
+                        startContent={
+                          <XCircle className="h-4 w-4" aria-hidden="true" focusable="false" />
+                        }
+                      >
+                        {canceling ? '取消中…' : '取消执行'}
+                      </Button>
+                    </div>
                   </div>
-                ) : (
-                  executions.map((e) => (
-                    <button
-                      key={e.execution_id}
-                      className={
-                        selectedExecutionId === e.execution_id
-                          ? 'w-full rounded-lg border bg-muted/30 p-3 text-left'
-                          : 'w-full rounded-lg border bg-background/40 p-3 text-left hover:bg-background/60'
-                      }
-                      onClick={() => setSelectedExecutionId(e.execution_id)}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <Badge variant="secondary">{executionStatusText(e.status)}</Badge>
-                        <code className="truncate text-xs">{e.execution_id}</code>
-                      </div>
-                      <div className="mt-2 truncate text-xs text-muted-foreground">
-                        {e.command}
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
 
-            <div className="rounded-xl border bg-card p-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-sm font-semibold">终端</div>
-                {selectedExecutionId ? (
-                  <Badge variant="outline">{selectedExecutionId}</Badge>
-                ) : (
-                  <Skeleton className="h-5 w-40" />
-                )}
-              </div>
-              <div className="mt-3">
-                <TerminalPane ref={terminalRef} />
-              </div>
-            </div>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+                  <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
+                    <div className="rounded-xl border bg-card p-3">
+                      <div className="text-sm font-semibold">执行列表</div>
+                      <div className="mt-3 space-y-2">
+                        {executions.length === 0 ? (
+                          <div className="text-sm text-muted-foreground">
+                            点击“运行示例”开始一次执行。
+                          </div>
+                        ) : (
+                          executions.map((e) => (
+                            <button
+                              key={e.execution_id}
+                              className={
+                                selectedExecutionId === e.execution_id
+                                  ? 'w-full rounded-lg border bg-muted/30 p-3 text-left'
+                                  : 'w-full rounded-lg border bg-background/40 p-3 text-left hover:bg-background/60'
+                              }
+                              onClick={() => setSelectedExecutionId(e.execution_id)}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <Chip variant="flat" size="sm">
+                                  {executionStatusText(e.status)}
+                                </Chip>
+                                <code className="truncate text-xs">{e.execution_id}</code>
+                              </div>
+                              <div className="mt-2 truncate text-xs text-muted-foreground">
+                                {e.command}
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border bg-card p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-sm font-semibold">终端</div>
+                        {selectedExecutionId ? (
+                          <Chip variant="bordered" size="sm">
+                            {selectedExecutionId}
+                          </Chip>
+                        ) : (
+                          <Skeleton className="h-5 w-40 rounded-md" />
+                        )}
+                      </div>
+                      <div className="mt-3">
+                        <TerminalPane ref={terminalRef} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </ModalBody>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+    </>
   )
 }

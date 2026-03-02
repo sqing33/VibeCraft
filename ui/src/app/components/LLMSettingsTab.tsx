@@ -1,19 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Play, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
+  Alert,
+  Button,
+  Chip,
+  Input,
   Select,
-  SelectContent,
   SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
-import { toast } from "@/components/ui/use-toast";
+  Skeleton,
+} from "@heroui/react";
+
+import { toast } from "@/lib/toast";
 import {
   fetchExperts,
   fetchLLMSettings,
@@ -113,6 +111,16 @@ function nextID(prefix: string, used: Set<string>): string {
   return `${prefix}-${Date.now()}`;
 }
 
+function selectionToString(keys: unknown): string {
+  if (keys === "all") return "";
+  if (keys instanceof Set) {
+    const first = keys.values().next().value;
+    if (typeof first === "string") return first;
+    if (typeof first === "number") return String(first);
+  }
+  return "";
+}
+
 export function LLMSettingsTab() {
   const daemonUrl = useDaemonStore((s) => s.daemonUrl);
   const setExperts = useDaemonStore((s) => s.setExperts);
@@ -131,8 +139,22 @@ export function LLMSettingsTab() {
     setLoading(true);
     try {
       const res = await fetchLLMSettings(daemonUrl);
-      setSources(toDraftSources(res.sources ?? []));
-      setModels(toDraftModels(res.models ?? []));
+      const draftSources = toDraftSources(res.sources ?? []);
+      const draftModels = toDraftModels(res.models ?? []);
+
+      const sourceIDs = new Set(
+        draftSources.map((s) => s.id).filter(Boolean),
+      );
+      const fallbackSourceID =
+        draftSources.find((s) => Boolean(s.id))?.id ?? "";
+      const normalizedModels = draftModels.map((m) => {
+        if (m.source_id && sourceIDs.has(m.source_id)) return m;
+        if (!fallbackSourceID) return m;
+        return { ...m, source_id: fallbackSourceID };
+      });
+
+      setSources(draftSources);
+      setModels(normalizedModels);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
@@ -197,6 +219,15 @@ export function LLMSettingsTab() {
   };
 
   const onAddModel = () => {
+    if (sourceOptions.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "无法添加模型",
+        description: "请先添加至少一个 Source。",
+      });
+      return;
+    }
+
     const used = new Set(models.map((m) => m.id));
     const provider = "openai";
     const source_id = sourceOptions[0]?.id ?? "";
@@ -212,6 +243,16 @@ export function LLMSettingsTab() {
   };
 
   const onSave = async () => {
+    const missingSource = models.find((m) => !(m.source_id ?? "").trim());
+    if (missingSource) {
+      toast({
+        variant: "destructive",
+        title: "配置不完整",
+        description: "存在未选择 Source 的模型，请先为模型选择 Source。",
+      });
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
@@ -303,9 +344,9 @@ export function LLMSettingsTab() {
   if (loading) {
     return (
       <div className="space-y-4">
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-10 w-full rounded-md" />
+        <Skeleton className="h-24 w-full rounded-md" />
+        <Skeleton className="h-24 w-full rounded-md" />
       </div>
     );
   }
@@ -313,17 +354,19 @@ export function LLMSettingsTab() {
   return (
     <div className="space-y-6">
       {error ? (
-        <Alert variant="destructive">
-          <AlertTitle>加载/保存失败</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+        <Alert color="danger" title="加载/保存失败" description={error} />
       ) : null}
 
       <section className="space-y-3">
-        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between gap-2">
           <div className="text-sm font-medium">API 源</div>
-          <Button variant="secondary" size="sm" onClick={onAddSource}>
-            <Plus className="mr-2 h-4 w-4" />
+          <Button
+            color="secondary"
+            variant="flat"
+            size="sm"
+            onPress={onAddSource}
+            startContent={<Plus className="h-4 w-4" />}
+          >
             添加来源
           </Button>
         </div>
@@ -344,21 +387,24 @@ export function LLMSettingsTab() {
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     {s.has_key ? (
-                      <Badge variant="outline">
+                      <Chip variant="bordered" size="sm">
                         Key：{s.masked_key || "已设置"}
-                      </Badge>
+                      </Chip>
                     ) : (
-                      <Badge variant="outline">Key：未设置</Badge>
+                      <Chip variant="bordered" size="sm">
+                        Key：未设置
+                      </Chip>
                     )}
                   </div>
                 </div>
                 <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => onDeleteSource(s.id)}
+                  variant="light"
+                  size="sm"
+                  isIconOnly
+                  onPress={() => onDeleteSource(s.id)}
                   aria-label="删除 Source"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <Trash2 className="h-4 w-4" aria-hidden="true" focusable="false" />
                 </Button>
               </div>
 
@@ -367,9 +413,8 @@ export function LLMSettingsTab() {
                   <div className="text-xs text-muted-foreground">ID</div>
                   <Input
                     value={s.id}
-                    onChange={(e) =>
+                    onValueChange={(nextID) =>
                       setSources((prev) => {
-                        const nextID = e.target.value;
                         const old = prev.find((x) => x.local_id === s.local_id);
                         const oldID = (old?.id ?? "").trim();
 
@@ -401,13 +446,13 @@ export function LLMSettingsTab() {
                   <div className="text-xs text-muted-foreground">名称</div>
                   <Input
                     value={s.label}
-                    onChange={(e) =>
+                    onValueChange={(label) =>
                       setSources((prev) =>
                         prev.map((x) =>
                           x.local_id === s.local_id
                             ? {
                                 ...x,
-                                label: e.target.value,
+                                label,
                                 label_touched: true,
                               }
                             : x,
@@ -424,11 +469,11 @@ export function LLMSettingsTab() {
                   </div>
                   <Input
                     value={s.base_url}
-                    onChange={(e) =>
+                    onValueChange={(base_url) =>
                       setSources((prev) =>
                         prev.map((x) =>
                           x.local_id === s.local_id
-                            ? { ...x, base_url: e.target.value }
+                            ? { ...x, base_url }
                             : x,
                         ),
                       )
@@ -444,13 +489,13 @@ export function LLMSettingsTab() {
                   <Input
                     type="password"
                     value={s.key_input}
-                    onChange={(e) =>
+                    onValueChange={(key_input) =>
                       setSources((prev) =>
                         prev.map((x) =>
                           x.local_id === s.local_id
                             ? {
                                 ...x,
-                                key_input: e.target.value,
+                                key_input,
                                 key_touched: true,
                               }
                             : x,
@@ -470,8 +515,13 @@ export function LLMSettingsTab() {
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-2">
           <div className="text-sm font-medium">模型</div>
-          <Button variant="secondary" size="sm" onClick={onAddModel}>
-            <Plus className="mr-2 h-4 w-4" />
+          <Button
+            color="secondary"
+            variant="flat"
+            size="sm"
+            onPress={onAddModel}
+            startContent={<Plus className="h-4 w-4" />}
+          >
             添加模型
           </Button>
         </div>
@@ -490,41 +540,41 @@ export function LLMSettingsTab() {
                       {(m.label || "").trim() || "未命名"}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
+                <div className="flex items-center gap-1">
+                  <Button
+                      variant="light"
                       size="sm"
-                      onClick={() => void onTestModel(m)}
+                      onPress={() => void onTestModel(m)}
                       aria-label="测试模型"
-                      disabled={testingId !== null}
+                      isDisabled={testingId !== null}
                       title="测试该模型配置（会产生少量调用）"
                     >
-                      <Play className="mr-2 h-4 w-4" />
+                      <Play className="mr-2 h-4 w-4" aria-hidden="true" focusable="false" />
                       测试
                     </Button>
                     <Button
-                      variant="ghost"
+                      variant="light"
                       size="sm"
-                      onClick={() => onDeleteModel(m.id)}
+                      onPress={() => onDeleteModel(m.id)}
                       aria-label="删除 Model"
-                      disabled={testingId === m.id}
+                      isDisabled={testingId === m.id}
                     >
-                      <Trash2 className="mr-2 h-4 w-4" />
+                      <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" focusable="false" />
                       删除
                     </Button>
                   </div>
                 </div>
 
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <div className="grid gap-2">
+                    <div className="grid gap-2">
                     <div className="text-xs text-muted-foreground">ID</div>
                     <Input
                       value={m.id}
-                      disabled={testingId === m.id}
-                      onChange={(e) =>
+                      isDisabled={testingId === m.id}
+                      onValueChange={(id) =>
                         setModels((prev) =>
                           prev.map((x) =>
-                            x === m ? { ...x, id: e.target.value } : x,
+                            x === m ? { ...x, id } : x,
                           ),
                         )
                       }
@@ -532,15 +582,15 @@ export function LLMSettingsTab() {
                     />
                   </div>
 
-                  <div className="grid gap-2">
+                    <div className="grid gap-2">
                     <div className="text-xs text-muted-foreground">名称</div>
                     <Input
                       value={m.label}
-                      disabled={testingId === m.id}
-                      onChange={(e) =>
+                      isDisabled={testingId === m.id}
+                      onValueChange={(label) =>
                         setModels((prev) =>
                           prev.map((x) =>
-                            x === m ? { ...x, label: e.target.value } : x,
+                            x === m ? { ...x, label } : x,
                           ),
                         )
                       }
@@ -551,12 +601,17 @@ export function LLMSettingsTab() {
                   <div className="grid gap-2">
                     <div className="text-xs text-muted-foreground">SDK</div>
                     <Select
-                      value={m.provider}
-                      disabled={testingId === m.id}
-                      onValueChange={(v) =>
+                      aria-label="SDK"
+                      placeholder="选择 SDK"
+                      selectionMode="single"
+                      disallowEmptySelection
+                      selectedKeys={m.provider ? new Set([m.provider]) : new Set([])}
+                      isDisabled={testingId === m.id}
+                      onSelectionChange={(keys) =>
                         setModels((prev) =>
                           prev.map((x) => {
                             if (x !== m) return x;
+                            const v = selectionToString(keys);
                             const nextSource = sourceOptions.some(
                               (o) => o.id === x.source_id,
                             )
@@ -567,55 +622,51 @@ export function LLMSettingsTab() {
                         )
                       }
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="选择 SDK" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="openai">OpenAI</SelectItem>
-                        <SelectItem value="anthropic">Anthropic</SelectItem>
-                      </SelectContent>
+                      <SelectItem key="openai">OpenAI</SelectItem>
+                      <SelectItem key="anthropic">Anthropic</SelectItem>
                     </Select>
                   </div>
 
                   <div className="grid gap-2">
                     <div className="text-xs text-muted-foreground">Source</div>
                     <Select
-                      value={m.source_id}
-                      disabled={testingId === m.id}
-                      onValueChange={(v) =>
+                      aria-label="Source"
+                      placeholder="选择 Source"
+                      selectionMode="single"
+                      disallowEmptySelection
+                      selectedKeys={m.source_id ? new Set([m.source_id]) : new Set([])}
+                      isDisabled={testingId === m.id || sourceOptions.length === 0}
+                      onSelectionChange={(keys) =>
                         setModels((prev) =>
                           prev.map((x) =>
-                            x === m ? { ...x, source_id: v } : x,
+                            x === m
+                              ? {
+                                  ...x,
+                                  source_id:
+                                    selectionToString(keys) ||
+                                    x.source_id ||
+                                    (sourceOptions[0]?.id ?? ""),
+                                }
+                              : x,
                           ),
                         )
                       }
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="选择 Source" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {sourceOptions.length > 0 ? (
-                          sourceOptions.map((s) => (
-                            <SelectItem key={s.id} value={s.id}>
-                              {formatSourceOption(s.id)}
-                            </SelectItem>
-                          ))
-                        ) : (
-                          <SelectItem value="">无可用 Source</SelectItem>
-                        )}
-                      </SelectContent>
+                      {sourceOptions.map((s) => (
+                        <SelectItem key={s.id}>{formatSourceOption(s.id)}</SelectItem>
+                      ))}
                     </Select>
                   </div>
 
-                  <div className="grid gap-2 sm:col-span-2">
+                    <div className="grid gap-2 sm:col-span-2">
                     <div className="text-xs text-muted-foreground">模型名</div>
                     <Input
                       value={m.model}
-                      disabled={testingId === m.id}
-                      onChange={(e) =>
+                      isDisabled={testingId === m.id}
+                      onValueChange={(model) =>
                         setModels((prev) =>
                           prev.map((x) =>
-                            x === m ? { ...x, model: e.target.value } : x,
+                            x === m ? { ...x, model } : x,
                           ),
                         )
                       }
@@ -631,15 +682,22 @@ export function LLMSettingsTab() {
 
       <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
         <Button
-          variant="secondary"
-          onClick={() => void load()}
-          disabled={saving}
+          color="secondary"
+          variant="flat"
+          onPress={() => void load()}
+          isDisabled={saving}
+          startContent={
+            <RefreshCw className="h-4 w-4" aria-hidden="true" focusable="false" />
+          }
         >
-          <RefreshCw className="mr-2 h-4 w-4" />
           重新加载
         </Button>
-        <Button onClick={() => void onSave()} disabled={saving}>
-          <Save className="mr-2 h-4 w-4" />
+        <Button
+          color="primary"
+          onPress={() => void onSave()}
+          isDisabled={saving}
+          startContent={<Save className="h-4 w-4" aria-hidden="true" focusable="false" />}
+        >
           {saving ? "保存中…" : "保存"}
         </Button>
       </div>

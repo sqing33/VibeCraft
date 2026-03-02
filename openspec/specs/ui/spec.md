@@ -3,12 +3,10 @@
 ## Purpose
 
 React SPA 提供 Kanban 列表页 + Workflow 详情页（DAG + Terminal Pool）交互，通过 HTTP/WebSocket 与 daemon 通信。
-
 ## Requirements
+### Requirement: Technology Stack
 
-### Technology Stack
-
-The system MUST use React + TypeScript + Vite for the frontend build. The system MUST use Tailwind CSS + shadcn/ui for styling. The system MUST use Zustand for state management. The system MUST use React Flow + dagre for DAG visualization. The system MUST use xterm.js with fit addon for terminal rendering.
+The system MUST use React + TypeScript + Vite for the frontend build. The system MUST use Tailwind CSS + HeroUI (`@heroui/react`) for styling and UI components. The system MUST use Zustand for state management. The system MUST use React Flow + dagre for DAG visualization. The system MUST use xterm.js with fit addon for terminal rendering.
 
 #### Scenario: Frontend builds successfully
 
@@ -208,3 +206,20 @@ The UI MUST show success or failure feedback to the user (e.g. toast).
 - **WHEN** user clicks `测试` on a model card with complete configuration
 - **THEN** the UI calls `POST /api/v1/settings/llm/test`
 - **AND** the UI displays the result to the user
+
+### Requirement: LLM model profiles require a valid Source
+
+When at least one LLM Source exists, the UI MUST ensure each model profile is bound to a non-empty, valid Source ID. The UI MUST prevent saving or testing LLM settings when any model profile has an empty Source selection.
+
+#### Scenario: User cannot clear Source selection
+
+- **WHEN** a model profile has at least one available Source option
+- **AND** the user attempts to clear the Source selection in the UI
+- **THEN** the UI keeps a non-empty Source selection (either the previous value or a default)
+
+#### Scenario: Saving is blocked when Source is missing
+
+- **WHEN** the user clicks Save while any model profile has an empty Source selection
+- **THEN** the UI shows an error toast describing the missing Source
+- **AND** does not submit the settings update request
+

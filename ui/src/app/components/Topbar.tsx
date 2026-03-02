@@ -1,7 +1,6 @@
 import { Moon, Sun } from 'lucide-react'
+import { Button, Chip } from '@heroui/react'
 
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { type HealthState, useDaemonStore } from '@/stores/daemonStore'
 import { useThemeStore } from '@/stores/themeStore'
 
@@ -28,15 +27,17 @@ export function Topbar() {
 
   const healthBadge =
     health.status === 'ok' ? (
-      <Badge className="bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-200">
+      <Chip color="success" variant="flat" size="sm">
         健康状态：{healthText(health)}
-      </Badge>
+      </Chip>
     ) : health.status === 'error' ? (
-      <Badge className="bg-red-500/15 text-red-700 hover:bg-red-500/15 dark:text-red-200">
+      <Chip color="danger" variant="flat" size="sm">
         健康状态：{healthText(health)}
-      </Badge>
+      </Chip>
     ) : (
-      <Badge variant="secondary">健康状态：{healthText(health)}</Badge>
+      <Chip variant="flat" size="sm">
+        健康状态：{healthText(health)}
+      </Chip>
     )
 
   return (
@@ -44,23 +45,28 @@ export function Topbar() {
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
         <div className="flex items-center gap-2">
           <div className="text-sm font-semibold tracking-tight">vibe-tree</div>
-          <Badge variant="outline">前端</Badge>
+          <Chip variant="bordered" size="sm">
+            前端
+          </Chip>
         </div>
 
         <div className="flex items-center gap-2">
           {healthBadge}
-          <Badge variant="secondary">连接：{wsText(wsState)}</Badge>
+          <Chip variant="flat" size="sm">
+            连接：{wsText(wsState)}
+          </Chip>
           <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleTheme}
+            variant="light"
+            size="sm"
+            isIconOnly
+            onPress={toggleTheme}
             aria-label={theme === 'dark' ? '切换为浅色主题' : '切换为深色主题'}
             title={theme === 'dark' ? '切换为浅色主题' : '切换为深色主题'}
           >
             {theme === 'dark' ? (
-              <Sun className="h-4 w-4" />
+              <Sun className="h-4 w-4" aria-hidden="true" focusable="false" />
             ) : (
-              <Moon className="h-4 w-4" />
+              <Moon className="h-4 w-4" aria-hidden="true" focusable="false" />
             )}
           </Button>
           <DevToolsDialog />
