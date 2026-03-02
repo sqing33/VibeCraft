@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Feature Analyzer"
+  short_description: "Principle-first feature analysis with optional multi-agent parallel synthesis"
+  default_prompt: "Analyze feature implementation principles in a GitHub repository using an evidence-backed, multi-agent-first workflow, keep outputs under <project-root>/.github-feature-analyzer/<owner-repo>/, and produce a detailed mechanism-oriented Executive Principle Summary."

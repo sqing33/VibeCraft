@@ -1,6 +1,6 @@
 # vibe-tree 项目结构与功能定位索引
 
-> 更新时间：2026-02-28
+> 更新时间：2026-03-02
 > 说明：本文档用于开发期快速定位功能文件。修改前先读本文件，再做定向检索。
 
 ## 1. 项目概览
@@ -15,7 +15,10 @@
 | `ui/`            | React 前端：健康检查展示、工作流页面与后续交互                                         |
 | `desktop/`       | 桌面壳（Wails）：启动/复用 daemon，并在 WebView 内打开 UI                              |
 | `scripts/`       | 仓库级脚本：本地开发启动与辅助命令                                                     |
-| `.codex/skills/` | 项目级 Codex skills：流程规范与协作约束                                                |
+| `.github-feature-analyzer/` | GitHub feature analyzer skill 运行产物目录：按 `{owner-repo}` 隔离源码缓存、分析工件与累计 `report.md` |
+| `.codex/skills/` | 项目级 Codex skills：流程规范、分析/实施工作流与协作约束                               |
+| `.codex/agents/` | 项目级 Codex 子代理角色配置（按角色覆盖模型/沙箱/指令）                               |
+| `.codex/config.toml` | 项目级 Codex 配置覆盖（feature flags、agents 并发与深度等）                      |
 | `openspec/`      | OpenSpec 规范管理：基线 specs（系统当前行为真相源）+ changes（变更提案与 delta specs） |
 
 ## 3. 当前关键文件索引
@@ -23,6 +26,12 @@
 | 文件                                       | 作用                                                                                                                                  |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `AGENTS.md`                                | 仓库级 Agent 协作入口（技能路由、执行流程、交付要求）                                                                                 |
+| `.codex/config.toml`                       | 项目级 Codex 配置：开启 `multi_agent`，并声明 `agents.max_threads/max_depth` 与 `explorer` 角色                                      |
+| `.codex/agents/explorer.toml`              | `explorer` 子代理角色配置：read-only + 证据优先的实现机理分析指令                                                                     |
+| `.codex/skills/github-feature-analyzer/SKILL.md` | GitHub 功能分析 skill 主流程：MCP-first 拉取、分层多代理分析、父代理汇总与报告渲染                                             |
+| `.codex/skills/github-feature-analyzer/scripts/prepare_workspace.py` | 分析路径准备：统一输出到 `<project-root>/.github-feature-analyzer/{owner-repo}/`（`source`/`artifacts`/`report.md`） |
+| `.codex/skills/github-feature-analyzer/scripts/merge_agent_results.py` | 子代理 JSON 结果合并脚本：规范化/去重/冲突与缺失注记后输出单一合并工件                                       |
+| `.codex/skills/github-feature-analyzer/scripts/render_report.py` | 原理优先报告渲染：五维机制分析（控制流/数据流/状态生命周期/失败恢复/并发时序）+ `file:line` 证据链                         |
 | `backend/cmd/vibe-tree-daemon/main.go`     | daemon 进程入口，负责加载配置、启动 HTTP Server、处理优雅退出                                                                         |
 | `backend/internal/server/server.go`        | Gin Engine 装配：恢复中间件、请求日志、dev CORS，并挂载 `internal/api` 路由；可选挂载 UI 静态资源（`ui/dist` 或 `VIBE_TREE_UI_DIST`） |
 | `backend/internal/api/api.go`              | HTTP/WS handlers：health、workflow CRUD、execution start/log/cancel、WebSocket 升级入口                                               |
@@ -128,6 +137,9 @@
 | desktop 拉起/复用 daemon           | `desktop/app.go`, `desktop/frontend/src/main.js`                                                                                                                                                                                           |
 | desktop 打开数据目录               | `desktop/main.go`, `desktop/app.go`                                                                                                                                                                                                        |
 | Agent 协作与 skill 路由            | `AGENTS.md`                                                                                                                                                                                                                                |
+| Codex 多代理角色配置               | `.codex/config.toml`, `.codex/agents/explorer.toml`                                                                                                                                                                                      |
+| GitHub 仓库功能机理分析 skill      | `.codex/skills/github-feature-analyzer/SKILL.md`, `.codex/skills/github-feature-analyzer/references/report-schema.md`, `.codex/skills/github-feature-analyzer/scripts/render_report.py`                                               |
+| GitHub feature analyzer 产物目录规范 | `.codex/skills/github-feature-analyzer/scripts/prepare_workspace.py`, `.github-feature-analyzer/`                                                                                                                               |
 | OpenSpec 基线规范（workflow）      | `openspec/specs/workflow/spec.md`                                                                                                                                                                                                          |
 | OpenSpec 基线规范（dag）           | `openspec/specs/dag/spec.md`                                                                                                                                                                                                               |
 | OpenSpec 基线规范（scheduler）     | `openspec/specs/scheduler/spec.md`                                                                                                                                                                                                         |

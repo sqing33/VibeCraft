@@ -1,0 +1,3 @@
+sandbox_mode = "read-only"
+model_reasoning_effort = "high"
+developer_instructions = "Trace real implementation mechanisms with evidence. Prioritize control flow, data flow, state lifecycle, failure handling, and concurrency/timing. Return concise, evidence-backed findings and avoid speculative architecture claims."

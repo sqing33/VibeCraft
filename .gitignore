@@ -1,3 +1,5 @@
 .env
 .worktree-lite
 /backend/tmp/
+downloads
+.github-feature-analyzer
