@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 // Migrate 功能：执行 state DB schema 迁移（MVP：使用 PRAGMA user_version 管理版本）。
 // 参数/返回：ctx 控制超时；成功返回 nil。
@@ -38,8 +38,16 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		if err := migrateV1(ctx, tx); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d;", schemaVersion)); err != nil {
-			return fmt.Errorf("set user_version=%d: %w", schemaVersion, err)
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 1;"); err != nil {
+			return fmt.Errorf("set user_version=1: %w", err)
+		}
+	}
+	if userVersion < 2 {
+		if err := migrateV2(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 2;"); err != nil {
+			return fmt.Errorf("set user_version=2: %w", err)
 		}
 	}
 
@@ -119,6 +127,70 @@ CREATE TABLE IF NOT EXISTS events (
 		`CREATE INDEX IF NOT EXISTS idx_events_workflow_ts ON events(workflow_id, ts);`,
 	}
 
+	for _, stmt := range stmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("exec migration stmt: %w", err)
+		}
+	}
+	return nil
+}
+
+func migrateV2(ctx context.Context, tx *sql.Tx) error {
+	stmts := []string{
+		`
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  expert_id TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  workspace_path TEXT NOT NULL,
+  status TEXT NOT NULL,
+  summary TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  last_turn INTEGER NOT NULL DEFAULT 0
+);`,
+		`
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  turn INTEGER NOT NULL,
+  role TEXT NOT NULL,
+  content_text TEXT NOT NULL,
+  token_in INTEGER,
+  token_out INTEGER,
+  provider_message_id TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES chat_sessions(id)
+);`,
+		`
+CREATE INDEX IF NOT EXISTS idx_chat_messages_session_turn ON chat_messages(session_id, turn);`,
+		`
+CREATE TABLE IF NOT EXISTS chat_anchors (
+  session_id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  previous_response_id TEXT,
+  container_id TEXT,
+  provider_message_id TEXT,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES chat_sessions(id)
+);`,
+		`
+CREATE TABLE IF NOT EXISTS chat_compactions (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  from_turn INTEGER NOT NULL,
+  to_turn INTEGER NOT NULL,
+  before_tokens INTEGER NOT NULL,
+  after_tokens INTEGER NOT NULL,
+  summary_delta TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES chat_sessions(id)
+);`,
+		`
+CREATE INDEX IF NOT EXISTS idx_chat_compactions_session_created ON chat_compactions(session_id, created_at);`,
+	}
 	for _, stmt := range stmts {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("exec migration stmt: %w", err)

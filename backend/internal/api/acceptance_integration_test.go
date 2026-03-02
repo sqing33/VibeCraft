@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"vibe-tree/backend/internal/api"
+	"vibe-tree/backend/internal/chat"
 	"vibe-tree/backend/internal/config"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/expert"
@@ -51,8 +52,9 @@ func newTestEnv(t *testing.T, cfg config.Config, maxConcurrency int) *testEnv {
 	if err := st.Migrate(context.Background()); err != nil {
 		t.Fatalf("migrate store: %v", err)
 	}
+	chatMgr := chat.NewManager(st, hub, chat.Options{})
 
-	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub, Store: st, Experts: experts})
+	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub, Store: st, Experts: experts, Chat: chatMgr})
 	httpSrv := httptest.NewServer(engine)
 	t.Cleanup(httpSrv.Close)
 

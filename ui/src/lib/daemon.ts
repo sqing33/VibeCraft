@@ -97,7 +97,8 @@ export async function fetchInfo(daemonUrl: string): Promise<DaemonInfo> {
 export type PublicExpert = {
   id: string
   label: string
-  run_mode: string
+  provider: string
+  model: string
   timeout_ms: number
 }
 
@@ -227,6 +228,145 @@ export async function postLLMTest(
     throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
   }
   return (await res.json()) as LLMTestResponse
+}
+
+export type ChatSession = {
+  session_id: string
+  title: string
+  expert_id: string
+  provider: string
+  model: string
+  workspace_path: string
+  status: string
+  summary?: string
+  created_at: number
+  updated_at: number
+  last_turn: number
+}
+
+export type ChatMessage = {
+  message_id: string
+  session_id: string
+  turn: number
+  role: string
+  content_text: string
+  provider_message_id?: string
+  created_at: number
+}
+
+export type ChatTurnResult = {
+  user_message: ChatMessage
+  assistant_message: ChatMessage
+}
+
+export async function createChatSession(
+  daemonUrl: string,
+  req: { title?: string; expert_id?: string; workspace_path?: string },
+): Promise<ChatSession> {
+  const res = await fetch(`${daemonUrl}/api/v1/chat/sessions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as ChatSession
+}
+
+export async function fetchChatSessions(
+  daemonUrl: string,
+  limit = 100,
+): Promise<ChatSession[]> {
+  const url = new URL(`${daemonUrl}/api/v1/chat/sessions`)
+  url.searchParams.set('limit', String(limit))
+  const res = await fetch(url)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as ChatSession[]
+}
+
+export async function fetchChatMessages(
+  daemonUrl: string,
+  sessionId: string,
+  limit = 200,
+): Promise<ChatMessage[]> {
+  const url = new URL(`${daemonUrl}/api/v1/chat/sessions/${sessionId}/messages`)
+  url.searchParams.set('limit', String(limit))
+  const res = await fetch(url)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as ChatMessage[]
+}
+
+export async function postChatTurn(
+  daemonUrl: string,
+  sessionId: string,
+  req: { input: string },
+): Promise<ChatTurnResult> {
+  const res = await fetch(`${daemonUrl}/api/v1/chat/sessions/${sessionId}/turns`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as ChatTurnResult
+}
+
+export async function postChatCompact(
+  daemonUrl: string,
+  sessionId: string,
+): Promise<{ session: ChatSession; compaction?: unknown }> {
+  const res = await fetch(`${daemonUrl}/api/v1/chat/sessions/${sessionId}/compact`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as { session: ChatSession; compaction?: unknown }
+}
+
+export async function postChatFork(
+  daemonUrl: string,
+  sessionId: string,
+  req?: { title?: string },
+): Promise<ChatSession> {
+  const res = await fetch(`${daemonUrl}/api/v1/chat/sessions/${sessionId}/fork`, {
+    method: 'POST',
+    headers: req ? { 'Content-Type': 'application/json' } : undefined,
+    body: req ? JSON.stringify(req) : undefined,
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as ChatSession
+}
+
+export async function patchChatSession(
+  daemonUrl: string,
+  sessionId: string,
+  req: { title?: string; status?: string },
+): Promise<ChatSession> {
+  const res = await fetch(`${daemonUrl}/api/v1/chat/sessions/${sessionId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as ChatSession
 }
 
 export type Execution = {

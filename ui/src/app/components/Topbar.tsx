@@ -1,6 +1,7 @@
 import { Moon, Sun } from 'lucide-react'
 import { Button, Chip } from '@heroui/react'
 
+import { goHome, goToChat, useHashRoute } from '@/app/routes'
 import { type HealthState, useDaemonStore } from '@/stores/daemonStore'
 import { useThemeStore } from '@/stores/themeStore'
 
@@ -20,6 +21,7 @@ function wsText(state: string): string {
 }
 
 export function Topbar() {
+  const route = useHashRoute()
   const health = useDaemonStore((s) => s.health)
   const wsState = useDaemonStore((s) => s.wsState)
   const theme = useThemeStore((s) => s.theme)
@@ -48,6 +50,20 @@ export function Topbar() {
           <Chip variant="bordered" size="sm">
             前端
           </Chip>
+          <Button
+            variant={route.name === 'chat' ? 'flat' : 'light'}
+            size="sm"
+            onPress={goToChat}
+          >
+            Chat
+          </Button>
+          <Button
+            variant={route.name === 'workflows' || route.name === 'workflow_detail' ? 'flat' : 'light'}
+            size="sm"
+            onPress={goHome}
+          >
+            Workflows
+          </Button>
         </div>
 
         <div className="flex items-center gap-2">

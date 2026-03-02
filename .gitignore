@@ -1,2 +1,3 @@
 .env
 .worktree-lite
+/backend/tmp/

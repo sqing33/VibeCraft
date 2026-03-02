@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"vibe-tree/backend/internal/api"
+	"vibe-tree/backend/internal/chat"
 	"vibe-tree/backend/internal/config"
 	"vibe-tree/backend/internal/dotenv"
 	"vibe-tree/backend/internal/execution"
@@ -78,6 +79,7 @@ func main() {
 	}
 	execMgr := execution.NewManager(execRunner, grace, hub)
 	experts := expert.NewRegistry(cfg)
+	chatMgr := chat.NewManager(stateStore, hub, chat.Options{})
 
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
@@ -109,7 +111,7 @@ func main() {
 
 	engine := server.New(
 		server.Options{DevCORS: server.DevCORSFromEnv()},
-		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore, Experts: experts},
+		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore, Experts: experts, Chat: chatMgr},
 	)
 	srv := &http.Server{
 		Addr:              cfg.Addr(),

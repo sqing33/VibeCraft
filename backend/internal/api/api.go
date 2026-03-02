@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
+	"vibe-tree/backend/internal/chat"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/expert"
 	"vibe-tree/backend/internal/runner"
@@ -24,6 +25,7 @@ type Deps struct {
 	Hub        *ws.Hub
 	Store      *store.Store
 	Experts    *expert.Registry
+	Chat       *chat.Manager
 }
 
 // Register 功能：注册 HTTP/WS 路由到 `/api/v1` 路由组。
@@ -39,6 +41,14 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.GET("/settings/llm", getLLMSettingsHandler())
 	v1.PUT("/settings/llm", putLLMSettingsHandler(deps))
 	v1.POST("/settings/llm/test", llmTestHandler())
+
+	v1.POST("/chat/sessions", createChatSessionHandler(deps))
+	v1.GET("/chat/sessions", listChatSessionsHandler(deps))
+	v1.GET("/chat/sessions/:id/messages", listChatMessagesHandler(deps))
+	v1.PATCH("/chat/sessions/:id", patchChatSessionHandler(deps))
+	v1.POST("/chat/sessions/:id/turns", postChatTurnHandler(deps))
+	v1.POST("/chat/sessions/:id/compact", compactChatSessionHandler(deps))
+	v1.POST("/chat/sessions/:id/fork", forkChatSessionHandler(deps))
 
 	v1.GET("/workflows", listWorkflowsHandler(deps))
 	v1.POST("/workflows", createWorkflowHandler(deps))

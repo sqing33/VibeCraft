@@ -73,3 +73,45 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer components {
+  .chat-markdown {
+    @apply break-words leading-6;
+  }
+
+  .chat-markdown p {
+    @apply my-0 mb-2 last:mb-0;
+  }
+
+  .chat-markdown ul {
+    @apply mb-2 ml-5 list-disc;
+  }
+
+  .chat-markdown ol {
+    @apply mb-2 ml-5 list-decimal;
+  }
+
+  .chat-markdown li {
+    @apply mb-1;
+  }
+
+  .chat-markdown pre {
+    @apply mb-2 overflow-x-auto rounded-md bg-muted px-3 py-2 text-sm leading-6;
+  }
+
+  .chat-markdown code {
+    @apply rounded bg-muted px-1 py-0.5 text-[0.95em];
+  }
+
+  .chat-markdown pre code {
+    @apply bg-transparent p-0;
+  }
+
+  .chat-markdown blockquote {
+    @apply mb-2 border-l-2 border-border pl-3 text-sm leading-6 text-muted-foreground;
+  }
+
+  .chat-markdown a {
+    @apply text-primary underline;
+  }
+}

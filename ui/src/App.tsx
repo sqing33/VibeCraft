@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 
 import { useHashRoute } from '@/app/routes'
 import { Topbar } from '@/app/components/Topbar'
+import { ChatSessionsPage } from '@/app/pages/ChatSessionsPage'
 import { WorkflowsPage } from '@/app/pages/WorkflowsPage'
 import { WorkflowDetailPage } from '@/app/pages/WorkflowDetailPage'
 import { fetchExperts, fetchHealth, fetchInfo } from '@/lib/daemon'
@@ -17,6 +18,7 @@ import { useDaemonStore } from '@/stores/daemonStore'
  */
 export default function App() {
   const route = useHashRoute()
+  const isChatRoute = route.name === 'chat'
 
   const daemonUrl = useDaemonStore((s) => s.daemonUrl)
   const wsUrl = useDaemonStore((s) => s.wsUrl)
@@ -129,11 +131,19 @@ export default function App() {
   }, [wsUrl, setWsState])
 
   return (
-    <div className="min-h-screen">
+    <div className={isChatRoute ? 'h-screen overflow-hidden' : 'min-h-screen'}>
       <Topbar />
-      <main className="mx-auto max-w-6xl p-4">
+      <main
+        className={
+          isChatRoute
+            ? 'h-[calc(100vh-3.5rem)] w-full overflow-hidden p-4'
+            : 'mx-auto max-w-6xl p-4'
+        }
+      >
         {route.name === 'workflows' ? (
           <WorkflowsPage />
+        ) : route.name === 'chat' ? (
+          <ChatSessionsPage />
         ) : (
           <WorkflowDetailPage workflowId={route.workflowId} />
         )}
