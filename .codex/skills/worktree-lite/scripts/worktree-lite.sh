@@ -13,13 +13,13 @@ Usage:
   worktree-lite.sh review [--base <branch>]
   worktree-lite.sh merge-options [--target <branch>] [--source <branch>] [--format <plain|codex>]
   worktree-lite.sh propose-message [--base <branch>]
-  worktree-lite.sh merge --target <branch> [--message "动作：修改内容"] [--source <branch>]
+  worktree-lite.sh merge --target <branch> [--message "<commit title>"] [--source <branch>]
 
 Commands:
   init             Create a new worktree and branch.
   review           Print review summary for changes against base branch.
   merge-options    Print merge decision options (plain 5-choice or codex-native payload).
-  propose-message  Generate commit title candidates in "动作：修改内容" format.
+  propose-message  Generate commit title candidates inferred from git history.
   merge            Squash merge source branch into target and commit.
 EOF
 }
@@ -220,68 +220,312 @@ build_subject() {
   echo "更新 ${count} 处文件改动"
 }
 
-detect_action() {
+history_recent_subjects() {
+  local common_root="$1"
+  local branch="$2"
+  local n="${3:-40}"
+  git -C "$common_root" log --format=%s -n "$n" "$branch" 2>/dev/null || true
+}
+
+title_style_stats() {
+  local common_root="$1"
+  local target_branch="$2"
+  local sample total conventional action_cn
+  sample="$(history_recent_subjects "$common_root" "$target_branch" 40)"
+  total="$(count_non_empty "$sample")"
+  conventional="$(
+    printf '%s\n' "$sample" \
+      | grep -E '^(feat|fix|docs|refactor|perf|test|build|ci|chore|revert)(\([^)]*\))?: .+' \
+      | wc -l \
+      | tr -d ' '
+  )"
+  action_cn="$(
+    printf '%s\n' "$sample" \
+      | grep -E '^[^[:space:]]+：.+' \
+      | wc -l \
+      | tr -d ' '
+  )"
+  printf '%s\t%s\t%s\n' "$total" "$conventional" "$action_cn"
+}
+
+detect_title_style() {
+  local common_root="$1"
+  local target_branch="$2"
+  local total conventional action_cn
+  IFS=$'\t' read -r total conventional action_cn <<<"$(title_style_stats "$common_root" "$target_branch")"
+  if [[ "$total" -le 0 ]]; then
+    echo "plain"
+    return 0
+  fi
+  if [[ $((conventional * 100 / total)) -ge 60 ]]; then
+    echo "conventional"
+    return 0
+  fi
+  if [[ $((action_cn * 100 / total)) -ge 60 ]]; then
+    echo "action_cn"
+    return 0
+  fi
+  echo "plain"
+}
+
+history_default_conventional_type() {
+  local common_root="$1"
+  local target_branch="$2"
+  local types
+  types="$(
+    history_recent_subjects "$common_root" "$target_branch" 100 \
+      | sed -nE 's/^([a-z]+)(\([^)]*\))?: .+/\1/p'
+  )"
+  if [[ -z "$types" ]]; then
+    echo "feat"
+    return 0
+  fi
+  printf '%s\n' "$types" | awk '
+NF { c[$0]++ }
+END {
+  best="feat"; max=0;
+  for (t in c) { if (c[t] > max) { max=c[t]; best=t } }
+  print best
+}'
+}
+
+history_conventional_scopes() {
+  local common_root="$1"
+  local target_branch="$2"
+  history_recent_subjects "$common_root" "$target_branch" 200 \
+    | sed -nE 's/^[a-z]+\(([^)]+)\): .+/\1/p' \
+    | awk 'NF && !seen[$0]++ { print }'
+}
+
+is_valid_conventional_type() {
+  local t="$1"
+  case "$t" in
+    feat|fix|docs|refactor|perf|test|build|ci|chore|revert)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+type_to_action_cn() {
+  local t="$1"
+  case "$t" in
+    fix)
+      echo "修复"
+      ;;
+    feat)
+      echo "新增"
+      ;;
+    perf)
+      echo "优化"
+      ;;
+    *)
+      echo "修改"
+      ;;
+  esac
+}
+
+parse_conventional_title() {
+  local raw="$1"
+  local re='^([a-z]+)(\(([^)]+)\))?:[[:space:]]*(.+)$'
+  if [[ "$raw" =~ $re ]]; then
+    printf '%s\t%s\t%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
+    return 0
+  fi
+  printf '\t\t\n'
+}
+
+parse_action_cn_title() {
+  local raw="$1"
+  local re='^([^：]+)：[[:space:]]*(.+)$'
+  if [[ "$raw" =~ $re ]]; then
+    printf '%s\t%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    return 0
+  fi
+  printf '\t\n'
+}
+
+strip_title_prefix() {
+  local raw="$1"
+  local t s sub
+  IFS=$'\t' read -r t s sub <<<"$(parse_conventional_title "$raw")"
+  if [[ -n "$sub" ]]; then
+    echo "$sub"
+    return 0
+  fi
+  IFS=$'\t' read -r _action sub <<<"$(parse_action_cn_title "$raw")"
+  if [[ -n "$sub" ]]; then
+    echo "$sub"
+    return 0
+  fi
+  echo "$raw"
+}
+
+primary_range_commit_subject() {
+  local common_root="$1"
+  local base_branch="$2"
+  local source_branch="$3"
+  git -C "$common_root" log --format=%s -n 1 "${base_branch}..${source_branch}" 2>/dev/null || true
+}
+
+detect_scope_from_files() {
+  local files="$1"
+  local known_scopes="${2:-}"
+
+  local modules mod_count first_module
+  modules="$(printf '%s\n' "$files" | awk -F/ 'NF{print $1}' | awk '!seen[$0]++')"
+  mod_count="$(count_non_empty "$modules")"
+  first_module="$(printf '%s\n' "$modules" | awk 'NF{print; exit}')"
+
+  if [[ "$mod_count" -eq 1 && -n "$first_module" && -n "$known_scopes" ]]; then
+    if printf '%s\n' "$known_scopes" | grep -Fxq "$first_module"; then
+      echo "$first_module"
+      return 0
+    fi
+  fi
+
+  if printf '%s\n' "$modules" | grep -Fxq "desktop"; then
+    echo "desktop"
+    return 0
+  fi
+  if printf '%s\n' "$modules" | grep -Fxq ".codex" || printf '%s\n' "$modules" | grep -Fxq "scripts"; then
+    echo "dev"
+    return 0
+  fi
+  echo "core"
+}
+
+detect_type_from_diff() {
   local common_root="$1"
   local range="$2"
   local statuses="$3"
   local count="$4"
+  local default_type="$5"
+  local files="$6"
 
   if [[ "$count" -eq 0 ]]; then
-    echo "合并"
+    echo "$default_type"
     return 0
+  fi
+
+  if [[ -n "$files" ]]; then
+    if printf '%s\n' "$files" | awk 'NF && $0 !~ /^docs\// && $0 !~ /\.md$/ { exit 1 }'; then
+      echo "docs"
+      return 0
+    fi
   fi
 
   local patch
   patch="$(git -C "$common_root" diff "$range" || true)"
-
   if printf '%s\n' "$patch" | grep -Eiq 'fix|bug|error|panic|crash|异常|错误|兼容|回归'; then
-    echo "修复"
-    return 0
-  fi
-  if printf '%s\n' "$statuses" | grep -Eq '^A[[:space:]]'; then
-    echo "新增"
+    echo "fix"
     return 0
   fi
   if printf '%s\n' "$patch" | grep -Eiq 'optimi|perf|cache|speed|性能|提速'; then
-    echo "优化"
+    echo "perf"
     return 0
   fi
-  echo "修改"
-}
-
-title_parts() {
-  local common_root="$1"
-  local base_branch="$2"
-  local source_branch="$3"
-  local range files statuses count action subject
-
-  range="${base_branch}...${source_branch}"
-  files="$(git -C "$common_root" diff --name-only "$range" || true)"
-  statuses="$(git -C "$common_root" diff --name-status "$range" || true)"
-  count="$(count_non_empty "$files")"
-  subject="$(build_subject "$files")"
-  if [[ "$count" -eq 0 ]]; then
-    subject="同步 ${source_branch} 到 ${base_branch}"
+  if printf '%s\n' "$statuses" | grep -Eq '^A[[:space:]]'; then
+    echo "feat"
+    return 0
   fi
-  action="$(detect_action "$common_root" "$range" "$statuses" "$count")"
-  printf '%s\t%s\t%s\n' "$action" "$subject" "$count"
+  echo "$default_type"
 }
 
 build_message_candidates() {
   local common_root="$1"
   local base_branch="$2"
   local source_branch="$3"
-  local action subject count rec alt1 alt2 reason
 
-  IFS=$'\t' read -r action subject count <<<"$(title_parts "$common_root" "$base_branch" "$source_branch")"
-  rec="${action}：${subject}"
-  alt1="${action}：处理 ${count} 处文件改动"
-  if [[ "$action" == "修改" ]]; then
-    alt2="优化：${subject}"
-  else
-    alt2="修改：${subject}"
+  local range files statuses count fallback_subject
+  range="${base_branch}...${source_branch}"
+  files="$(git -C "$common_root" diff --name-only "$range" || true)"
+  statuses="$(git -C "$common_root" diff --name-status "$range" || true)"
+  count="$(count_non_empty "$files")"
+  fallback_subject="$(build_subject "$files")"
+  if [[ "$count" -eq 0 ]]; then
+    fallback_subject="同步 ${source_branch} 到 ${base_branch}"
   fi
-  reason="根据 ${count} 个文件改动和 diff 关键词判断，动作词使用「${action}」。"
+
+  local style default_type known_scopes scope type
+  style="$(detect_title_style "$common_root" "$base_branch")"
+  default_type="$(history_default_conventional_type "$common_root" "$base_branch")"
+  known_scopes="$(history_conventional_scopes "$common_root" "$base_branch")"
+  scope="$(detect_scope_from_files "$files" "$known_scopes")"
+  type="$(detect_type_from_diff "$common_root" "$range" "$statuses" "$count" "$default_type" "$files")"
+
+  local primary_raw
+  primary_raw="$(primary_range_commit_subject "$common_root" "$base_branch" "$source_branch")"
+
+  local subject
+  subject="$(strip_title_prefix "$primary_raw")"
+  subject="${subject:-$fallback_subject}"
+
+  local rec alt1 alt2 reason
+  case "$style" in
+    conventional)
+      local parsed_type parsed_scope parsed_subject
+      IFS=$'\t' read -r parsed_type parsed_scope parsed_subject <<<"$(parse_conventional_title "$primary_raw")"
+
+      local final_type="$type"
+      local final_scope="$scope"
+      if is_valid_conventional_type "$parsed_type"; then
+        final_type="$parsed_type"
+      fi
+      if [[ -n "$parsed_scope" ]]; then
+        if [[ -z "$known_scopes" ]] || printf '%s\n' "$known_scopes" | grep -Fxq "$parsed_scope"; then
+          final_scope="$parsed_scope"
+        fi
+      fi
+      if [[ -n "$parsed_subject" ]]; then
+        subject="$parsed_subject"
+      fi
+      subject="${subject:-$fallback_subject}"
+
+      rec="${final_type}(${final_scope}): ${subject}"
+      if [[ -n "$fallback_subject" && "$fallback_subject" != "$subject" ]]; then
+        alt1="${final_type}(${final_scope}): ${fallback_subject}"
+      else
+        alt1="${final_type}(${final_scope}): 处理 ${count} 处文件改动"
+      fi
+      if [[ "$final_type" == "feat" ]]; then
+        alt2="chore(${final_scope}): ${subject}"
+      else
+        alt2="feat(${final_scope}): ${subject}"
+      fi
+
+      local total conventional action_cn
+      IFS=$'\t' read -r total conventional action_cn <<<"$(title_style_stats "$common_root" "$base_branch")"
+      reason="基于 ${base_branch} 最近 ${total} 条提交（conventional=${conventional}）推断格式为 conventional commits；并优先使用待合并分支最新提交标题作为摘要。"
+      ;;
+    action_cn)
+      local commit_action commit_subject
+      IFS=$'\t' read -r commit_action commit_subject <<<"$(parse_action_cn_title "$primary_raw")"
+      local action
+      action="$(type_to_action_cn "$type")"
+      if [[ -n "$commit_action" ]]; then
+        action="$commit_action"
+      fi
+      if [[ -n "$commit_subject" ]]; then
+        subject="$commit_subject"
+      fi
+      subject="${subject:-$fallback_subject}"
+
+      rec="${action}：${subject}"
+      alt1="${action}：${fallback_subject}"
+      alt2="修改：${subject}"
+      reason="基于 ${base_branch} 最近提交推断格式为「动作：内容」，并优先使用待合并分支最新提交标题作为摘要。"
+      ;;
+    *)
+      rec="$subject"
+      alt1="$fallback_subject"
+      alt2="更新 ${count} 处文件改动"
+      reason="未检测到稳定的提交标题格式，回退为纯标题输出，并优先使用待合并分支最新提交标题作为摘要。"
+      ;;
+  esac
+
   printf '%s\t%s\t%s\t%s\n' "$rec" "$alt1" "$alt2" "$reason"
 }
 
@@ -927,8 +1171,9 @@ cmd_merge() {
     if [[ "$should_fold" -eq 1 && -n "$last_message" ]]; then
       message="$last_message"
     else
-      IFS=$'\t' read -r action subject count <<<"$(title_parts "$common_root" "$target_branch" "$source_branch")"
-      message="${action}：${subject}"
+      local rec alt1 alt2 reason
+      IFS=$'\t' read -r rec alt1 alt2 reason <<<"$(build_message_candidates "$common_root" "$target_branch" "$source_branch")"
+      message="$rec"
     fi
     echo "AUTO_MESSAGE=$message"
   fi
