@@ -45,6 +45,7 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.POST("/chat/sessions", createChatSessionHandler(deps))
 	v1.GET("/chat/sessions", listChatSessionsHandler(deps))
 	v1.GET("/chat/sessions/:id/messages", listChatMessagesHandler(deps))
+	v1.GET("/chat/sessions/:id/attachments/:attachmentID/content", getChatAttachmentContentHandler(deps))
 	v1.PATCH("/chat/sessions/:id", patchChatSessionHandler(deps))
 	v1.POST("/chat/sessions/:id/turns", postChatTurnHandler(deps))
 	v1.POST("/chat/sessions/:id/compact", compactChatSessionHandler(deps))

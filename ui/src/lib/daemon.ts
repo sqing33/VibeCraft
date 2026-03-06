@@ -353,6 +353,15 @@ export async function postChatTurn(
   return (await res.json()) as ChatTurnResult
 }
 
+
+export function chatAttachmentContentUrl(
+  daemonUrl: string,
+  sessionId: string,
+  attachmentId: string,
+): string {
+  return `${normalizeBaseUrl(daemonUrl)}/api/v1/chat/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachmentId)}/content`
+}
+
 export async function postChatCompact(
   daemonUrl: string,
   sessionId: string,

@@ -46,10 +46,17 @@ Each persisted attachment MUST include at least:
 
 Message query APIs MUST return the attachments associated with each message.
 
+The system MUST provide an API to read persisted attachment content for a specific chat session attachment so that the UI can preview supported attachment types.
+
 #### Scenario: Message history includes attachments
 - **WHEN** a user sends a turn with attachments and later calls `GET /api/v1/chat/sessions/:id/messages`
 - **THEN** the returned user message contains its attachment metadata
 - **AND** the metadata is stable across daemon restart
+
+#### Scenario: Read persisted attachment content
+- **WHEN** client calls the chat attachment content API with a valid `session_id` and `attachment_id`
+- **THEN** the daemon returns the stored attachment content with the correct content type
+- **AND** the UI can use that response for preview
 
 ### Requirement: Providers MUST receive provider-native multimodal input
 The system MUST translate persisted attachments into the native input structure supported by the selected provider SDK.

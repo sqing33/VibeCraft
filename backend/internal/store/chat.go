@@ -492,6 +492,34 @@ func (s *Store) CreateChatAttachments(ctx context.Context, params CreateChatAtta
 	return nil
 }
 
+func (s *Store) GetChatAttachment(ctx context.Context, sessionID, attachmentID string) (ChatAttachment, error) {
+	if s == nil || s.db == nil {
+		return ChatAttachment{}, fmt.Errorf("store not initialized")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	attachmentID = strings.TrimSpace(attachmentID)
+	if sessionID == "" || attachmentID == "" {
+		return ChatAttachment{}, fmt.Errorf("%w: session_id and attachment_id are required", ErrValidation)
+	}
+	row := s.db.QueryRowContext(
+		ctx,
+		`SELECT id, session_id, message_id, kind, file_name, mime_type, size_bytes, storage_rel_path, created_at
+		   FROM chat_attachments
+		  WHERE session_id = ? AND id = ?
+		  LIMIT 1;`,
+		sessionID,
+		attachmentID,
+	)
+	att, err := scanChatAttachment(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ChatAttachment{}, os.ErrNotExist
+		}
+		return ChatAttachment{}, fmt.Errorf("query chat attachment: %w", err)
+	}
+	return att, nil
+}
+
 func (s *Store) SessionHasAttachments(ctx context.Context, sessionID string) (bool, error) {
 	if s == nil || s.db == nil {
 		return false, fmt.Errorf("store not initialized")

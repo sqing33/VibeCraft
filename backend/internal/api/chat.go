@@ -3,11 +3,16 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+
+	"vibe-tree/backend/internal/paths"
 
 	"github.com/gin-gonic/gin"
 
@@ -294,6 +299,55 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, result)
+	}
+}
+
+func getChatAttachmentContentHandler(deps Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Store == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "store not configured"})
+			return
+		}
+		sessionID := c.Param("id")
+		attachmentID := c.Param("attachmentID")
+		att, err := deps.Store.GetChatAttachment(c.Request.Context(), sessionID, attachmentID)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "attachment not found"})
+				return
+			}
+			if errors.Is(err, store.ErrValidation) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		root, err := paths.ChatAttachmentsDir()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		fullPath := filepath.Join(root, filepath.FromSlash(att.StorageRelPath))
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "attachment content not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		contentType := strings.TrimSpace(att.MIMEType)
+		if contentType == "" {
+			contentType = mime.TypeByExtension(strings.ToLower(filepath.Ext(att.FileName)))
+		}
+		if contentType == "" {
+			contentType = http.DetectContentType(data)
+		}
+		c.Header("Content-Type", contentType)
+		c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%q", att.FileName))
+		c.Data(http.StatusOK, contentType, data)
 	}
 }
 

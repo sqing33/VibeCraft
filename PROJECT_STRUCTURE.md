@@ -39,7 +39,7 @@
 | `backend/cmd/vibe-tree-daemon/main.go`     | daemon 进程入口，负责加载配置、启动 HTTP Server、处理优雅退出                                                                         |
 | `backend/internal/server/server.go`        | Gin Engine 装配：恢复中间件、请求日志、dev CORS，并挂载 `internal/api` 路由；可选挂载 UI 静态资源（`ui/dist` 或 `VIBE_TREE_UI_DIST`） |
 | `backend/internal/api/api.go`              | HTTP/WS handlers：health、workflow CRUD、execution start/log/cancel、WebSocket 升级入口                                               |
-| `backend/internal/api/chat.go`             | Chat Session API：会话创建/列表/消息查询/多轮发送/附件上传（JSON + multipart）/手动压缩/分叉/归档（`/api/v1/chat/*`）                |
+| `backend/internal/api/chat.go`             | Chat Session API：会话创建/列表/消息查询/多轮发送/附件上传/附件内容预览（JSON + multipart）/手动压缩/分叉/归档（`/api/v1/chat/*`）                |
 | `backend/internal/api/info.go`             | 排障信息 API：`GET /api/v1/info`（version + XDG paths）                                                                               |
 | `backend/internal/api/experts.go`          | Experts 列表 API：`GET /api/v1/experts`（仅安全字段，供 UI 下拉）                                                                     |
 | `backend/internal/api/settings_llm.go`     | 模型设置 API：`GET/PUT /api/v1/settings/llm`（sources/models；key masking；写盘并热更新 experts）                                     |
@@ -75,7 +75,9 @@
 | `backend/internal/logx/logx.go`            | 后端统一日志格式封装（`level=... module=... action=... msg="..."`）                                                                   |
 | `backend/internal/version/version.go`      | 版本信息（Commit/BuiltAt，可用 ldflags 注入；用于 `/api/v1/info`）                                                                    |
 | `ui/src/App.tsx`                           | 前端入口：daemon health + WS 连接管理 + 路由（`#/` workflows、`#/chat` chat sessions、`#/workflows/:id` 详情）                       |
-| `ui/src/app/pages/ChatSessionsPage.tsx`    | Chat 会话页：会话列表、消息流式渲染、发送消息/上传附件、附件标签展示、手动压缩/分叉/归档                                              |
+| `ui/src/app/pages/ChatSessionsPage.tsx`    | Chat 会话页：会话列表、消息流式渲染、发送消息/上传附件、拖拽上传、附件标签与图片/PDF/文本代码预览、手动压缩/分叉/归档                                       |
+| `ui/src/app/components/AttachmentPreviewModal.tsx` | Chat 附件预览弹窗：图片/PDF 预览、Markdown 渲染、代码高亮与纯文本展示                                                              |
+| `ui/src/lib/chatAttachmentPreview.ts`      | Chat 附件预览判断：按文件后缀/MIME 推断图片/PDF/Markdown/代码/纯文本预览模式                                                         |
 | `ui/src/components/DAGView.tsx`            | React Flow DAG 视图：dagre 自动布局 + 节点按状态上色 + 点击节点联动终端                                                               |
 | `ui/src/components/TerminalPane.tsx`       | xterm.js 封装组件（fit + write/reset 接口）                                                                                           |
 | `ui/src/app/components/LLMSettingsTab.tsx` | 系统设置「模型」Tab：编辑 Sources（base_url+key）与 Models（model+source+SDK），保存后刷新 experts                                    |
@@ -111,6 +113,7 @@
 | Chat 自动上下文压缩               | `backend/internal/chat/manager.go`, `backend/internal/store/chat.go`                                                                                                                                                                                           |
 | Chat provider anchor 续上下文      | `backend/internal/chat/manager.go`, `backend/internal/store/chat.go`                                                                                                                                                                                           |
 | Chat 附件上传与多模态输入          | `backend/internal/api/chat.go`, `backend/internal/chat/attachments.go`, `backend/internal/chat/provider_input.go`, `backend/internal/store/chat.go`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/lib/daemon.ts`                                 |
+| Chat 附件预览与拖拽上传            | `backend/internal/api/api.go`, `backend/internal/api/chat.go`, `backend/internal/store/chat.go`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/app/components/AttachmentPreviewModal.tsx`, `ui/src/lib/chatAttachmentPreview.ts`, `ui/src/lib/daemon.ts` |
 | Workflow CRUD API                  | `backend/internal/api/workflows.go`, `backend/internal/store/workflows.go`                                                                                                                                                                 |
 | Workflow Start（master 执行）      | `backend/internal/api/workflow_start.go`, `backend/internal/store/nodes.go`, `backend/internal/store/executions.go`                                                                                                                        |
 | Workflow Nodes API                 | `backend/internal/api/workflow_start.go`, `backend/internal/store/nodes.go`                                                                                                                                                                |

@@ -3,8 +3,10 @@ package api_test
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"mime/multipart"
 	"net/http"
+	"strings"
 	"testing"
 
 	"vibe-tree/backend/internal/config"
@@ -292,5 +294,87 @@ func TestChatSession_MultipartTurnPersistsAttachments(t *testing.T) {
 	}
 	if messages[0].ContentText != "（仅附件）" {
 		t.Fatalf("expected attachment-only display text, got %q", messages[0].ContentText)
+	}
+}
+
+func TestChatSession_AttachmentContentEndpoint(t *testing.T) {
+	env := newTestEnv(t, config.Default(), 2)
+	baseURL := env.httpSrv.URL
+
+	createBody, _ := json.Marshal(map[string]any{
+		"title":          "chat-preview",
+		"expert_id":      "demo",
+		"workspace_path": ".",
+	})
+	createRes, err := http.Post(baseURL+"/api/v1/chat/sessions", "application/json", bytes.NewReader(createBody))
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer createRes.Body.Close()
+	if createRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected create status: %s", createRes.Status)
+	}
+	var sess store.ChatSession
+	if err := json.NewDecoder(createRes.Body).Decode(&sess); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("files", "hello.txt")
+	if err != nil {
+		t.Fatalf("create file part: %v", err)
+	}
+	if _, err := part.Write([]byte("preview me")); err != nil {
+		t.Fatalf("write file part: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/chat/sessions/"+sess.ID+"/turns", &body)
+	if err != nil {
+		t.Fatalf("new multipart turn request: %v", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	turnRes, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post multipart turn: %v", err)
+	}
+	defer turnRes.Body.Close()
+	if turnRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected multipart turn status: %s", turnRes.Status)
+	}
+
+	msgsRes, err := http.Get(baseURL + "/api/v1/chat/sessions/" + sess.ID + "/messages")
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	defer msgsRes.Body.Close()
+	var messages []store.ChatMessage
+	if err := json.NewDecoder(msgsRes.Body).Decode(&messages); err != nil {
+		t.Fatalf("decode messages response: %v", err)
+	}
+	if len(messages) == 0 || len(messages[0].Attachments) == 0 {
+		t.Fatalf("expected persisted attachment metadata, got %+v", messages)
+	}
+	att := messages[0].Attachments[0]
+	contentRes, err := http.Get(baseURL + "/api/v1/chat/sessions/" + sess.ID + "/attachments/" + att.ID + "/content")
+	if err != nil {
+		t.Fatalf("get attachment content: %v", err)
+	}
+	defer contentRes.Body.Close()
+	if contentRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected attachment content status: %s", contentRes.Status)
+	}
+	if got := contentRes.Header.Get("Content-Type"); !strings.Contains(got, "text/plain") {
+		t.Fatalf("unexpected content-type: %q", got)
+	}
+	payload, err := io.ReadAll(contentRes.Body)
+	if err != nil {
+		t.Fatalf("read attachment content: %v", err)
+	}
+	if string(payload) != "preview me" {
+		t.Fatalf("unexpected attachment content: %q", string(payload))
 	}
 }

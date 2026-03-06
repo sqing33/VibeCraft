@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Chip, Input, Select, SelectItem, Textarea } from '@heroui/react'
-import { Paperclip, Trash2, X } from 'lucide-react'
+import { Eye, Paperclip, Trash2, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 import { onWsEnvelope } from '@/lib/wsBus'
-import { fetchLLMSettings } from '@/lib/daemon'
+import { chatAttachmentContentUrl, fetchLLMSettings, type ChatAttachment } from '@/lib/daemon'
+import { AttachmentPreviewModal, type AttachmentPreviewState } from '@/app/components/AttachmentPreviewModal'
+import { canPreviewAttachmentTarget, describeAttachmentPreview } from '@/lib/chatAttachmentPreview'
 import { toast } from '@/lib/toast'
 import { formatRelativeTime } from '@/lib/time'
 import { useDaemonStore } from '@/stores/daemonStore'
@@ -104,10 +106,13 @@ export function ChatSessionsPage() {
   const [input, setInput] = useState('')
   const [turnExpertId, setTurnExpertId] = useState('')
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [dragActive, setDragActive] = useState(false)
+  const [preview, setPreview] = useState<AttachmentPreviewState | null>(null)
   const [allowedModelExpertIds, setAllowedModelExpertIds] = useState<Set<string>>(new Set())
   const messageScrollRef = useRef<HTMLDivElement | null>(null)
   const shouldAutoScrollRef = useRef(true)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const dragDepthRef = useRef(0)
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.session_id === activeSessionId) ?? null,
@@ -175,6 +180,149 @@ export function ChatSessionsPage() {
   const openFilePicker = useCallback(() => {
     fileInputRef.current?.click()
   }, [])
+
+  const closePreview = useCallback(() => {
+    setPreview((prev) => {
+      if (prev?.revokeOnClose && prev.url) URL.revokeObjectURL(prev.url)
+      return null
+    })
+  }, [])
+
+  const openPreviewForFile = useCallback(async (file: File) => {
+    const descriptor = describeAttachmentPreview(file.name, file.type, undefined)
+    if (descriptor.kind === 'unsupported') return
+    setPreview((prev) => {
+      if (prev?.revokeOnClose && prev.url) URL.revokeObjectURL(prev.url)
+      return {
+        name: file.name,
+        kind: descriptor.kind,
+        language: descriptor.language,
+        loading: descriptor.kind === 'code' || descriptor.kind === 'markdown' || descriptor.kind === 'text',
+        revokeOnClose: false,
+      }
+    })
+    if (descriptor.kind === 'image' || descriptor.kind === 'pdf') {
+      const url = URL.createObjectURL(file)
+      setPreview((prev) => {
+        if (prev?.revokeOnClose && prev.url) URL.revokeObjectURL(prev.url)
+        return {
+          name: file.name,
+          kind: descriptor.kind,
+          url,
+          revokeOnClose: true,
+        }
+      })
+      return
+    }
+    try {
+      const content = await file.text()
+      setPreview({
+        name: file.name,
+        kind: descriptor.kind,
+        language: descriptor.language,
+        content,
+        revokeOnClose: false,
+      })
+    } catch (err) {
+      setPreview({
+        name: file.name,
+        kind: descriptor.kind,
+        error: err instanceof Error ? err.message : String(err),
+        revokeOnClose: false,
+      })
+      toast({
+        variant: 'destructive',
+        title: '附件预览失败',
+        description: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }, [])
+
+  const openPreviewForAttachment = useCallback(async (attachment: ChatAttachment) => {
+    if (!activeSessionId) return
+    const descriptor = describeAttachmentPreview(attachment.file_name, attachment.mime_type, attachment.kind)
+    if (descriptor.kind === 'unsupported') return
+    const contentUrl = chatAttachmentContentUrl(daemonUrl, activeSessionId, attachment.attachment_id)
+    setPreview((prev) => {
+      if (prev?.revokeOnClose && prev.url) URL.revokeObjectURL(prev.url)
+      return {
+        name: attachment.file_name,
+        kind: descriptor.kind,
+        language: descriptor.language,
+        url: descriptor.kind === 'image' || descriptor.kind === 'pdf' ? contentUrl : undefined,
+        loading: descriptor.kind === 'code' || descriptor.kind === 'markdown' || descriptor.kind === 'text',
+        revokeOnClose: false,
+      }
+    })
+    if (descriptor.kind === 'image' || descriptor.kind === 'pdf') {
+      return
+    }
+    try {
+      const res = await fetch(contentUrl)
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`.trim())
+      const content = await res.text()
+      setPreview({
+        name: attachment.file_name,
+        kind: descriptor.kind,
+        language: descriptor.language,
+        content,
+        revokeOnClose: false,
+      })
+    } catch (err) {
+      setPreview({
+        name: attachment.file_name,
+        kind: descriptor.kind,
+        error: err instanceof Error ? err.message : String(err),
+        revokeOnClose: false,
+      })
+      toast({
+        variant: 'destructive',
+        title: '附件预览失败',
+        description: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }, [activeSessionId, daemonUrl])
+
+  useEffect(() => () => {
+    if (preview?.revokeOnClose && preview.url) URL.revokeObjectURL(preview.url)
+  }, [preview])
+
+  const dragHasFiles = useCallback((event: DragEvent<HTMLDivElement>) => {
+    return Array.from(event.dataTransfer?.types ?? []).includes('Files')
+  }, [])
+
+  const handleComposerDragEnter = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current += 1
+    setDragActive(true)
+  }, [dragHasFiles])
+
+  const handleComposerDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'copy'
+    if (!dragActive) setDragActive(true)
+  }, [dragActive, dragHasFiles])
+
+  const handleComposerDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) setDragActive(false)
+  }, [dragHasFiles])
+
+  const handleComposerDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current = 0
+    setDragActive(false)
+    appendSelectedFiles(event.dataTransfer.files)
+  }, [appendSelectedFiles, dragHasFiles])
 
   useEffect(() => {
     let cancelled = false
@@ -643,11 +791,24 @@ export function ChatSessionsPage() {
                         const sizeLabel = formatAttachmentSize(attachment.size_bytes)
                         const kindLabel = formatAttachmentKind(attachment.kind)
                         return (
-                          <Chip key={attachment.attachment_id} size="sm" variant="flat">
-                            {attachment.file_name}
-                            {kindLabel ? ` · ${kindLabel}` : ''}
-                            {sizeLabel ? ` · ${sizeLabel}` : ''}
-                          </Chip>
+                          <div
+                            key={attachment.attachment_id}
+                            className="flex items-center gap-1 rounded-full border bg-background/60 px-2 py-1 text-xs"
+                          >
+                            <span className="max-w-[200px] truncate">{attachment.file_name}</span>
+                            {kindLabel ? <span className="text-muted-foreground">{kindLabel}</span> : null}
+                            {sizeLabel ? <span className="text-muted-foreground">{sizeLabel}</span> : null}
+                            {canPreviewAttachmentTarget(attachment.file_name, attachment.mime_type, attachment.kind) ? (
+                              <button
+                                type="button"
+                                className="rounded p-0.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                                onClick={() => void openPreviewForAttachment(attachment)}
+                                title="预览附件"
+                              >
+                                <Eye className="h-3 w-3" />
+                              </button>
+                            ) : null}
+                          </div>
                         )
                       })}
                     </div>
@@ -704,7 +865,13 @@ export function ChatSessionsPage() {
           ) : null}
         </div>
 
-        <div className="flex gap-2">
+        <div
+          className={`flex gap-2 rounded-xl border border-dashed p-2 transition ${dragActive ? 'border-primary bg-primary/5 shadow-sm' : 'border-transparent'}` }
+          onDragEnter={handleComposerDragEnter}
+          onDragOver={handleComposerDragOver}
+          onDragLeave={handleComposerDragLeave}
+          onDrop={handleComposerDrop}
+        >
           <div className="flex flex-1 flex-col gap-2">
             <input
               ref={fileInputRef}
@@ -721,17 +888,32 @@ export function ChatSessionsPage() {
                 {selectedFiles.map((file) => {
                   const identity = fileIdentity(file)
                   return (
-                    <button
+                    <div
                       key={identity}
-                      type="button"
-                      onClick={() => removeSelectedFile(identity)}
-                      className="flex max-w-full items-center gap-1 rounded-full border px-2 py-1 text-xs text-foreground transition hover:bg-muted"
+                      className="flex max-w-full items-center gap-1 rounded-full border px-2 py-1 text-xs text-foreground"
                     >
-                      <span className="max-w-[220px] truncate">{file.name}</span>
+                      <span className="max-w-[180px] truncate">{file.name}</span>
                       <span className="text-muted-foreground">{guessPendingFileKind(file)}</span>
                       <span className="text-muted-foreground">{formatAttachmentSize(file.size)}</span>
-                      <X className="h-3 w-3" />
-                    </button>
+                      {canPreviewAttachmentTarget(file.name, file.type) ? (
+                        <button
+                          type="button"
+                          className="rounded p-0.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                          onClick={() => void openPreviewForFile(file)}
+                          title="预览附件"
+                        >
+                          <Eye className="h-3 w-3" />
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="rounded p-0.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                        onClick={() => removeSelectedFile(identity)}
+                        title="移除附件"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
                   )
                 })}
               </div>
@@ -744,6 +926,7 @@ export function ChatSessionsPage() {
               isDisabled={!activeSessionId || sending}
               className="flex-1"
             />
+            {dragActive ? <div className="text-xs text-primary">释放鼠标即可添加附件</div> : null}
           </div>
           <div className="flex w-[200px] flex-col gap-2">
             <Button
@@ -780,6 +963,8 @@ export function ChatSessionsPage() {
           </div>
         </div>
       </section>
+            <AttachmentPreviewModal preview={preview} onClose={closePreview} />
+
     </div>
   )
 }
