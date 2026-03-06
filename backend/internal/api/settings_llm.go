@@ -137,6 +137,7 @@ func putLLMSettingsHandler(deps Deps) gin.HandlerFunc {
 		}
 
 		cfg.LLM = next
+		config.ReconcileBasicSettingsWithLLM(&cfg.Basic, cfg.LLM)
 		if err := config.MirrorLLMToExperts(&cfg); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return

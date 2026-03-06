@@ -29,11 +29,15 @@ const (
 )
 
 type Options struct {
-	SoftRatio     float64
-	ForceRatio    float64
-	HardRatio     float64
-	KeepRecent    int
-	ContextWindow int64
+	SoftRatio                     float64
+	ForceRatio                    float64
+	HardRatio                     float64
+	KeepRecent                    int
+	ContextWindow                 int64
+	ThinkingTranslationMinChars   int
+	ThinkingTranslationForceChars int
+	ThinkingTranslationIdle       time.Duration
+	ThinkingTranslator            ThinkingTranslatorFunc
 }
 
 type Manager struct {
@@ -48,26 +52,35 @@ type Manager struct {
 	hardRatio     float64
 	keepRecent    int
 	contextWindow int64
+
+	thinkingTranslationMinChars   int
+	thinkingTranslationForceChars int
+	thinkingTranslationIdle       time.Duration
+	thinkingTranslator            ThinkingTranslatorFunc
 }
 
 type TurnParams struct {
-	Session     store.ChatSession
-	ExpertID    string
-	UserInput   string
-	ModelInput  string
-	Attachments []UploadedAttachment
-	SDK         runner.SDKSpec
-	Env         map[string]string
-	Fallbacks   []runner.SDKFallback
+	Session             store.ChatSession
+	ExpertID            string
+	UserInput           string
+	ModelInput          string
+	Attachments         []UploadedAttachment
+	SDK                 runner.SDKSpec
+	Env                 map[string]string
+	Fallbacks           []runner.SDKFallback
+	ThinkingTranslation *ThinkingTranslationSpec
 }
 
 type TurnResult struct {
-	UserMessage       store.ChatMessage `json:"user_message"`
-	AssistantMessage  store.ChatMessage `json:"assistant_message"`
-	ReasoningText     *string           `json:"reasoning_text,omitempty"`
-	ModelInput        *string           `json:"model_input,omitempty"`
-	ContextMode       *string           `json:"context_mode,omitempty"`
-	CachedInputTokens *int64            `json:"cached_input_tokens,omitempty"`
+	UserMessage                store.ChatMessage `json:"user_message"`
+	AssistantMessage           store.ChatMessage `json:"assistant_message"`
+	ReasoningText              *string           `json:"reasoning_text,omitempty"`
+	TranslatedReasoningText    *string           `json:"translated_reasoning_text,omitempty"`
+	ModelInput                 *string           `json:"model_input,omitempty"`
+	ContextMode                *string           `json:"context_mode,omitempty"`
+	CachedInputTokens          *int64            `json:"cached_input_tokens,omitempty"`
+	ThinkingTranslationApplied bool              `json:"thinking_translation_applied"`
+	ThinkingTranslationFailed  bool              `json:"thinking_translation_failed"`
 }
 
 type providerCallMeta struct {
@@ -105,17 +118,36 @@ func NewManager(st *store.Store, hub *ws.Hub, opts Options) *Manager {
 	if contextWindow <= 0 {
 		contextWindow = defaultContextWindow
 	}
+	thinkingTranslationMinChars := opts.ThinkingTranslationMinChars
+	if thinkingTranslationMinChars <= 0 {
+		thinkingTranslationMinChars = defaultThinkingTranslationMinChars
+	}
+	thinkingTranslationForceChars := opts.ThinkingTranslationForceChars
+	if thinkingTranslationForceChars <= 0 {
+		thinkingTranslationForceChars = defaultThinkingTranslationForceChars
+	}
+	if thinkingTranslationForceChars < thinkingTranslationMinChars {
+		thinkingTranslationForceChars = thinkingTranslationMinChars
+	}
+	thinkingTranslationIdle := opts.ThinkingTranslationIdle
+	if thinkingTranslationIdle <= 0 {
+		thinkingTranslationIdle = defaultThinkingTranslationIdle
+	}
 
 	return &Manager{
-		store:           st,
-		hub:             hub,
-		openaiClient:    openai.NewClient(),
-		anthropicClient: anthropic.NewClient(),
-		softRatio:       soft,
-		forceRatio:      force,
-		hardRatio:       hard,
-		keepRecent:      keepRecent,
-		contextWindow:   contextWindow,
+		store:                         st,
+		hub:                           hub,
+		openaiClient:                  openai.NewClient(),
+		anthropicClient:               anthropic.NewClient(),
+		softRatio:                     soft,
+		forceRatio:                    force,
+		hardRatio:                     hard,
+		keepRecent:                    keepRecent,
+		contextWindow:                 contextWindow,
+		thinkingTranslationMinChars:   thinkingTranslationMinChars,
+		thinkingTranslationForceChars: thinkingTranslationForceChars,
+		thinkingTranslationIdle:       thinkingTranslationIdle,
+		thinkingTranslator:            opts.ThinkingTranslator,
 	}
 }
 
@@ -190,13 +222,20 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 	if strings.EqualFold(provider, params.Session.Provider) && strings.EqualFold(model, params.Session.Model) {
 		anchor, _ = m.store.GetChatAnchor(ctx, params.Session.ID)
 	}
+	translationRuntime := newThinkingTranslationRuntime(m, params.Session.ID, params.ThinkingTranslation)
 
-	usedSDK, respText, reasoningText, anchorUpdate, callMeta, err := m.callProviderWithFallbacks(ctx, params.Session, userMsg, params.SDK, params.Env, modelInput, anchor, params.Fallbacks)
+	usedSDK, respText, reasoningText, anchorUpdate, callMeta, err := m.callProviderWithFallbacks(ctx, params.Session, userMsg, params.SDK, params.Env, modelInput, anchor, params.Fallbacks, translationRuntime)
 	if err != nil {
 		return TurnResult{}, err
 	}
 	provider = strings.ToLower(strings.TrimSpace(usedSDK.Provider))
 	model = strings.TrimSpace(usedSDK.Model)
+	translatedReasoningText := ""
+	translationApplied := translationRuntime.applied()
+	translationFailed := translationRuntime.failedState()
+	if translationRuntime != nil {
+		translatedReasoningText = translationRuntime.translatedText()
+	}
 
 	assistantMsg, err := m.store.AppendChatMessage(ctx, store.AppendChatMessageParams{
 		SessionID:         params.Session.ID,
@@ -229,35 +268,41 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 	})
 
 	m.broadcast("chat.turn.completed", map[string]any{
-		"session_id":          params.Session.ID,
-		"user_message_id":     userMsg.ID,
-		"message":             assistantMsg,
-		"reasoning_text":      reasoningText,
-		"model_input":         callMeta.ModelInput,
-		"context_mode":        callMeta.ContextMode,
-		"token_in":            callMeta.TokenIn,
-		"token_out":           callMeta.TokenOut,
-		"cached_input_tokens": callMeta.CachedInputTokens,
+		"session_id":                   params.Session.ID,
+		"user_message_id":              userMsg.ID,
+		"message":                      assistantMsg,
+		"reasoning_text":               reasoningText,
+		"translated_reasoning_text":    translatedReasoningText,
+		"thinking_translation_applied": translationApplied,
+		"thinking_translation_failed":  translationFailed,
+		"model_input":                  callMeta.ModelInput,
+		"context_mode":                 callMeta.ContextMode,
+		"token_in":                     callMeta.TokenIn,
+		"token_out":                    callMeta.TokenOut,
+		"cached_input_tokens":          callMeta.CachedInputTokens,
 	})
 
 	return TurnResult{
-		UserMessage:       userMsg,
-		AssistantMessage:  assistantMsg,
-		ReasoningText:     pointerString(reasoningText),
-		ModelInput:        pointerString(callMeta.ModelInput),
-		ContextMode:       pointerString(callMeta.ContextMode),
-		CachedInputTokens: callMeta.CachedInputTokens,
+		UserMessage:                userMsg,
+		AssistantMessage:           assistantMsg,
+		ReasoningText:              pointerString(reasoningText),
+		TranslatedReasoningText:    pointerString(translatedReasoningText),
+		ModelInput:                 pointerString(callMeta.ModelInput),
+		ContextMode:                pointerString(callMeta.ContextMode),
+		CachedInputTokens:          callMeta.CachedInputTokens,
+		ThinkingTranslationApplied: translationApplied,
+		ThinkingTranslationFailed:  translationFailed,
 	}, nil
 }
 
-func (m *Manager) callProviderWithFallbacks(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor, fallbacks []runner.SDKFallback) (runner.SDKSpec, string, string, store.ChatAnchor, providerCallMeta, error) {
-	respText, reasoningText, anchorUpdate, callMeta, err := m.callProviderWithAnchorRetry(ctx, sess, currentUser, sdk, env, modelInput, anchor)
+func (m *Manager) callProviderWithFallbacks(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor, fallbacks []runner.SDKFallback, translationRuntime *thinkingTranslationRuntime) (runner.SDKSpec, string, string, store.ChatAnchor, providerCallMeta, error) {
+	respText, reasoningText, anchorUpdate, callMeta, err := m.callProviderWithAnchorRetry(ctx, sess, currentUser, sdk, env, modelInput, anchor, translationRuntime)
 	if err == nil {
 		return sdk, respText, reasoningText, anchorUpdate, callMeta, nil
 	}
 	lastErr := err
 	for _, fallback := range fallbacks {
-		respText, reasoningText, anchorUpdate, callMeta, err = m.callProviderWithAnchorRetry(ctx, sess, currentUser, fallback.SDK, fallback.Env, modelInput, store.ChatAnchor{})
+		respText, reasoningText, anchorUpdate, callMeta, err = m.callProviderWithAnchorRetry(ctx, sess, currentUser, fallback.SDK, fallback.Env, modelInput, store.ChatAnchor{}, translationRuntime)
 		if err == nil {
 			return fallback.SDK, respText, reasoningText, anchorUpdate, callMeta, nil
 		}
@@ -266,15 +311,15 @@ func (m *Manager) callProviderWithFallbacks(ctx context.Context, sess store.Chat
 	return runner.SDKSpec{}, "", "", store.ChatAnchor{}, providerCallMeta{}, lastErr
 }
 
-func (m *Manager) callProviderWithAnchorRetry(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, providerCallMeta, error) {
+func (m *Manager) callProviderWithAnchorRetry(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor, translationRuntime *thinkingTranslationRuntime) (string, string, store.ChatAnchor, providerCallMeta, error) {
 	provider := strings.ToLower(strings.TrimSpace(sdk.Provider))
-	respText, reasoningText, anchorUpdate, callMeta, err := m.callProvider(ctx, sess, currentUser, sdk, env, modelInput, anchor)
+	respText, reasoningText, anchorUpdate, callMeta, err := m.callProvider(ctx, sess, currentUser, sdk, env, modelInput, anchor, translationRuntime)
 	if err == nil {
 		return respText, reasoningText, anchorUpdate, callMeta, nil
 	}
 	if (provider == "openai" && anchor.PreviousResponse != nil && strings.TrimSpace(*anchor.PreviousResponse) != "") ||
 		(provider == "anthropic" && anchor.ContainerID != nil && strings.TrimSpace(*anchor.ContainerID) != "") {
-		return m.callProvider(ctx, sess, currentUser, sdk, env, modelInput, store.ChatAnchor{})
+		return m.callProvider(ctx, sess, currentUser, sdk, env, modelInput, store.ChatAnchor{}, translationRuntime)
 	}
 	return "", "", store.ChatAnchor{}, providerCallMeta{}, err
 }
@@ -690,15 +735,15 @@ func estimateTokens(s string) int64 {
 	return int64((n + 3) / 4)
 }
 
-func (m *Manager) callProvider(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, providerCallMeta, error) {
+func (m *Manager) callProvider(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor, translationRuntime *thinkingTranslationRuntime) (string, string, store.ChatAnchor, providerCallMeta, error) {
 	provider := strings.ToLower(strings.TrimSpace(sdk.Provider))
 	sdk.Provider = provider
 
 	switch provider {
 	case "openai":
-		return m.callOpenAI(ctx, sess, currentUser, sdk, env, modelInput, anchor)
+		return m.callOpenAI(ctx, sess, currentUser, sdk, env, modelInput, anchor, translationRuntime)
 	case "anthropic":
-		return m.callAnthropic(ctx, sess, currentUser, sdk, env, modelInput, anchor)
+		return m.callAnthropic(ctx, sess, currentUser, sdk, env, modelInput, anchor, translationRuntime)
 	case "demo":
 		return m.callDemo(sess, modelInput), "", store.ChatAnchor{}, providerCallMeta{
 			ModelInput:  strings.TrimSpace(modelInput),
@@ -721,7 +766,7 @@ func (m *Manager) callDemo(sess store.ChatSession, modelInput string) string {
 	return out
 }
 
-func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, providerCallMeta, error) {
+func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor, translationRuntime *thinkingTranslationRuntime) (string, string, store.ChatAnchor, providerCallMeta, error) {
 	body := openai_responses.ResponseNewParams{
 		Model: openai_shared.ResponsesModel(strings.TrimSpace(sdk.Model)),
 	}
@@ -848,6 +893,7 @@ func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, curren
 				"session_id": sess.ID,
 				"delta":      delta,
 			})
+			translationRuntime.add(ctx, delta)
 		case "response.reasoning_summary_text.done":
 			done := ev.AsResponseReasoningSummaryTextDone().Text
 			if done == "" || sawReasoningDelta {
@@ -858,6 +904,7 @@ func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, curren
 				"session_id": sess.ID,
 				"delta":      done,
 			})
+			translationRuntime.add(ctx, done)
 		case "error":
 			msg := strings.TrimSpace(ev.AsError().Message)
 			if msg != "" {
@@ -868,6 +915,7 @@ func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, curren
 	if err := stream.Err(); err != nil {
 		return "", "", store.ChatAnchor{}, providerCallMeta{}, err
 	}
+	translationRuntime.complete(ctx)
 	out := strings.TrimSpace(text.String())
 	if out == "" {
 		out = "(empty response)"
@@ -894,7 +942,7 @@ func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, curren
 	return out, strings.TrimSpace(reasoning.String()), anchorOut, meta, nil
 }
 
-func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, providerCallMeta, error) {
+func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor, translationRuntime *thinkingTranslationRuntime) (string, string, store.ChatAnchor, providerCallMeta, error) {
 	maxTokens := sdk.MaxOutputTokens
 	if maxTokens <= 0 {
 		maxTokens = 4096
@@ -1008,6 +1056,7 @@ func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, cur
 				"session_id": sess.ID,
 				"delta":      delta,
 			})
+			translationRuntime.add(ctx, delta)
 		case "content_block_delta":
 			de := ev.AsContentBlockDelta()
 			switch strings.TrimSpace(de.Delta.Type) {
@@ -1041,12 +1090,14 @@ func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, cur
 					"session_id": sess.ID,
 					"delta":      delta,
 				})
+				translationRuntime.add(ctx, delta)
 			}
 		}
 	}
 	if err := stream.Err(); err != nil {
 		return "", "", store.ChatAnchor{}, providerCallMeta{}, err
 	}
+	translationRuntime.complete(ctx)
 	out := strings.TrimSpace(text.String())
 	if out == "" {
 		out = "(empty response)"

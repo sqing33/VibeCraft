@@ -122,6 +122,24 @@ export type LLMSettings = {
   models: LLMModelProfile[]
 }
 
+export type BasicSettings = {
+  thinking_translation?: ThinkingTranslationSettings
+}
+
+export type ThinkingTranslationSettings = {
+  source_id: string
+  model: string
+  target_model_ids: string[]
+}
+
+export type PutBasicSettingsRequest = {
+  thinking_translation?: {
+    source_id: string
+    model: string
+    target_model_ids: string[]
+  }
+}
+
 export type LLMSource = {
   id: string
   label: string
@@ -191,6 +209,31 @@ export async function putLLMSettings(
     throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
   }
   return (await res.json()) as LLMSettings
+}
+
+export async function fetchBasicSettings(daemonUrl: string): Promise<BasicSettings> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/basic`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as BasicSettings
+}
+
+export async function putBasicSettings(
+  daemonUrl: string,
+  req: PutBasicSettingsRequest,
+): Promise<BasicSettings> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/basic`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as BasicSettings
 }
 
 export type LLMTestRequest = {
@@ -523,9 +566,13 @@ export type ChatMessage = {
 export type ChatTurnResult = {
   user_message: ChatMessage
   assistant_message: ChatMessage
+  reasoning_text?: string
+  translated_reasoning_text?: string
   model_input?: string
   context_mode?: string
   cached_input_tokens?: number
+  thinking_translation_applied?: boolean
+  thinking_translation_failed?: boolean
 }
 
 export async function createChatSession(

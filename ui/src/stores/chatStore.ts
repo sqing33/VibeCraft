@@ -30,6 +30,11 @@ type UsageMeta = {
   cached_input_tokens?: number
 }
 
+type ThinkingTranslationState = {
+  applied: boolean
+  failed: boolean
+}
+
 function guessAttachmentKind(file: File): string {
   const name = file.name.toLowerCase()
   const type = file.type.toLowerCase()
@@ -62,6 +67,8 @@ export type ChatStore = {
   messagesBySession: Record<string, ChatMessage[]>
   streamingBySession: Record<string, string>
   thinkingBySession: Record<string, string>
+  translatedThinkingBySession: Record<string, string>
+  thinkingTranslationStateBySession: Record<string, ThinkingTranslationState | undefined>
   turnMetaBySession: Record<string, TurnMeta | null>
   turnInputByUserMessageId: Record<string, TurnInputMeta | undefined>
   usageByMessageId: Record<string, UsageMeta | undefined>
@@ -75,9 +82,13 @@ export type ChatStore = {
   appendMessage: (sessionId: string, msg: ChatMessage) => void
   appendStreamingDelta: (sessionId: string, delta: string) => void
   appendThinkingDelta: (sessionId: string, delta: string) => void
+  appendTranslatedThinkingDelta: (sessionId: string, delta: string) => void
   setThinking: (sessionId: string, thinking: string) => void
+  setTranslatedThinking: (sessionId: string, thinking: string) => void
   clearStreaming: (sessionId: string) => void
   clearThinking: (sessionId: string) => void
+  resetThinkingTranslation: (sessionId: string) => void
+  setThinkingTranslationState: (sessionId: string, state: ThinkingTranslationState) => void
   setTurnMeta: (sessionId: string, meta: TurnMeta | null) => void
   setTurnInputMeta: (userMessageId: string, meta: TurnInputMeta) => void
   setUsageMeta: (messageId: string, meta: UsageMeta) => void
@@ -105,6 +116,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   messagesBySession: {},
   streamingBySession: {},
   thinkingBySession: {},
+  translatedThinkingBySession: {},
+  thinkingTranslationStateBySession: {},
   turnMetaBySession: {},
   turnInputByUserMessageId: {},
   usageByMessageId: {},
@@ -156,10 +169,24 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         [sessionId]: (state.thinkingBySession[sessionId] ?? '') + delta,
       },
     })),
+  appendTranslatedThinkingDelta: (sessionId, delta) =>
+    set((state) => ({
+      translatedThinkingBySession: {
+        ...state.translatedThinkingBySession,
+        [sessionId]: (state.translatedThinkingBySession[sessionId] ?? '') + delta,
+      },
+    })),
   setThinking: (sessionId, thinking) =>
     set((state) => ({
       thinkingBySession: {
         ...state.thinkingBySession,
+        [sessionId]: thinking,
+      },
+    })),
+  setTranslatedThinking: (sessionId, thinking) =>
+    set((state) => ({
+      translatedThinkingBySession: {
+        ...state.translatedThinkingBySession,
         [sessionId]: thinking,
       },
     })),
@@ -175,6 +202,24 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       thinkingBySession: {
         ...state.thinkingBySession,
         [sessionId]: '',
+      },
+    })),
+  resetThinkingTranslation: (sessionId) =>
+    set((state) => ({
+      translatedThinkingBySession: {
+        ...state.translatedThinkingBySession,
+        [sessionId]: '',
+      },
+      thinkingTranslationStateBySession: {
+        ...state.thinkingTranslationStateBySession,
+        [sessionId]: { applied: false, failed: false },
+      },
+    })),
+  setThinkingTranslationState: (sessionId, translationState) =>
+    set((state) => ({
+      thinkingTranslationStateBySession: {
+        ...state.thinkingTranslationStateBySession,
+        [sessionId]: translationState,
       },
     })),
   setTurnMeta: (sessionId, meta) =>
@@ -234,6 +279,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set({ sending: true, error: null })
     get().clearStreaming(sessionId)
     get().clearThinking(sessionId)
+    get().resetThinkingTranslation(sessionId)
     get().setTurnMeta(sessionId, expertId ? { expert_id: expertId } : null)
     const now = Date.now()
     const lastTurn = (get().messagesBySession[sessionId] ?? []).at(-1)?.turn ?? 0

@@ -19,6 +19,7 @@ import { copyToClipboard } from "@/lib/clipboard";
 import { daemonUrlFromEnv } from "@/lib/daemon";
 import { type HealthState, useDaemonStore } from "@/stores/daemonStore";
 
+import { BasicSettingsTab } from "./BasicSettingsTab";
 import { LLMSettingsTab } from "./LLMSettingsTab";
 import { ExpertSettingsTab } from "./ExpertSettingsTab";
 
@@ -157,9 +158,12 @@ export function SettingsDialog() {
                   classNames={{
                     base: "min-h-0",
                     panel: "min-h-0 overflow-y-auto pr-1",
-                    tabList: "grid w-full grid-cols-3",
+                    tabList: "grid w-full grid-cols-4",
                   }}
                 >
+                  <Tab key="basic" title="基本设置">
+                    <BasicSettingsTab />
+                  </Tab>
                   <Tab key="diagnostics" title="连接与诊断">
                     <div className="space-y-6">
                       <section className="space-y-3">

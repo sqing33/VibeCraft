@@ -78,6 +78,8 @@ export function ChatSessionsPage() {
   const messagesBySession = useChatStore((s) => s.messagesBySession)
   const streamingBySession = useChatStore((s) => s.streamingBySession)
   const thinkingBySession = useChatStore((s) => s.thinkingBySession)
+  const translatedThinkingBySession = useChatStore((s) => s.translatedThinkingBySession)
+  const thinkingTranslationStateBySession = useChatStore((s) => s.thinkingTranslationStateBySession)
   const turnMetaBySession = useChatStore((s) => s.turnMetaBySession)
   const turnInputByUserMessageId = useChatStore((s) => s.turnInputByUserMessageId)
   const usageByMessageId = useChatStore((s) => s.usageByMessageId)
@@ -88,9 +90,13 @@ export function ChatSessionsPage() {
   const setActiveSession = useChatStore((s) => s.setActiveSession)
   const appendStreamingDelta = useChatStore((s) => s.appendStreamingDelta)
   const appendThinkingDelta = useChatStore((s) => s.appendThinkingDelta)
+  const appendTranslatedThinkingDelta = useChatStore((s) => s.appendTranslatedThinkingDelta)
   const setThinking = useChatStore((s) => s.setThinking)
+  const setTranslatedThinking = useChatStore((s) => s.setTranslatedThinking)
   const clearStreaming = useChatStore((s) => s.clearStreaming)
   const clearThinking = useChatStore((s) => s.clearThinking)
+  const resetThinkingTranslation = useChatStore((s) => s.resetThinkingTranslation)
+  const setThinkingTranslationState = useChatStore((s) => s.setThinkingTranslationState)
   const setTurnMeta = useChatStore((s) => s.setTurnMeta)
   const setTurnInputMeta = useChatStore((s) => s.setTurnInputMeta)
   const setUsageMeta = useChatStore((s) => s.setUsageMeta)
@@ -351,6 +357,17 @@ export function ChatSessionsPage() {
   )
   const streaming = activeSessionId ? streamingBySession[activeSessionId] ?? '' : ''
   const thinking = activeSessionId ? thinkingBySession[activeSessionId] ?? '' : ''
+  const translatedThinking = activeSessionId ? translatedThinkingBySession[activeSessionId] ?? '' : ''
+  const thinkingTranslationState = activeSessionId
+    ? thinkingTranslationStateBySession[activeSessionId] ?? { applied: false, failed: false }
+    : { applied: false, failed: false }
+  const displayedThinking =
+    thinkingTranslationState.applied && !thinkingTranslationState.failed ? translatedThinking : thinking
+  const pendingThinkingTranslation =
+    thinkingTranslationState.applied &&
+    !thinkingTranslationState.failed &&
+    !displayedThinking.trim() &&
+    Boolean(thinking.trim())
   const lastAssistantMessageId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       if (messages[i]?.role === 'assistant') return messages[i]?.message_id ?? null
@@ -377,7 +394,7 @@ export function ChatSessionsPage() {
     if (!el) return
     if (!shouldAutoScrollRef.current) return
     el.scrollTop = el.scrollHeight
-  }, [messages, streaming, thinking])
+  }, [messages, streaming, thinking, translatedThinking, thinkingTranslationState.failed])
 
   useEffect(() => {
     const el = messageScrollRef.current
@@ -414,6 +431,7 @@ export function ChatSessionsPage() {
         if (!payload?.session_id) return
         clearStreaming(payload.session_id)
         clearThinking(payload.session_id)
+        resetThinkingTranslation(payload.session_id)
         setTurnMeta(payload.session_id, {
           expert_id: payload.expert_id,
           provider: payload.provider,
@@ -425,6 +443,19 @@ export function ChatSessionsPage() {
         const payload = env.payload as { session_id?: string; delta?: string } | undefined
         if (!payload?.session_id || typeof payload.delta !== 'string') return
         appendThinkingDelta(payload.session_id, payload.delta)
+        return
+      }
+      if (env.type === 'chat.turn.thinking.translation.delta') {
+        const payload = env.payload as { session_id?: string; delta?: string } | undefined
+        if (!payload?.session_id || typeof payload.delta !== 'string') return
+        setThinkingTranslationState(payload.session_id, { applied: true, failed: false })
+        appendTranslatedThinkingDelta(payload.session_id, payload.delta)
+        return
+      }
+      if (env.type === 'chat.turn.thinking.translation.failed') {
+        const payload = env.payload as { session_id?: string } | undefined
+        if (!payload?.session_id) return
+        setThinkingTranslationState(payload.session_id, { applied: true, failed: true })
         return
       }
       if (env.type === 'chat.turn.delta') {
@@ -440,6 +471,9 @@ export function ChatSessionsPage() {
               user_message_id?: string
               message?: { message_id?: string; token_in?: number; token_out?: number }
               reasoning_text?: string
+              translated_reasoning_text?: string
+              thinking_translation_applied?: boolean
+              thinking_translation_failed?: boolean
               model_input?: string
               context_mode?: string
               token_in?: number
@@ -450,6 +484,17 @@ export function ChatSessionsPage() {
         if (!payload?.session_id) return
         if (typeof payload.reasoning_text === 'string' && payload.reasoning_text.trim()) {
           setThinking(payload.session_id, payload.reasoning_text)
+        }
+        if (payload.thinking_translation_applied === true) {
+          setThinkingTranslationState(payload.session_id, {
+            applied: true,
+            failed: payload.thinking_translation_failed === true,
+          })
+          if (payload.thinking_translation_failed !== true) {
+            setTranslatedThinking(payload.session_id, payload.translated_reasoning_text ?? '')
+          }
+        } else {
+          resetThinkingTranslation(payload.session_id)
         }
         if (
           typeof payload.user_message_id === 'string' &&
@@ -498,9 +543,13 @@ export function ChatSessionsPage() {
   }, [
     appendStreamingDelta,
     appendThinkingDelta,
+    appendTranslatedThinkingDelta,
     setThinking,
+    setTranslatedThinking,
     clearStreaming,
     clearThinking,
+    resetThinkingTranslation,
+    setThinkingTranslationState,
     setTurnMeta,
     setTurnInputMeta,
     setUsageMeta,
@@ -755,7 +804,7 @@ export function ChatSessionsPage() {
             const showThinkingDrawer =
               isAssistant &&
               m.message_id === lastAssistantMessageId &&
-              Boolean(thinking.trim()) &&
+              Boolean(displayedThinking.trim()) &&
               !pendingAssistant
             return (
               <div key={m.message_id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -774,7 +823,7 @@ export function ChatSessionsPage() {
                         查看完整思考过程
                       </summary>
                       <div className="chat-markdown mt-2 text-xs text-muted-foreground">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{thinking}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayedThinking}</ReactMarkdown>
                       </div>
                     </details>
                   ) : null}
@@ -843,15 +892,19 @@ export function ChatSessionsPage() {
                 <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   AI{pendingIdentity ? ` · ${pendingIdentity}` : ''} {streaming ? '回复中' : '思考中'}
                 </div>
-                {thinking.trim() ? (
+                {displayedThinking.trim() ? (
                   <details className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
                     <summary className="cursor-pointer select-none text-muted-foreground">
                       查看完整思考过程
                     </summary>
                     <div className="chat-markdown mt-2 text-xs text-muted-foreground">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{thinking}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayedThinking}</ReactMarkdown>
                     </div>
                   </details>
+                ) : pendingThinkingTranslation ? (
+                  <div className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+                    正在翻译思考过程…
+                  </div>
                 ) : null}
                 {streaming ? (
                   <div className="chat-markdown text-sm">

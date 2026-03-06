@@ -13,6 +13,7 @@ type Config struct {
 	Server    ServerConfig    `json:"server"`
 	Execution ExecutionConfig `json:"execution"`
 	Experts   []ExpertConfig  `json:"experts"`
+	Basic     *BasicSettings  `json:"basic,omitempty"`
 	LLM       *LLMSettings    `json:"llm,omitempty"`
 }
 
@@ -92,6 +93,16 @@ type ExpertConfig struct {
 type LLMSettings struct {
 	Sources []LLMSourceConfig `json:"sources"`
 	Models  []LLMModelConfig  `json:"models"`
+}
+
+type BasicSettings struct {
+	ThinkingTranslation *ThinkingTranslationSettings `json:"thinking_translation,omitempty"`
+}
+
+type ThinkingTranslationSettings struct {
+	SourceID       string   `json:"source_id,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	TargetModelIDs []string `json:"target_model_ids,omitempty"`
 }
 
 type LLMSourceConfig struct {
@@ -245,6 +256,7 @@ func Load() (Config, string, error) {
 	if err := RebuildExperts(&cfg); err != nil {
 		return Config{}, "", err
 	}
+	ReconcileBasicSettingsWithLLM(&cfg.Basic, cfg.LLM)
 	return cfg, path, nil
 }
 
@@ -277,6 +289,7 @@ func LoadPersisted() (Config, string, error) {
 	if err := RebuildExperts(&cfg); err != nil {
 		return Config{}, "", err
 	}
+	ReconcileBasicSettingsWithLLM(&cfg.Basic, cfg.LLM)
 	return cfg, path, nil
 }
 

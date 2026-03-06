@@ -22,11 +22,11 @@ import (
 )
 
 type Deps struct {
-	Executions *execution.Manager
-	Hub        *ws.Hub
-	Store      *store.Store
-	Experts    *expert.Registry
-	Chat       *chat.Manager
+	Executions    *execution.Manager
+	Hub           *ws.Hub
+	Store         *store.Store
+	Experts       *expert.Registry
+	Chat          *chat.Manager
 	Orchestration *orchestration.Manager
 }
 
@@ -40,6 +40,8 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	})
 	v1.GET("/info", infoHandler(deps))
 	v1.GET("/experts", listExpertsHandler(deps))
+	v1.GET("/settings/basic", getBasicSettingsHandler())
+	v1.PUT("/settings/basic", putBasicSettingsHandler())
 	v1.GET("/settings/llm", getLLMSettingsHandler())
 	v1.PUT("/settings/llm", putLLMSettingsHandler(deps))
 	v1.POST("/settings/llm/test", llmTestHandler())

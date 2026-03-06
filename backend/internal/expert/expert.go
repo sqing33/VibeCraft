@@ -14,8 +14,10 @@ import (
 )
 
 type Resolved struct {
-	Spec    runner.RunSpec
-	Timeout time.Duration
+	Spec           runner.RunSpec
+	Timeout        time.Duration
+	ManagedSource  string
+	PrimaryModelID string
 }
 
 type Registry struct {
@@ -211,7 +213,9 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 				Env:     env,
 				Cwd:     cwd,
 			},
-			Timeout: timeout,
+			Timeout:        timeout,
+			ManagedSource:  strings.TrimSpace(e.ManagedSource),
+			PrimaryModelID: strings.TrimSpace(e.PrimaryModelID),
 		}, nil
 	case "openai", "anthropic", "demo":
 		// LLM/Demo 走 SDK 驱动；禁止 legacy CLI 字段悄悄生效。
@@ -284,7 +288,9 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 				},
 				SDKFallbacks: fallbacks,
 			},
-			Timeout: timeout,
+			Timeout:        timeout,
+			ManagedSource:  strings.TrimSpace(e.ManagedSource),
+			PrimaryModelID: strings.TrimSpace(e.PrimaryModelID),
 		}, nil
 	default:
 		return Resolved{}, fmt.Errorf("expert %q: unsupported provider %q", expertID, provider)

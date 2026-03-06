@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"vibe-tree/backend/internal/chat"
+	"vibe-tree/backend/internal/config"
 	"vibe-tree/backend/internal/store"
 )
 
@@ -278,14 +279,15 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 		}
 		sdk := *resolved.Spec.SDK
 		result, err := deps.Chat.RunTurn(c.Request.Context(), chat.TurnParams{
-			Session:     sess,
-			ExpertID:    expertID,
-			UserInput:   userText,
-			ModelInput:  sdk.Prompt,
-			Attachments: uploads,
-			SDK:         sdk,
-			Env:         resolved.Spec.Env,
-			Fallbacks:   resolved.Spec.SDKFallbacks,
+			Session:             sess,
+			ExpertID:            expertID,
+			UserInput:           userText,
+			ModelInput:          sdk.Prompt,
+			Attachments:         uploads,
+			SDK:                 sdk,
+			Env:                 resolved.Spec.Env,
+			Fallbacks:           resolved.Spec.SDKFallbacks,
+			ThinkingTranslation: buildThinkingTranslationSpec(resolved.PrimaryModelID),
 		})
 		if err != nil {
 			if errors.Is(err, store.ErrValidation) {
@@ -300,6 +302,39 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, result)
+	}
+}
+
+func buildThinkingTranslationSpec(primaryModelID string) *chat.ThinkingTranslationSpec {
+	if strings.TrimSpace(primaryModelID) == "" {
+		return nil
+	}
+	cfg, _, err := config.LoadPersisted()
+	if err != nil {
+		return nil
+	}
+	runtime, err := config.ResolveThinkingTranslation(cfg.Basic, cfg.LLM, primaryModelID)
+	if err != nil || runtime == nil {
+		return nil
+	}
+	env := map[string]string{}
+	switch strings.ToLower(strings.TrimSpace(runtime.Provider)) {
+	case "openai":
+		if strings.TrimSpace(runtime.APIKey) != "" {
+			env["OPENAI_API_KEY"] = strings.TrimSpace(runtime.APIKey)
+		}
+	case "anthropic":
+		if strings.TrimSpace(runtime.APIKey) != "" {
+			env["ANTHROPIC_API_KEY"] = strings.TrimSpace(runtime.APIKey)
+		}
+	default:
+		return nil
+	}
+	return &chat.ThinkingTranslationSpec{
+		Provider: strings.TrimSpace(runtime.Provider),
+		Model:    strings.TrimSpace(runtime.Model),
+		BaseURL:  strings.TrimSpace(runtime.BaseURL),
+		Env:      env,
 	}
 }
 
