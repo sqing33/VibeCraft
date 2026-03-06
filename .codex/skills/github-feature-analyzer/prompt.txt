@@ -1,27 +1,29 @@
-请使用 github-feature-analyzer skill 重新分析仓库。
+请使用 github-feature-analyzer skill 分析仓库。
 
-  repo_url: https://github.com/Haleclipse/codex
-  ref: main
-  language: zh
-  depth: deep
-  agent_mode: multi
-  max_parallel_agents: auto
+repo_url: https://github.com/<owner>/<repo>
+ref: main
+language: zh
+depth: standard
+agent_mode: multi
+max_parallel_agents: auto
 
-  features:
-  - 如何实现的对于智能体推理内容进行翻译的功能，而且还是嵌入其中，在对话过程中毫无修改痕迹
-  - 因为这个仓库对应的 codex 官方上游，帮我分析一下他的子 agent 功能是怎么实现的，也就是 multi_agent
+features:
+- <feature-1>
+- <feature-2>
 
-  执行要求：
-  - 必须启用分层多子代理（overview + architecture + 每个 feature 子代理），父代理统一汇总去重后输出。
-  - 只维护一份最终“精准报告”（同项目 `report.md` 按 Run 追加）。
-  - 产物路径固定在 `<project-root>/.github-feature-analyzer/<owner-repo>/`。
-  - 报告结构严格使用：
-    1) Metadata
-    2) Repository Mental Model（Repository Overview，置顶）
-    3) Executive Principle Summary（结论先行）
-    4) Feature Principle Analysis（功能实现详解）
-    5) Cross-feature Coupling and System Risks（全局边界与风险）
-  - 每个关键结论必须提供至少一条 file:line 证据；无直接证据时必须明确标注 inference。
-  - 优先后端实现链路，过滤 docs/UI 噪声。
-  - 重点解释“实现原理与机制”，Executive Principle Summary 必须用 4-8 句话讲清“怎么工作”，不要只给函数/文件清单。
-  - 对第 2 个功能点，必须明确判定调用路径是原生 SDK、CLI，还是混合，并说明本地文件修改路径如何被确定（例如 working_dir/current_dir/容器映射等）。
+reference_lookup:  # optional
+  enabled: false
+  query: "<reference question for historical reports>"
+  mode: semi  # compact | semi | full
+  repo_filter:
+  - <owner-repo>
+
+说明：
+- 默认报告采用三段式结构：
+  1) 项目参数与结构解析；
+  2) 面向人的功能说明（功能作用 / 特殊功能 / 实现想法）；
+  3) 面向 AI 的实现细节与证据链（控制流、数据流、状态生命周期、失败恢复、并发时序）。
+- README-first、项目特点机制分析、分层多子代理、证据追踪规则均已内置。
+- 证据与推断规则保持不变：关键结论需尽量给出 `path:line`；无直接证据必须标注 `inference`；保留 `confidence`。
+- 需要复用历史分析结果时，设置 `reference_lookup.enabled=true`，skill 会先通过 `ensure_uv_unix.sh/setup_reference_venv.sh` 准备 UV 环境，再执行 `reference_retrieval_uv.sh`。
+- 仅需填写仓库信息和你关心的 feature 问题。

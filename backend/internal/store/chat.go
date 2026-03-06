@@ -12,6 +12,8 @@ import (
 	"vibe-tree/backend/internal/id"
 )
 
+const ForkContextProvider = "fork_context_copy"
+
 type ChatSession struct {
 	ID            string  `json:"session_id"`
 	Title         string  `json:"title"`
@@ -32,6 +34,9 @@ type ChatMessage struct {
 	Turn              int64   `json:"turn"`
 	Role              string  `json:"role"`
 	ContentText       string  `json:"content_text"`
+	ExpertID          *string `json:"expert_id,omitempty"`
+	Provider          *string `json:"provider,omitempty"`
+	Model             *string `json:"model,omitempty"`
 	TokenIn           *int64  `json:"token_in,omitempty"`
 	TokenOut          *int64  `json:"token_out,omitempty"`
 	ProviderMessageID *string `json:"provider_message_id,omitempty"`
@@ -255,10 +260,66 @@ func (s *Store) PatchChatSession(ctx context.Context, sessionID string, patch Pa
 	return sess, nil
 }
 
+type UpdateChatSessionDefaultsParams struct {
+	SessionID string
+	ExpertID  string
+	Provider  string
+	Model     string
+}
+
+func (s *Store) UpdateChatSessionDefaults(ctx context.Context, params UpdateChatSessionDefaultsParams) (ChatSession, error) {
+	if s == nil || s.db == nil {
+		return ChatSession{}, fmt.Errorf("store not initialized")
+	}
+	sessionID := strings.TrimSpace(params.SessionID)
+	if sessionID == "" {
+		return ChatSession{}, fmt.Errorf("%w: session_id is required", ErrValidation)
+	}
+	expertID := strings.TrimSpace(params.ExpertID)
+	if expertID == "" {
+		return ChatSession{}, fmt.Errorf("%w: expert_id is required", ErrValidation)
+	}
+	provider := strings.ToLower(strings.TrimSpace(params.Provider))
+	if provider != "openai" && provider != "anthropic" && provider != "demo" {
+		return ChatSession{}, fmt.Errorf("%w: unsupported provider %q", ErrValidation, params.Provider)
+	}
+	model := strings.TrimSpace(params.Model)
+	if provider == "demo" && model == "" {
+		model = "demo"
+	}
+	if model == "" {
+		return ChatSession{}, fmt.Errorf("%w: model is required", ErrValidation)
+	}
+
+	now := time.Now().UnixMilli()
+	res, err := s.db.ExecContext(
+		ctx,
+		`UPDATE chat_sessions
+		    SET expert_id = ?, provider = ?, model = ?, updated_at = ?
+		  WHERE id = ?;`,
+		expertID,
+		provider,
+		model,
+		now,
+		sessionID,
+	)
+	if err != nil {
+		return ChatSession{}, fmt.Errorf("update chat session defaults: %w", err)
+	}
+	aff, _ := res.RowsAffected()
+	if aff == 0 {
+		return ChatSession{}, os.ErrNotExist
+	}
+	return s.GetChatSession(ctx, sessionID)
+}
+
 type AppendChatMessageParams struct {
 	SessionID         string
 	Role              string
 	ContentText       string
+	ExpertID          *string
+	Provider          *string
+	Model             *string
 	TokenIn           *int64
 	TokenOut          *int64
 	ProviderMessageID *string
@@ -306,6 +367,9 @@ func (s *Store) AppendChatMessage(ctx context.Context, params AppendChatMessageP
 		Turn:              nextTurn,
 		Role:              role,
 		ContentText:       content,
+		ExpertID:          trimOrNil(params.ExpertID),
+		Provider:          trimOrNil(params.Provider),
+		Model:             trimOrNil(params.Model),
 		TokenIn:           params.TokenIn,
 		TokenOut:          params.TokenOut,
 		ProviderMessageID: params.ProviderMessageID,
@@ -314,13 +378,16 @@ func (s *Store) AppendChatMessage(ctx context.Context, params AppendChatMessageP
 
 	_, err = tx.ExecContext(
 		ctx,
-		`INSERT INTO chat_messages (id, session_id, turn, role, content_text, token_in, token_out, provider_message_id, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO chat_messages (id, session_id, turn, role, content_text, expert_id, provider, model, token_in, token_out, provider_message_id, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		msg.ID,
 		msg.SessionID,
 		msg.Turn,
 		msg.Role,
 		msg.ContentText,
+		msg.ExpertID,
+		msg.Provider,
+		msg.Model,
 		msg.TokenIn,
 		msg.TokenOut,
 		msg.ProviderMessageID,
@@ -360,7 +427,7 @@ func (s *Store) ListChatMessages(ctx context.Context, sessionID string, limit in
 	}
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT id, session_id, turn, role, content_text, token_in, token_out, provider_message_id, created_at
+		`SELECT id, session_id, turn, role, content_text, expert_id, provider, model, token_in, token_out, provider_message_id, created_at
 		   FROM chat_messages
 		  WHERE session_id = ?
 		  ORDER BY turn DESC
@@ -552,6 +619,10 @@ func (s *Store) ForkChatSession(ctx context.Context, sessionID string, title str
 	if err != nil {
 		return ChatSession{}, err
 	}
+	sourceMessages, err := s.ListChatMessages(ctx, source.ID, 2000)
+	if err != nil {
+		return ChatSession{}, err
+	}
 	nextTitle := strings.TrimSpace(title)
 	if nextTitle == "" {
 		nextTitle = source.Title + " (fork)"
@@ -570,7 +641,12 @@ func (s *Store) ForkChatSession(ctx context.Context, sessionID string, title str
 		UpdatedAt:     now,
 		LastTurn:      0,
 	}
-	_, err = s.db.ExecContext(
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ChatSession{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(
 		ctx,
 		`INSERT INTO chat_sessions (id, title, expert_id, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
@@ -588,6 +664,56 @@ func (s *Store) ForkChatSession(ctx context.Context, sessionID string, title str
 	)
 	if err != nil {
 		return ChatSession{}, fmt.Errorf("insert fork session: %w", err)
+	}
+	lastTurn := int64(0)
+	updatedAt := fork.UpdatedAt
+	for i, msg := range sourceMessages {
+		content := strings.TrimSpace(msg.ContentText)
+		if content == "" {
+			continue
+		}
+		createdAt := now + int64(i) + 1
+		lastTurn += 1
+		_, err = tx.ExecContext(
+			ctx,
+			`INSERT INTO chat_messages (id, session_id, turn, role, content_text, expert_id, provider, model, token_in, token_out, provider_message_id, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+			id.New("cm_"),
+			fork.ID,
+			lastTurn,
+			msg.Role,
+			content,
+			nil,
+			ForkContextProvider,
+			nil,
+			nil,
+			nil,
+			nil,
+			createdAt,
+		)
+		if err != nil {
+			return ChatSession{}, fmt.Errorf("insert fork context message: %w", err)
+		}
+		updatedAt = createdAt
+	}
+	if lastTurn > 0 {
+		_, err = tx.ExecContext(
+			ctx,
+			`UPDATE chat_sessions
+			    SET last_turn = ?, updated_at = ?
+			  WHERE id = ?;`,
+			lastTurn,
+			updatedAt,
+			fork.ID,
+		)
+		if err != nil {
+			return ChatSession{}, fmt.Errorf("update fork session turns: %w", err)
+		}
+		fork.LastTurn = lastTurn
+		fork.UpdatedAt = updatedAt
+	}
+	if err := tx.Commit(); err != nil {
+		return ChatSession{}, fmt.Errorf("commit fork session: %w", err)
 	}
 	return fork, nil
 }
@@ -624,6 +750,9 @@ func scanChatMessage(s scanner) (ChatMessage, error) {
 		&msg.Turn,
 		&msg.Role,
 		&msg.ContentText,
+		&msg.ExpertID,
+		&msg.Provider,
+		&msg.Model,
 		&msg.TokenIn,
 		&msg.TokenOut,
 		&msg.ProviderMessageID,
@@ -632,6 +761,17 @@ func scanChatMessage(s scanner) (ChatMessage, error) {
 		return ChatMessage{}, err
 	}
 	return msg, nil
+}
+
+func trimOrNil(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*s)
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 
 func scanChatAnchor(s scanner) (ChatAnchor, error) {

@@ -250,6 +250,11 @@ export type ChatMessage = {
   turn: number
   role: string
   content_text: string
+  expert_id?: string
+  provider?: string
+  model?: string
+  token_in?: number
+  token_out?: number
   provider_message_id?: string
   created_at: number
 }
@@ -257,6 +262,9 @@ export type ChatMessage = {
 export type ChatTurnResult = {
   user_message: ChatMessage
   assistant_message: ChatMessage
+  model_input?: string
+  context_mode?: string
+  cached_input_tokens?: number
 }
 
 export async function createChatSession(
@@ -307,7 +315,7 @@ export async function fetchChatMessages(
 export async function postChatTurn(
   daemonUrl: string,
   sessionId: string,
-  req: { input: string },
+  req: { input: string; expert_id?: string },
 ): Promise<ChatTurnResult> {
   const res = await fetch(`${daemonUrl}/api/v1/chat/sessions/${sessionId}/turns`, {
     method: 'POST',

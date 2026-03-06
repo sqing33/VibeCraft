@@ -172,7 +172,8 @@ func patchChatSessionHandler(deps Deps) gin.HandlerFunc {
 }
 
 type postChatTurnRequest struct {
-	Input string `json:"input"`
+	Input   string `json:"input"`
+	ExpertID string `json:"expert_id"`
 }
 
 func postChatTurnHandler(deps Deps) gin.HandlerFunc {
@@ -210,7 +211,11 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		resolved, err := deps.Experts.Resolve(sess.ExpertID, req.Input, sess.WorkspacePath)
+		expertID := strings.TrimSpace(req.ExpertID)
+		if expertID == "" {
+			expertID = sess.ExpertID
+		}
+		resolved, err := deps.Experts.Resolve(expertID, req.Input, sess.WorkspacePath)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -220,10 +225,9 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 			return
 		}
 		sdk := *resolved.Spec.SDK
-		sdk.Provider = sess.Provider
-		sdk.Model = sess.Model
 		result, err := deps.Chat.RunTurn(c.Request.Context(), chat.TurnParams{
 			Session:    sess,
+			ExpertID:   expertID,
 			UserInput:  req.Input,
 			ModelInput: sdk.Prompt,
 			SDK:        sdk,
@@ -247,11 +251,40 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 
 func compactChatSessionHandler(deps Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if deps.Store == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "store not configured"})
+			return
+		}
+		if deps.Experts == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "expert registry not configured"})
+			return
+		}
 		if deps.Chat == nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "chat manager not configured"})
 			return
 		}
-		sess, rec, err := deps.Chat.CompactSession(c.Request.Context(), c.Param("id"))
+		sessionID := c.Param("id")
+		sess, err := deps.Store.GetChatSession(c.Request.Context(), sessionID)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		resolved, err := deps.Experts.Resolve(sess.ExpertID, "", sess.WorkspacePath)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if resolved.Spec.SDK == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "session expert is not sdk provider"})
+			return
+		}
+		sdk := *resolved.Spec.SDK
+
+		sess, rec, err := deps.Chat.CompactSession(c.Request.Context(), sessionID, sdk, resolved.Spec.Env)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})

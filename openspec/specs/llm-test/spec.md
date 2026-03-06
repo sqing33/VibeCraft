@@ -16,6 +16,8 @@ The request body MUST include:
 
 The request MUST provide at least one of: `api_key`, `source_id`.
 
+Before calling the provider SDK, the system MUST lowercase-trim the effective `model` value.
+
 The response on success MUST include:
 - `ok: true`
 - `output`: a short output string (truncated)
@@ -34,6 +36,11 @@ The API MUST return HTTP 400 for invalid request payloads and HTTP 500 for provi
 - **WHEN** client posts a payload with neither `api_key` nor `source_id`
 - **THEN** the daemon returns HTTP 400
 
+#### Scenario: Normalize mixed-case model name before test call
+
+- **WHEN** client posts `model="GPT-5-CODEX"`
+- **THEN** the daemon lowercases it before calling the provider SDK
+
 ### Requirement: LLM test API MUST NOT leak API keys
 
 The daemon MUST NOT include plaintext API keys in the HTTP response.
@@ -42,4 +49,3 @@ The daemon MUST NOT include plaintext API keys in the HTTP response.
 
 - **WHEN** client posts to `/api/v1/settings/llm/test`
 - **THEN** the response body does not include the request API key content
-

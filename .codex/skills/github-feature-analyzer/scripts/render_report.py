@@ -16,9 +16,83 @@ MAX_SCAN_FILE_SIZE = 600 * 1024
 MAX_LINE_HITS_PER_FILE = 12
 MAX_FEATURE_FILES = 8
 MAX_FEATURE_EVIDENCE = 24
+MAX_CHARACTERISTICS = 3
+MAX_CHARACTERISTIC_EVIDENCE_REFS = 2
+MAX_README_SIGNAL_LENGTH = 140
 
 DOC_FILE_SUFFIXES = {".md", ".mdx", ".rst", ".txt", ".adoc"}
 DOC_PATH_HINTS = ("docs/", "doc/", "documentation/", ".github/")
+README_CANDIDATE_FILES = [
+    "README.md",
+    "README",
+    "readme.md",
+    "Readme.md",
+    "README.rst",
+    "README.txt",
+]
+README_SKIP_TERMS = {
+    "license",
+    "contributing",
+    "contribution",
+    "installation",
+    "install",
+    "quick start",
+    "getting started",
+    "usage",
+    "faq",
+    "changelog",
+    "roadmap",
+    "author",
+    "贡献",
+    "安装",
+    "快速开始",
+    "使用",
+    "常见问题",
+    "许可证",
+    "更新日志",
+}
+README_FEATURE_TERMS = {
+    "feature",
+    "features",
+    "architecture",
+    "workflow",
+    "pipeline",
+    "orchestration",
+    "runtime",
+    "execution",
+    "api",
+    "cli",
+    "sdk",
+    "agent",
+    "agents",
+    "功能",
+    "特性",
+    "架构",
+    "工作流",
+    "机制",
+    "实现",
+    "执行",
+    "接口",
+    "调度",
+    "智能体",
+}
+SDK_CLI_HINT_TERMS = {
+    "sdk",
+    "cli",
+    "command",
+    "sub-agent",
+    "subagent",
+    "multi-agent",
+    "agent",
+    "working_dir",
+    "current_dir",
+    "workdir",
+    "container",
+    "路径映射",
+    "工作目录",
+    "子代理",
+    "多代理",
+}
 
 STOPWORDS = {
     "how",
@@ -138,7 +212,7 @@ DIMENSION_TOKENS = {
 LABELS = {
     "zh": {
         "title": "GitHub 功能实现原理报告",
-        "metadata": "Metadata",
+        "metadata": "元数据",
         "repo": "仓库",
         "ref": "请求 Ref",
         "resolved_ref": "解析 Ref",
@@ -149,27 +223,41 @@ LABELS = {
         "source_dir": "源码目录",
         "index_file": "索引文件",
         "subagent_file": "子代理结果",
-        "overview": "Repository Mental Model",
+        "overview": "仓库结构心智模型",
         "total_files": "文件总数",
         "indexed_text_files": "可检索文本文件",
         "top_languages": "主要语言",
         "entrypoints": "运行入口线索",
         "module_boundaries": "模块边界线索",
-        "executive_summary": "Executive Principle Summary",
+        "project_characteristics": "项目特点与标志实现",
+        "characteristic": "项目特点",
+        "characteristic_source": "来源",
+        "characteristic_signal": "README 线索",
+        "characteristic_mechanism": "实现机制",
+        "executive_summary": "面向人的功能说明",
         "feature": "功能",
         "direct_answer": "直接回答",
         "confidence": "置信度",
         "key_evidence_refs": "关键证据引用",
-        "feature_details": "Feature Principle Analysis",
-        "runtime_control_flow": "Runtime Control Flow",
-        "data_flow": "Data Flow",
-        "state_lifecycle": "State and Lifecycle",
-        "failure_recovery": "Failure and Recovery",
-        "concurrency_timing": "Concurrency and Timing",
-        "key_evidence": "Key Evidence",
-        "unknowns": "Inference and Unknowns",
-        "deep_audit": "Deep Audit",
-        "global_risks": "Cross-feature Coupling and System Risks",
+        "feature_details": "面向 AI 的实现细节",
+        "runtime_control_flow": "运行时控制流",
+        "data_flow": "数据流",
+        "state_lifecycle": "状态与生命周期",
+        "failure_recovery": "失败与恢复",
+        "concurrency_timing": "并发与时序",
+        "invocation_classification": "调用路径分类",
+        "invocation_type": "调用路径类型",
+        "working_dir_resolution": "工作目录确定方式",
+        "key_evidence": "关键证据",
+        "unknowns": "推断与未知点",
+        "deep_audit": "深度审计",
+        "global_risks": "跨功能耦合与系统风险",
+        "section_one": "第一部分：项目参数与结构解析",
+        "section_two": "第二部分：面向人的功能说明",
+        "section_three": "第三部分：面向 AI 的实现细节与证据链",
+        "human_function_role": "功能作用",
+        "human_special_capability": "特殊功能",
+        "human_implementation_idea": "实现想法",
         "none": "无",
         "inference": "inference",
         "high": "high",
@@ -195,6 +283,11 @@ LABELS = {
         "top_languages": "Top Languages",
         "entrypoints": "Runtime Entrypoint Signals",
         "module_boundaries": "Module Boundary Signals",
+        "project_characteristics": "Project Characteristics and Signature Implementations",
+        "characteristic": "Characteristic",
+        "characteristic_source": "Source",
+        "characteristic_signal": "README Signal",
+        "characteristic_mechanism": "Implementation Mechanism",
         "executive_summary": "Executive Principle Summary",
         "feature": "Feature",
         "direct_answer": "Direct Answer",
@@ -206,10 +299,19 @@ LABELS = {
         "state_lifecycle": "State and Lifecycle",
         "failure_recovery": "Failure and Recovery",
         "concurrency_timing": "Concurrency and Timing",
+        "invocation_classification": "Invocation Path Classification",
+        "invocation_type": "Invocation Type",
+        "working_dir_resolution": "Working Directory Resolution",
         "key_evidence": "Key Evidence",
         "unknowns": "Inference and Unknowns",
         "deep_audit": "Deep Audit",
         "global_risks": "Cross-feature Coupling and System Risks",
+        "section_one": "Part 1: Project Parameters and Structure",
+        "section_two": "Part 2: Human-readable Feature Explanation",
+        "section_three": "Part 3: AI-facing Mechanism Details and Evidence",
+        "human_function_role": "Function Role",
+        "human_special_capability": "Special Capability",
+        "human_implementation_idea": "Implementation Idea",
         "none": "None",
         "inference": "inference",
         "high": "high",
@@ -311,6 +413,253 @@ def is_doc_like(path: str) -> bool:
     if suffix in DOC_FILE_SUFFIXES:
         return True
     return lowered.startswith(DOC_PATH_HINTS)
+
+
+def normalize_dedupe_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", value.lower())
+
+
+def normalize_markdown_line(line: str) -> str:
+    normalized = line.strip()
+    normalized = re.sub(r"!\[[^\]]*\]\([^)]+\)", " ", normalized)
+    normalized = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", normalized)
+    normalized = re.sub(r"^#{1,6}\s*", "", normalized)
+    normalized = re.sub(r"^\s*(?:[-*+]|\d+\.)\s+", "", normalized)
+    normalized = re.sub(r"`+", "", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
+
+
+def is_readme_noise(line: str) -> bool:
+    if not line:
+        return True
+    if len(line) < 8:
+        return True
+    lowered = line.lower()
+    if "shields.io" in lowered:
+        return True
+    if lowered.startswith("http://") or lowered.startswith("https://"):
+        return True
+
+    has_feature_hint = any(term in lowered for term in README_FEATURE_TERMS)
+    has_skip_hint = any(term in lowered for term in README_SKIP_TERMS)
+    if has_skip_hint and not has_feature_hint:
+        return True
+    return False
+
+
+def load_primary_readme(source_dir: Path) -> tuple[str | None, str | None]:
+    for name in README_CANDIDATE_FILES:
+        candidate = source_dir / name
+        if candidate.exists() and candidate.is_file():
+            text = candidate.read_text(encoding="utf-8", errors="ignore")
+            return candidate.relative_to(source_dir).as_posix(), text
+
+    for candidate in sorted(source_dir.iterdir(), key=lambda item: item.name.lower()):
+        if not candidate.is_file():
+            continue
+        if not candidate.name.lower().startswith("readme"):
+            continue
+        text = candidate.read_text(encoding="utf-8", errors="ignore")
+        return candidate.relative_to(source_dir).as_posix(), text
+
+    return None, None
+
+
+def extract_readme_signals(readme_text: str) -> list[str]:
+    scored: list[tuple[int, int, str]] = []
+    in_code_block = False
+
+    for order, raw_line in enumerate(readme_text.splitlines()):
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+
+        is_heading = bool(re.match(r"^\s*#{1,6}\s+", raw_line))
+        is_bullet = bool(re.match(r"^\s*(?:[-*+]|\d+\.)\s+", raw_line))
+        normalized = normalize_markdown_line(raw_line)
+        if is_readme_noise(normalized):
+            continue
+
+        if len(normalized) > MAX_README_SIGNAL_LENGTH:
+            normalized = normalized[:MAX_README_SIGNAL_LENGTH].rstrip() + "..."
+
+        lowered = normalized.lower()
+        score = 0
+        if is_heading:
+            score += 4
+        if is_bullet:
+            score += 2
+        if any(term in lowered for term in README_FEATURE_TERMS):
+            score += 3
+        if any(term in lowered for term in README_SKIP_TERMS):
+            score -= 2
+        if not is_heading and not is_bullet:
+            score -= 1
+        if score <= 0:
+            continue
+        scored.append((score, order, normalized))
+
+    deduped: list[str] = []
+    seen = set()
+    for _score, _order, line in sorted(scored, key=lambda item: (-item[0], item[1])):
+        key = normalize_dedupe_key(line)
+        if not key or key in seen:
+            continue
+        deduped.append(line)
+        seen.add(key)
+        if len(deduped) >= 10:
+            break
+    return deduped
+
+
+def infer_characteristics_from_index(index: dict, language: str) -> list[str]:
+    key_files = [item for item in index.get("key_files", []) if isinstance(item, str)]
+    entrypoints = [item for item in index.get("entry_candidates", []) if isinstance(item, str)]
+    directories = [
+        item.get("path")
+        for item in index.get("directories", [])
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    ]
+    path_pool = " ".join([*key_files[:40], *entrypoints[:40], *directories[:20]]).lower()
+
+    candidates: list[str] = []
+
+    if language == "zh":
+        if entrypoints:
+            candidates.append(f"启动入口与运行主链路（{entrypoints[0]}）")
+        if any(token in path_pool for token in ["api", "route", "handler", "controller", "server"]):
+            candidates.append("外部接口接入、分发与执行机制")
+        if any(token in path_pool for token in ["scheduler", "queue", "worker", "job", "task"]):
+            candidates.append("任务调度与并发时序控制机制")
+        if any(token in path_pool for token in ["store", "state", "db", "cache", "repository"]):
+            candidates.append("状态持久化与生命周期管理机制")
+        if directories:
+            candidates.append(f"模块边界协作与职责划分（{directories[0]}）")
+        candidates.append("核心能力闭环与失败恢复机制")
+    else:
+        if entrypoints:
+            candidates.append(f"Runtime bootstrap and entry execution chain ({entrypoints[0]})")
+        if any(token in path_pool for token in ["api", "route", "handler", "controller", "server"]):
+            candidates.append("External interface ingestion, dispatch, and execution mechanism")
+        if any(token in path_pool for token in ["scheduler", "queue", "worker", "job", "task"]):
+            candidates.append("Task orchestration and concurrency timing mechanism")
+        if any(token in path_pool for token in ["store", "state", "db", "cache", "repository"]):
+            candidates.append("State persistence and lifecycle management mechanism")
+        if directories:
+            candidates.append(f"Module boundaries and responsibility partitioning ({directories[0]})")
+        candidates.append("Core capability closure and failure recovery mechanism")
+
+    deduped: list[str] = []
+    seen = set()
+    for candidate in candidates:
+        key = normalize_dedupe_key(candidate)
+        if not key or key in seen:
+            continue
+        deduped.append(candidate)
+        seen.add(key)
+        if len(deduped) >= MAX_CHARACTERISTICS:
+            break
+    return deduped
+
+
+def build_characteristic_candidates(source_dir: Path, index: dict, language: str) -> tuple[list[dict], str | None]:
+    readme_path, readme_text = load_primary_readme(source_dir)
+    candidates: list[dict] = []
+    seen = set()
+
+    if readme_text:
+        for signal in extract_readme_signals(readme_text):
+            key = normalize_dedupe_key(signal)
+            if not key or key in seen:
+                continue
+            candidates.append(
+                {
+                    "title": signal,
+                    "source": "readme",
+                    "readme_signal": signal,
+                }
+            )
+            seen.add(key)
+            if len(candidates) >= MAX_CHARACTERISTICS:
+                break
+
+    if len(candidates) < MAX_CHARACTERISTICS:
+        for fallback in infer_characteristics_from_index(index, language):
+            key = normalize_dedupe_key(fallback)
+            if not key or key in seen:
+                continue
+            candidates.append(
+                {
+                    "title": fallback,
+                    "source": "inference",
+                    "readme_signal": None,
+                }
+            )
+            seen.add(key)
+            if len(candidates) >= MAX_CHARACTERISTICS:
+                break
+
+    return candidates, readme_path
+
+
+def should_classify_invocation_path(feature: str) -> bool:
+    lowered = feature.lower()
+    return any(term in lowered for term in SDK_CLI_HINT_TERMS)
+
+
+def classify_invocation_path(feature_result: dict, lang: str) -> dict:
+    evidence_items = feature_result.get("evidence_items", [])
+    signal_pool_parts = []
+    for path, _line, snippet, _dimension in evidence_items:
+        signal_pool_parts.append(path.lower())
+        signal_pool_parts.append(snippet.lower())
+    signal_pool = " ".join(signal_pool_parts)
+
+    sdk_terms = {"sdk", "client", "openai", "anthropic", "httpx", "requests", "grpc"}
+    cli_terms = {"cli", "command", "subprocess", "spawn", "exec", "shell", "pty", "argv"}
+    wd_terms = {"working_dir", "current_dir", "workdir", "cwd", "chdir", "container", "mount", "volume"}
+
+    has_sdk = any(term in signal_pool for term in sdk_terms)
+    has_cli = any(term in signal_pool for term in cli_terms)
+    has_workdir = any(term in signal_pool for term in wd_terms)
+
+    if has_sdk and has_cli:
+        mode = "hybrid"
+    elif has_sdk:
+        mode = "sdk"
+    elif has_cli:
+        mode = "cli"
+    else:
+        mode = "inference"
+
+    if lang == "zh":
+        mode_text = {
+            "hybrid": "Hybrid（SDK + CLI）",
+            "sdk": "SDK",
+            "cli": "CLI",
+            "inference": "inference（证据不足）",
+        }[mode]
+        if has_workdir:
+            working_dir_text = "在证据中检测到 `working_dir/current_dir/cwd` 线索，可推断工作目录由运行参数或容器映射共同决定。"
+        else:
+            working_dir_text = "未发现稳定 `working_dir/current_dir/cwd` 证据，当前仅能做 inference 级别判定。"
+    else:
+        mode_text = {
+            "hybrid": "Hybrid (SDK + CLI)",
+            "sdk": "SDK",
+            "cli": "CLI",
+            "inference": "inference (insufficient direct evidence)",
+        }[mode]
+        if has_workdir:
+            working_dir_text = "Signals for `working_dir/current_dir/cwd` are present; the working directory is likely resolved by runtime args and/or container mapping."
+        else:
+            working_dir_text = "No stable `working_dir/current_dir/cwd` signal was found; this remains inference-level only."
+
+    return {"mode_text": mode_text, "working_dir_text": working_dir_text}
 
 
 def classify_dimension(text: str) -> str:
@@ -803,6 +1152,55 @@ def analyze_feature_single_agent(
     }
 
 
+def analyze_project_characteristics(
+    *,
+    source_dir: Path,
+    index: dict,
+    files: list[FileEntry],
+    lang: str,
+    labels: dict,
+) -> tuple[list[dict], list[str]]:
+    candidates, readme_path = build_characteristic_candidates(source_dir, index, lang)
+    notes: list[str] = []
+    if readme_path:
+        notes.append(
+            f"README-first: `{readme_path}`"
+            if lang == "zh"
+            else f"README-first source: `{readme_path}`"
+        )
+    else:
+        notes.append(
+            "未发现可用 README，已切换到基于代码索引的 inference 兜底。"
+            if lang == "zh"
+            else "No usable README found; switched to index-based inference fallback."
+        )
+
+    results: list[dict] = []
+    for candidate in candidates[:MAX_CHARACTERISTICS]:
+        title = candidate.get("title")
+        if not isinstance(title, str) or not title.strip():
+            continue
+        analyzed = analyze_feature_single_agent(
+            feature=title.strip(),
+            source_dir=source_dir,
+            files=files,
+            lang=lang,
+            labels=labels,
+        )
+        results.append(
+            {
+                "title": title.strip(),
+                "source": candidate.get("source") if candidate.get("source") in {"readme", "inference"} else "inference",
+                "readme_signal": candidate.get("readme_signal") if isinstance(candidate.get("readme_signal"), str) else None,
+                "direct_answer": analyzed.get("direct_answer", ""),
+                "confidence": analyzed.get("confidence", "low"),
+                "evidence_items": analyzed.get("evidence_items", [])[:MAX_CHARACTERISTIC_EVIDENCE_REFS],
+            }
+        )
+
+    return results, notes
+
+
 def deep_audit_lines(feature_result: dict, lang: str) -> list[str]:
     evidence_pool = " ".join(snippet.lower() for _path, _line, snippet, _dim in feature_result.get("evidence_items", []))
     has_failure = any(token in evidence_pool for token in DIMENSION_TOKENS["failure_recovery"])
@@ -840,6 +1238,61 @@ def deep_audit_lines(feature_result: dict, lang: str) -> list[str]:
         + ("good (multiple dimensions covered)" if len(feature_result.get("evidence_items", [])) >= 8 else "moderate (collect more direct evidence)")
     )
     return lines
+
+
+def build_human_feature_view(feature_result: dict, lang: str, labels: dict) -> dict[str, str]:
+    principles = feature_result.get("principles", {}) if isinstance(feature_result.get("principles"), dict) else {}
+    runtime = str(principles.get("runtime_control_flow", {}).get("conclusion", labels["none"]))
+    data_flow = str(principles.get("data_flow", {}).get("conclusion", labels["none"]))
+    state_lifecycle = str(principles.get("state_lifecycle", {}).get("conclusion", labels["none"]))
+    failure_recovery = str(principles.get("failure_recovery", {}).get("conclusion", labels["none"]))
+    concurrency_timing = str(principles.get("concurrency_timing", {}).get("conclusion", labels["none"]))
+
+    has_failure_signal = failure_recovery and labels["none"] not in failure_recovery
+    has_concurrency_signal = concurrency_timing and labels["none"] not in concurrency_timing
+
+    if lang == "zh":
+        special_parts: list[str] = []
+        if has_failure_signal:
+            special_parts.append(f"该功能具备失败恢复能力，{failure_recovery}")
+        if has_concurrency_signal:
+            special_parts.append(f"该功能具备并发/时序控制能力，{concurrency_timing}")
+        if not special_parts:
+            special_parts.append("当前未提取到稳定的失败恢复或并发时序特征，特殊能力判断以 inference 为主。")
+
+        implementation_idea = (
+            "实现上采用“控制流触发 + 数据流传递 + 状态流转”的组合策略，"
+            f"控制流负责串联执行阶段（{runtime}），"
+            f"数据流负责边界转换（{data_flow}），"
+            f"状态生命周期负责保持一致性（{state_lifecycle}）。"
+        )
+
+        return {
+            "function_role": feature_result.get("direct_answer", labels["none"]),
+            "special_capability": "；".join(special_parts),
+            "implementation_idea": implementation_idea,
+        }
+
+    special_parts_en: list[str] = []
+    if has_failure_signal:
+        special_parts_en.append(f"Failure-recovery signals are explicit: {failure_recovery}")
+    if has_concurrency_signal:
+        special_parts_en.append(f"Concurrency/timing control signals are explicit: {concurrency_timing}")
+    if not special_parts_en:
+        special_parts_en.append("No stable failure/concurrency signal is extracted yet; special capability remains inference-level.")
+
+    implementation_idea_en = (
+        "The implementation uses a combined control-flow + data-flow + state-lifecycle strategy, "
+        f"where control flow wires execution stages ({runtime}), "
+        f"data flow handles boundary transformation ({data_flow}), "
+        f"and state lifecycle preserves consistency ({state_lifecycle})."
+    )
+
+    return {
+        "function_role": feature_result.get("direct_answer", labels["none"]),
+        "special_capability": "; ".join(special_parts_en),
+        "implementation_idea": implementation_idea_en,
+    }
 
 
 def render_report(
@@ -910,6 +1363,14 @@ def render_report(
             )
         )
 
+    characteristic_results, characteristic_notes = analyze_project_characteristics(
+        source_dir=source_dir,
+        index=index,
+        files=file_entries,
+        lang=language,
+        labels=labels,
+    )
+
     analysis_mode = "single-agent"
     if subagent_payload and isinstance(subagent_payload, dict) and subagent_payload.get("analysis_mode") == "multi-agent":
         analysis_mode = "multi-agent"
@@ -979,9 +1440,11 @@ def render_report(
 
     report_lines: list[str] = []
 
+    report_lines.extend([f"## {labels['section_one']}", ""])
+
     report_lines.extend(
         [
-            f"## {labels['metadata']}",
+            f"### {labels['metadata']}",
             f"- {labels['repo']}: `{repo_url}`",
             f"- {labels['ref']}: `{ref}`",
             f"- {labels['resolved_ref']}: `{resolved_ref}`",
@@ -998,7 +1461,7 @@ def render_report(
 
     report_lines.extend(
         [
-            f"## {labels['overview']}",
+            f"### {labels['overview']}",
             f"- {labels['total_files']}: `{index.get('total_files', 0)}`",
             f"- {labels['indexed_text_files']}: `{index.get('indexed_text_files', 0)}`",
             f"- {labels['top_languages']}: `{top_languages or labels['none']}`",
@@ -1015,11 +1478,48 @@ def render_report(
     if overview_notes or architecture_notes:
         report_lines.append("")
 
-    report_lines.extend([f"## {labels['executive_summary']}", ""])
+    report_lines.extend([f"### {labels['project_characteristics']}", ""])
+    for note in characteristic_notes:
+        report_lines.append(f"- {note}")
+    if characteristic_notes:
+        report_lines.append("")
+
+    if characteristic_results:
+        for idx, item in enumerate(characteristic_results, start=1):
+            report_lines.append(f"#### {labels['characteristic']} {idx}: {item['title']}")
+            report_lines.append(
+                f"- {labels['characteristic_source']}: `{item['source']}`"
+            )
+            if item.get("readme_signal"):
+                report_lines.append(
+                    f"- {labels['characteristic_signal']}: `{item['readme_signal']}`"
+                )
+            report_lines.append(
+                f"- {labels['characteristic_mechanism']}: {item['direct_answer']}"
+            )
+            report_lines.append(
+                f"- {labels['confidence']}: `{format_confidence(item['confidence'], labels)}`"
+            )
+            report_lines.append(f"- {labels['key_evidence_refs']}:")
+            evidence_items = item.get("evidence_items", [])
+            if evidence_items:
+                for path, line, _snippet, _dim in evidence_items[:MAX_CHARACTERISTIC_EVIDENCE_REFS]:
+                    report_lines.append(f"  - `{path}:{line}`")
+            else:
+                report_lines.append(f"  - {labels['none']}")
+            report_lines.append("")
+    else:
+        report_lines.append(f"- {labels['none']}")
+        report_lines.append("")
+
+    report_lines.extend([f"## {labels['section_two']}", ""])
 
     for idx, result in enumerate(feature_results, start=1):
+        human_view = build_human_feature_view(result, language, labels)
         report_lines.append(f"### {labels['feature']} {idx}: {result['feature']}")
-        report_lines.append(f"- {labels['direct_answer']}: {result['direct_answer']}")
+        report_lines.append(f"- {labels['human_function_role']}: {human_view['function_role']}")
+        report_lines.append(f"- {labels['human_special_capability']}: {human_view['special_capability']}")
+        report_lines.append(f"- {labels['human_implementation_idea']}: {human_view['implementation_idea']}")
         report_lines.append(f"- {labels['confidence']}: `{format_confidence(result['confidence'], labels)}`")
         report_lines.append(f"- {labels['key_evidence_refs']}:")
         evidence_items = result.get("evidence_items", [])
@@ -1030,10 +1530,11 @@ def render_report(
             report_lines.append(f"  - {labels['none']}")
         report_lines.append("")
 
-    report_lines.extend([f"## {labels['feature_details']}", ""])
+    report_lines.extend([f"## {labels['section_three']}", ""])
+    report_lines.extend([f"### {labels['feature_details']}", ""])
 
     for idx, result in enumerate(feature_results, start=1):
-        report_lines.append(f"### {labels['feature']} {idx}: {result['feature']}")
+        report_lines.append(f"#### {labels['feature']} {idx}: {result['feature']}")
         report_lines.append("")
 
         principles = result.get("principles", {})
@@ -1044,13 +1545,13 @@ def render_report(
             confidence = detail.get("confidence") if detail.get("confidence") in {"high", "medium", "low"} else "low"
             inference = bool(detail.get("inference", True))
 
-            report_lines.append(f"#### {section_title}")
+            report_lines.append(f"##### {section_title}")
             report_lines.append(f"- {conclusion}")
             report_lines.append(f"- {labels['confidence']}: `{format_confidence(confidence, labels)}`")
             report_lines.append(f"- {labels['inference']}: `{str(inference).lower()}`")
             report_lines.append("")
 
-        report_lines.append(f"#### {labels['key_evidence']}")
+        report_lines.append(f"##### {labels['key_evidence']}")
         evidence_items = result.get("evidence_items", [])
         if evidence_items:
             for path, line, snippet, dimension in evidence_items:
@@ -1059,7 +1560,7 @@ def render_report(
             report_lines.append(f"- {labels['none']}")
         report_lines.append("")
 
-        report_lines.append(f"#### {labels['unknowns']}")
+        report_lines.append(f"##### {labels['unknowns']}")
         unknowns = result.get("unknowns", [])
         notes = result.get("notes", [])
         if unknowns or notes:
@@ -1071,13 +1572,20 @@ def render_report(
             report_lines.append(f"- {labels['none']}")
         report_lines.append("")
 
+        if should_classify_invocation_path(result["feature"]):
+            invocation = classify_invocation_path(result, language)
+            report_lines.append(f"##### {labels['invocation_classification']}")
+            report_lines.append(f"- {labels['invocation_type']}: `{invocation['mode_text']}`")
+            report_lines.append(f"- {labels['working_dir_resolution']}: {invocation['working_dir_text']}")
+            report_lines.append("")
+
         if depth == "deep":
-            report_lines.append(f"#### {labels['deep_audit']}")
+            report_lines.append(f"##### {labels['deep_audit']}")
             for line in deep_audit_lines(result, language):
                 report_lines.append(line)
             report_lines.append("")
 
-    report_lines.append(f"## {labels['global_risks']}")
+    report_lines.append(f"### {labels['global_risks']}")
     for risk in global_risks:
         report_lines.append(f"- {risk}")
     report_lines.append("")
@@ -1087,6 +1595,7 @@ def render_report(
     return {
         "report_path": str(output),
         "run_number": run_number,
+        "characteristic_count": len(characteristic_results),
         "feature_count": len(features),
         "depth": depth,
         "language": language,

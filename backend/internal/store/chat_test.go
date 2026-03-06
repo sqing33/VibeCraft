@@ -8,7 +8,7 @@ import (
 	"vibe-tree/backend/internal/store"
 )
 
-func TestMigrateV2_ChatTablesAvailable(t *testing.T) {
+func TestMigrateV3_ChatTablesAvailable(t *testing.T) {
 	t.Parallel()
 
 	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "state.db"))
@@ -60,10 +60,28 @@ func TestChatStoreLifecycle(t *testing.T) {
 		t.Fatalf("create chat session: %v", err)
 	}
 
-	if _, err := st.AppendChatMessage(context.Background(), store.AppendChatMessageParams{SessionID: sess.ID, Role: "user", ContentText: "hi"}); err != nil {
+	expertID := "claudecode"
+	provider := "anthropic"
+	model := "claude-3-7-sonnet-latest"
+
+	if _, err := st.AppendChatMessage(context.Background(), store.AppendChatMessageParams{
+		SessionID:   sess.ID,
+		Role:        "user",
+		ContentText: "hi",
+		ExpertID:    &expertID,
+		Provider:    &provider,
+		Model:       &model,
+	}); err != nil {
 		t.Fatalf("append user message: %v", err)
 	}
-	if _, err := st.AppendChatMessage(context.Background(), store.AppendChatMessageParams{SessionID: sess.ID, Role: "assistant", ContentText: "hello"}); err != nil {
+	if _, err := st.AppendChatMessage(context.Background(), store.AppendChatMessageParams{
+		SessionID:   sess.ID,
+		Role:        "assistant",
+		ContentText: "hello",
+		ExpertID:    &expertID,
+		Provider:    &provider,
+		Model:       &model,
+	}); err != nil {
 		t.Fatalf("append assistant message: %v", err)
 	}
 
@@ -76,6 +94,17 @@ func TestChatStoreLifecycle(t *testing.T) {
 	}
 	if msgs[0].Role != "user" || msgs[1].Role != "assistant" {
 		t.Fatalf("unexpected message order: %+v", msgs)
+	}
+	for _, msg := range msgs {
+		if msg.ExpertID == nil || *msg.ExpertID != expertID {
+			t.Fatalf("unexpected expert_id: %+v", msg)
+		}
+		if msg.Provider == nil || *msg.Provider != provider {
+			t.Fatalf("unexpected provider: %+v", msg)
+		}
+		if msg.Model == nil || *msg.Model != model {
+			t.Fatalf("unexpected model: %+v", msg)
+		}
 	}
 	if msgs[0].Turn >= msgs[1].Turn {
 		t.Fatalf("expected ascending turn order")
@@ -114,6 +143,27 @@ func TestChatStoreLifecycle(t *testing.T) {
 	}
 	if forked.Summary == nil || *forked.Summary != "summary" {
 		t.Fatalf("forked summary mismatch: %+v", forked)
+	}
+	forkMessages, err := st.ListChatMessages(context.Background(), forked.ID, 50)
+	if err != nil {
+		t.Fatalf("list fork messages: %v", err)
+	}
+	if len(forkMessages) != len(msgs) {
+		t.Fatalf("expected %d fork context messages, got %d", len(msgs), len(forkMessages))
+	}
+	for i := range forkMessages {
+		if forkMessages[i].Role != msgs[i].Role {
+			t.Fatalf("fork role mismatch at %d: got %q want %q", i, forkMessages[i].Role, msgs[i].Role)
+		}
+		if forkMessages[i].ContentText != msgs[i].ContentText {
+			t.Fatalf("fork content mismatch at %d", i)
+		}
+		if forkMessages[i].Provider == nil || *forkMessages[i].Provider != store.ForkContextProvider {
+			t.Fatalf("fork context provider missing at %d: %+v", i, forkMessages[i])
+		}
+		if forkMessages[i].ExpertID != nil || forkMessages[i].Model != nil {
+			t.Fatalf("fork context message should not carry expert/model at %d: %+v", i, forkMessages[i])
+		}
 	}
 
 	comp, err := st.CreateChatCompaction(context.Background(), store.CreateChatCompactionParams{

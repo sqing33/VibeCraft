@@ -18,7 +18,7 @@ func MirrorLLMToExperts(cfg *Config) error {
 	if cfg.LLM == nil {
 		return nil
 	}
-	if err := ValidateLLMSettings(cfg.LLM); err != nil {
+	if err := NormalizeLLMSettings(cfg.LLM); err != nil {
 		return err
 	}
 
@@ -87,4 +87,3 @@ func MirrorLLMToExperts(cfg *Config) error {
 	cfg.Experts = out
 	return nil
 }
-

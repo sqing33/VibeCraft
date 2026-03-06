@@ -15,10 +15,10 @@ import (
 	"vibe-tree/backend/internal/config"
 	"vibe-tree/backend/internal/runner"
 
+	openai "github.com/openai/openai-go"
 	openai_option "github.com/openai/openai-go/option"
 	openai_responses "github.com/openai/openai-go/responses"
 	openai_shared "github.com/openai/openai-go/shared"
-	openai "github.com/openai/openai-go"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	anthropic_option "github.com/anthropics/anthropic-sdk-go/option"
@@ -50,7 +50,7 @@ func llmTestHandler() gin.HandlerFunc {
 		}
 
 		provider := strings.ToLower(strings.TrimSpace(req.Provider))
-		model := strings.TrimSpace(req.Model)
+		model := strings.ToLower(strings.TrimSpace(req.Model))
 		apiKey := strings.TrimSpace(req.APIKey)
 		sourceID := strings.TrimSpace(req.SourceID)
 		baseURL := strings.TrimSpace(req.BaseURL)

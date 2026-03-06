@@ -8,7 +8,7 @@ import (
 
 // ValidateLLMSettings 功能：校验 LLM settings 的结构有效性（sources/models）。
 // 参数/返回：llm 可为 nil；nil 表示不启用该能力并返回 nil；否则返回校验错误。
-// 失败场景：id/provider/model/source 引用不合法时返回 error。
+// 失败场景：id/provider/model/source 引用不合法，或模型标识在小写归一化后冲突时返回 error。
 // 副作用：无。
 func ValidateLLMSettings(llm *LLMSettings) error {
 	if llm == nil {
@@ -16,7 +16,8 @@ func ValidateLLMSettings(llm *LLMSettings) error {
 	}
 
 	sourceByID := make(map[string]LLMSourceConfig, len(llm.Sources))
-	for i, s := range llm.Sources {
+	for i := range llm.Sources {
+		s := llm.Sources[i]
 		id := strings.TrimSpace(s.ID)
 		if id == "" {
 			return fmt.Errorf("llm.sources[%d].id is required", i)
@@ -40,14 +41,19 @@ func ValidateLLMSettings(llm *LLMSettings) error {
 			}
 		}
 
-		s.ID = id
-		s.Provider = provider
-		sourceByID[id] = s
+		sourceByID[id] = LLMSourceConfig{
+			ID:       id,
+			Label:    strings.TrimSpace(s.Label),
+			Provider: provider,
+			BaseURL:  strings.TrimSpace(s.BaseURL),
+			APIKey:   strings.TrimSpace(s.APIKey),
+		}
 	}
 
 	modelSeen := make(map[string]struct{}, len(llm.Models))
-	for i, m := range llm.Models {
-		id := strings.TrimSpace(m.ID)
+	for i := range llm.Models {
+		m := llm.Models[i]
+		id := normalizeModelIdentifier(m.ID)
 		if id == "" {
 			return fmt.Errorf("llm.models[%d].id is required", i)
 		}
@@ -64,7 +70,7 @@ func ValidateLLMSettings(llm *LLMSettings) error {
 			return fmt.Errorf("llm.models[%d].provider %q is not supported", i, strings.TrimSpace(m.Provider))
 		}
 
-		model := strings.TrimSpace(m.Model)
+		model := normalizeModelIdentifier(m.Model)
 		if model == "" {
 			return fmt.Errorf("llm.models[%d].model is required", i)
 		}
@@ -83,10 +89,10 @@ func ValidateLLMSettings(llm *LLMSettings) error {
 	return nil
 }
 
-// NormalizeLLMSettings 功能：在校验通过后，将 source.provider 自动补齐为引用它的 models.provider（若缺失）。
+// NormalizeLLMSettings 功能：在校验通过后，规范化 LLM settings 的 provider 与模型标识字段。
 // 参数/返回：llm 可为 nil；成功返回 nil。
-// 失败场景：结构非法或 source 被不同 provider 的 model 混用时返回 error。
-// 副作用：会原地规范化 llm.Sources 的 provider 字段（仅做小写化；不会推断/补齐）。
+// 失败场景：结构非法或归一化后出现冲突时返回 error。
+// 副作用：会原地 trim 并小写化 llm.Sources.provider 与 llm.Models 的 id/provider/model/source_id 字段。
 func NormalizeLLMSettings(llm *LLMSettings) error {
 	if llm == nil {
 		return nil
@@ -96,12 +102,28 @@ func NormalizeLLMSettings(llm *LLMSettings) error {
 	}
 
 	for i := range llm.Sources {
+		llm.Sources[i].ID = strings.TrimSpace(llm.Sources[i].ID)
+		llm.Sources[i].Label = strings.TrimSpace(llm.Sources[i].Label)
 		llm.Sources[i].Provider = normalizeProvider(llm.Sources[i].Provider)
+		llm.Sources[i].BaseURL = strings.TrimSpace(llm.Sources[i].BaseURL)
+		llm.Sources[i].APIKey = strings.TrimSpace(llm.Sources[i].APIKey)
+	}
+
+	for i := range llm.Models {
+		llm.Models[i].ID = normalizeModelIdentifier(llm.Models[i].ID)
+		llm.Models[i].Label = strings.TrimSpace(llm.Models[i].Label)
+		llm.Models[i].Provider = normalizeProvider(llm.Models[i].Provider)
+		llm.Models[i].Model = normalizeModelIdentifier(llm.Models[i].Model)
+		llm.Models[i].SourceID = strings.TrimSpace(llm.Models[i].SourceID)
 	}
 
 	return nil
 }
 
 func normalizeProvider(v string) string {
+	return strings.ToLower(strings.TrimSpace(v))
+}
+
+func normalizeModelIdentifier(v string) string {
 	return strings.ToLower(strings.TrimSpace(v))
 }

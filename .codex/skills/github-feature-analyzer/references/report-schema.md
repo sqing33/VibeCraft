@@ -1,9 +1,8 @@
 # Report Schema
 
-Use the following section order exactly. This schema is optimized for
-principle-first explanation with strict evidence traceability.
+Use the following **three-part top-level structure** exactly. This schema is optimized for human readability first, while preserving AI-grade mechanism traceability.
 
-## 1. Metadata
+## 1. 项目参数与结构解析 (Project Parameters and Structure)
 Include:
 - repository URL
 - requested ref
@@ -16,25 +15,26 @@ Include:
 - index file path
 - sub-agent result path (if used)
 
-## 2. Repository Mental Model
-Include:
+And include repository structure overview:
 - total file count
 - indexed text file count
 - top language distribution
 - likely runtime entrypoints
 - main module boundaries
+- README-first note / fallback note
+- exactly 3 project characteristics with mechanism explanation, confidence, and evidence refs
 
-## 3. Executive Principle Summary
+## 2. 面向人的功能说明 (Human-readable Feature Explanation)
 Create one subsection per feature in input order.
 
 Each feature summary must include:
-- direct principle-first answer (what mechanism implements the feature)
-- mechanism narrative in 4-8 sentences, explaining how control/data/state/failure/concurrency aspects work together
-- prioritize explanatory language for human understanding; do not reduce this section to function/file list
+- 功能作用（优先 direct_answer，用“用途 + 价值”表达）
+- 特殊功能（优先失败恢复/并发时序等高信号能力）
+- 实现想法（结合控制流 + 数据流 + 状态生命周期解释“为什么这样做”）
+- confidence (`high`/`medium`/`low`)
 - 2-5 key evidence references (`path:line`)
-- confidence level (`high`/`medium`/`low`)
 
-## 4. Feature Principle Analysis
+## 3. 面向 AI 的实现细节与证据链 (AI-facing Mechanism Details and Evidence)
 Create one subsection per feature in input order.
 
 Each feature subsection must include:
@@ -73,8 +73,17 @@ For each evidence item:
 ### Inference and Unknowns
 List uncertainties and missing verification points.
 
-## 5. Cross-feature Coupling and System Risks
-Include:
+### Conditional Block: Invocation Path Classification
+Add this block only when feature intent involves SDK/CLI/sub-agent/runtime invocation routing.
+
+Block content:
+- invocation path type: `SDK` | `CLI` | `Hybrid` | `inference`
+- working directory resolution notes (`working_dir` / `current_dir` / container mapping)
+- if no direct evidence, explicitly mark `inference`
+
+### Global tail block under Part 3
+After all features, include global block:
+- `Cross-feature Coupling and System Risks`
 - shared-module coupling risks across features (if present)
 - global blind spots (generated code, binary-only, truncated scans)
 - sections with weak evidence confidence
@@ -88,9 +97,12 @@ When depth is `deep`, add `Deep Audit` under each feature with:
 
 Do not emit generic deep-audit filler text.
 
-## Formatting Rules
-- use Markdown headings
-- keep snippets short
-- prefer relative paths in references
-- mark non-evidence claims as `inference`
-- avoid candidate-path dump sections
+## Hard Rules (unchanged)
+- Keep `path:line` traceability for key conclusions.
+- Keep `confidence` and `inference` mechanisms.
+- Mark non-evidence claims as `inference`.
+- Prefer mechanism explanation over file/function dump.
+- Keep `Run N` append behavior unchanged.
+
+## Migration Note
+Older reports may use six top-level sections. New reports use three top-level parts while preserving the same mechanism dimensions and evidence contract in Part 3.

@@ -109,3 +109,111 @@ func TestChatSessionLifecycle_DemoExpert(t *testing.T) {
 		t.Fatalf("expected new fork session id")
 	}
 }
+
+func TestChatSession_PerTurnExpertOverride_UpdatesSessionDefaults(t *testing.T) {
+	cfg := config.Default()
+	for i := range cfg.Experts {
+		if cfg.Experts[i].ID == "demo" {
+			cfg.Experts[i].Model = "demo-a"
+		}
+	}
+	cfg.Experts = append(cfg.Experts, config.ExpertConfig{
+		ID:       "demo_b",
+		Label:    "Demo B",
+		Provider: "demo",
+		Model:    "demo-b",
+		Env:      map[string]string{},
+		TimeoutMs: 30 * 1000,
+	})
+
+	env := newTestEnv(t, cfg, 2)
+	baseURL := env.httpSrv.URL
+
+	createBody, _ := json.Marshal(map[string]any{
+		"title":          "chat-override",
+		"expert_id":      "demo",
+		"workspace_path": ".",
+	})
+	createRes, err := http.Post(baseURL+"/api/v1/chat/sessions", "application/json", bytes.NewReader(createBody))
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer createRes.Body.Close()
+	if createRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected create status: %s", createRes.Status)
+	}
+
+	var sess store.ChatSession
+	if err := json.NewDecoder(createRes.Body).Decode(&sess); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if sess.ExpertID != "demo" {
+		t.Fatalf("expected session expert demo, got %q", sess.ExpertID)
+	}
+	if sess.Provider != "demo" || sess.Model != "demo-a" {
+		t.Fatalf("unexpected session model: provider=%q model=%q", sess.Provider, sess.Model)
+	}
+
+	turnBody, _ := json.Marshal(map[string]any{"input": "hello", "expert_id": "demo_b"})
+	turnRes, err := http.Post(baseURL+"/api/v1/chat/sessions/"+sess.ID+"/turns", "application/json", bytes.NewReader(turnBody))
+	if err != nil {
+		t.Fatalf("post turn: %v", err)
+	}
+	defer turnRes.Body.Close()
+	if turnRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected turn status: %s", turnRes.Status)
+	}
+
+	listRes, err := http.Get(baseURL + "/api/v1/chat/sessions")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	defer listRes.Body.Close()
+	if listRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected list status: %s", listRes.Status)
+	}
+	var sessions []store.ChatSession
+	if err := json.NewDecoder(listRes.Body).Decode(&sessions); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	var updated *store.ChatSession
+	for i := range sessions {
+		if sessions[i].ID == sess.ID {
+			updated = &sessions[i]
+			break
+		}
+	}
+	if updated == nil {
+		t.Fatalf("session not found in list")
+	}
+	if updated.ExpertID != "demo_b" || updated.Provider != "demo" || updated.Model != "demo-b" {
+		t.Fatalf("unexpected session defaults after override: %+v", *updated)
+	}
+
+	msgsRes, err := http.Get(baseURL + "/api/v1/chat/sessions/" + sess.ID + "/messages")
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	defer msgsRes.Body.Close()
+	if msgsRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected messages status: %s", msgsRes.Status)
+	}
+	var messages []store.ChatMessage
+	if err := json.NewDecoder(msgsRes.Body).Decode(&messages); err != nil {
+		t.Fatalf("decode messages response: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages after one turn, got %d", len(messages))
+	}
+	for _, msg := range messages {
+		if msg.ExpertID == nil || *msg.ExpertID != "demo_b" {
+			t.Fatalf("unexpected message expert_id: %+v", msg)
+		}
+		if msg.Provider == nil || *msg.Provider != "demo" {
+			t.Fatalf("unexpected message provider: %+v", msg)
+		}
+		if msg.Model == nil || *msg.Model != "demo-b" {
+			t.Fatalf("unexpected message model: %+v", msg)
+		}
+	}
+}

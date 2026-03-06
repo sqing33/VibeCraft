@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Chip, Input, Select, SelectItem, Textarea } from '@heroui/react'
+import { Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 import { onWsEnvelope } from '@/lib/wsBus'
+import { fetchLLMSettings } from '@/lib/daemon'
 import { toast } from '@/lib/toast'
 import { formatRelativeTime } from '@/lib/time'
 import { useDaemonStore } from '@/stores/daemonStore'
@@ -20,6 +22,18 @@ function shouldUseFullWidth(text: string): boolean {
   )
 }
 
+function formatTokenUsage(opts: {
+  tokenIn?: number
+  tokenOut?: number
+  cachedInputTokens?: number
+}): string {
+  const parts: string[] = []
+  if (typeof opts.tokenIn === 'number') parts.push(`输入 ${opts.tokenIn}`)
+  if (typeof opts.tokenOut === 'number') parts.push(`输出 ${opts.tokenOut}`)
+  if (typeof opts.cachedInputTokens === 'number') parts.push(`缓存 ${opts.cachedInputTokens}`)
+  return parts.join(' · ')
+}
+
 export function ChatSessionsPage() {
   const daemonUrl = useDaemonStore((s) => s.daemonUrl)
   const health = useDaemonStore((s) => s.health)
@@ -30,6 +44,9 @@ export function ChatSessionsPage() {
   const messagesBySession = useChatStore((s) => s.messagesBySession)
   const streamingBySession = useChatStore((s) => s.streamingBySession)
   const thinkingBySession = useChatStore((s) => s.thinkingBySession)
+  const turnMetaBySession = useChatStore((s) => s.turnMetaBySession)
+  const turnInputByUserMessageId = useChatStore((s) => s.turnInputByUserMessageId)
+  const usageByMessageId = useChatStore((s) => s.usageByMessageId)
   const loading = useChatStore((s) => s.loading)
   const sending = useChatStore((s) => s.sending)
   const error = useChatStore((s) => s.error)
@@ -40,23 +57,82 @@ export function ChatSessionsPage() {
   const setThinking = useChatStore((s) => s.setThinking)
   const clearStreaming = useChatStore((s) => s.clearStreaming)
   const clearThinking = useChatStore((s) => s.clearThinking)
+  const setTurnMeta = useChatStore((s) => s.setTurnMeta)
+  const setTurnInputMeta = useChatStore((s) => s.setTurnInputMeta)
+  const setUsageMeta = useChatStore((s) => s.setUsageMeta)
   const refreshSessions = useChatStore((s) => s.refreshSessions)
   const loadMessages = useChatStore((s) => s.loadMessages)
   const createSession = useChatStore((s) => s.createSession)
   const sendTurn = useChatStore((s) => s.sendTurn)
-  const compactSession = useChatStore((s) => s.compactSession)
   const forkSession = useChatStore((s) => s.forkSession)
   const archiveSession = useChatStore((s) => s.archiveSession)
 
   const [newTitle, setNewTitle] = useState('')
   const [newExpertId, setNewExpertId] = useState('codex')
   const [input, setInput] = useState('')
+  const [turnExpertId, setTurnExpertId] = useState('codex')
+  const [allowedModelExpertIds, setAllowedModelExpertIds] = useState<Set<string>>(new Set())
   const messageScrollRef = useRef<HTMLDivElement | null>(null)
+  const shouldAutoScrollRef = useRef(true)
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.session_id === activeSessionId) ?? null,
     [sessions, activeSessionId],
   )
+  const selectableExperts = useMemo(
+    () =>
+      experts.filter(
+        (e) => e.provider !== 'process' && allowedModelExpertIds.has(e.id),
+      ),
+    [allowedModelExpertIds, experts],
+  )
+  const expertsById = useMemo(() => {
+    const map = new Map<string, (typeof selectableExperts)[number]>()
+    for (const e of selectableExperts) map.set(e.id, e)
+    return map
+  }, [selectableExperts])
+
+  const formatModelIdentity = useCallback(
+    (meta?: { expert_id?: string; provider?: string; model?: string } | null): string => {
+      if (!meta) return ''
+      const expertId = meta.expert_id?.trim() || ''
+      const expert = expertId ? expertsById.get(expertId) : undefined
+      const label = expert ? expert.label || expert.id : expertId
+      const provider = (meta.provider?.trim() || expert?.provider || '').trim()
+      const model = (meta.model?.trim() || expert?.model || '').trim()
+      const parts: string[] = []
+      if (label) parts.push(label)
+      if (provider && model) parts.push(`${provider}/${model}`)
+      return parts.join(' · ')
+    },
+    [expertsById],
+  )
+
+  useEffect(() => {
+    if (activeSession?.expert_id) setTurnExpertId(activeSession.expert_id)
+  }, [activeSession?.expert_id])
+
+  useEffect(() => {
+    let cancelled = false
+    void fetchLLMSettings(daemonUrl)
+      .then((settings) => {
+        if (cancelled) return
+        const ids = new Set(
+          (settings.models ?? [])
+            .map((m) => (m.id ?? '').trim())
+            .filter((id) => id.length > 0),
+        )
+        setAllowedModelExpertIds(ids)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setAllowedModelExpertIds(new Set())
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [daemonUrl, experts])
+
   const messages = activeSessionId ? messagesBySession[activeSessionId] ?? [] : []
   const streaming = activeSessionId ? streamingBySession[activeSessionId] ?? '' : ''
   const thinking = activeSessionId ? thinkingBySession[activeSessionId] ?? '' : ''
@@ -84,16 +160,50 @@ export function ChatSessionsPage() {
   useEffect(() => {
     const el = messageScrollRef.current
     if (!el) return
+    if (!shouldAutoScrollRef.current) return
     el.scrollTop = el.scrollHeight
   }, [messages, streaming, thinking])
 
   useEffect(() => {
+    const el = messageScrollRef.current
+    if (!el) return
+    const onScroll = () => {
+      const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+      shouldAutoScrollRef.current = distanceToBottom < 64
+    }
+    onScroll()
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+    }
+  }, [activeSessionId])
+
+  useEffect(() => {
+    const el = messageScrollRef.current
+    if (!el) return
+    shouldAutoScrollRef.current = true
+    el.scrollTop = el.scrollHeight
+  }, [activeSessionId])
+
+  useEffect(() => {
     return onWsEnvelope((env) => {
       if (env.type === 'chat.turn.started') {
-        const payload = env.payload as { session_id?: string } | undefined
+        const payload = env.payload as
+          | {
+              session_id?: string
+              expert_id?: string
+              provider?: string
+              model?: string
+            }
+          | undefined
         if (!payload?.session_id) return
         clearStreaming(payload.session_id)
         clearThinking(payload.session_id)
+        setTurnMeta(payload.session_id, {
+          expert_id: payload.expert_id,
+          provider: payload.provider,
+          model: payload.model,
+        })
         return
       }
       if (env.type === 'chat.turn.thinking.delta') {
@@ -109,12 +219,59 @@ export function ChatSessionsPage() {
         return
       }
       if (env.type === 'chat.turn.completed') {
-        const payload = env.payload as { session_id?: string; reasoning_text?: string } | undefined
+        const payload = env.payload as
+          | {
+              session_id?: string
+              user_message_id?: string
+              message?: { message_id?: string; token_in?: number; token_out?: number }
+              reasoning_text?: string
+              model_input?: string
+              context_mode?: string
+              token_in?: number
+              token_out?: number
+              cached_input_tokens?: number
+            }
+          | undefined
         if (!payload?.session_id) return
         if (typeof payload.reasoning_text === 'string' && payload.reasoning_text.trim()) {
           setThinking(payload.session_id, payload.reasoning_text)
         }
+        if (
+          typeof payload.user_message_id === 'string' &&
+          payload.user_message_id &&
+          typeof payload.model_input === 'string' &&
+          payload.model_input.trim()
+        ) {
+          setTurnInputMeta(payload.user_message_id, {
+            model_input: payload.model_input,
+            context_mode: payload.context_mode,
+          })
+        }
+        const assistantMessageId =
+          typeof payload.message?.message_id === 'string' ? payload.message.message_id : undefined
+        if (assistantMessageId) {
+          const tokenIn =
+            typeof payload.message?.token_in === 'number'
+              ? payload.message.token_in
+              : typeof payload.token_in === 'number'
+                ? payload.token_in
+                : undefined
+          const tokenOut =
+            typeof payload.message?.token_out === 'number'
+              ? payload.message.token_out
+              : typeof payload.token_out === 'number'
+                ? payload.token_out
+                : undefined
+          const cachedInputTokens =
+            typeof payload.cached_input_tokens === 'number' ? payload.cached_input_tokens : undefined
+          setUsageMeta(assistantMessageId, {
+            token_in: tokenIn,
+            token_out: tokenOut,
+            cached_input_tokens: cachedInputTokens,
+          })
+        }
         clearStreaming(payload.session_id)
+        setTurnMeta(payload.session_id, null)
         void refreshSessions(daemonUrl)
         void loadMessages(daemonUrl, payload.session_id)
         return
@@ -129,6 +286,9 @@ export function ChatSessionsPage() {
     setThinking,
     clearStreaming,
     clearThinking,
+    setTurnMeta,
+    setTurnInputMeta,
+    setUsageMeta,
     daemonUrl,
     loadMessages,
     refreshSessions,
@@ -159,25 +319,11 @@ export function ChatSessionsPage() {
     if (!text) return
     setInput('')
     try {
-      await sendTurn(daemonUrl, activeSessionId, text)
+      await sendTurn(daemonUrl, activeSessionId, text, turnExpertId.trim() || undefined)
     } catch (err: unknown) {
       toast({
         variant: 'destructive',
         title: '发送失败',
-        description: err instanceof Error ? err.message : String(err),
-      })
-    }
-  }
-
-  const onCompact = async () => {
-    if (!activeSessionId) return
-    try {
-      await compactSession(daemonUrl, activeSessionId)
-      toast({ title: '压缩完成', description: activeSessionId })
-    } catch (err: unknown) {
-      toast({
-        variant: 'destructive',
-        title: '压缩失败',
         description: err instanceof Error ? err.message : String(err),
       })
     }
@@ -198,19 +344,61 @@ export function ChatSessionsPage() {
     }
   }
 
-  const onArchive = async () => {
-    if (!activeSessionId) return
+  const onDeleteSession = async (sessionId: string) => {
+    const session = sessions.find((s) => s.session_id === sessionId)
+    const label = session?.title?.trim() || sessionId
+    if (!window.confirm(`确认删除会话「${label}」吗？\n\n删除按钮当前行为为归档（本地保留，不再显示在活跃列表）。`)) {
+      return
+    }
     try {
-      await archiveSession(daemonUrl, activeSessionId)
-      toast({ title: '会话已归档', description: activeSessionId })
+      await archiveSession(daemonUrl, sessionId)
+      if (activeSessionId === sessionId) {
+        setActiveSession(null)
+      }
+      toast({ title: '会话已删除（归档）', description: sessionId })
     } catch (err: unknown) {
       toast({
         variant: 'destructive',
-        title: '归档失败',
+        title: '删除失败',
         description: err instanceof Error ? err.message : String(err),
       })
     }
   }
+
+  const visibleSessions = useMemo(
+    () => sessions.filter((s) => s.status === 'active'),
+    [sessions],
+  )
+
+  const pendingMeta = activeSessionId ? turnMetaBySession[activeSessionId] ?? null : null
+  useEffect(() => {
+    if (selectableExperts.length === 0) return
+    if (!newExpertId || !selectableExperts.some((e) => e.id === newExpertId)) {
+      setNewExpertId(selectableExperts[0].id)
+    }
+    if (!turnExpertId || !selectableExperts.some((e) => e.id === turnExpertId)) {
+      setTurnExpertId(selectableExperts[0].id)
+    }
+  }, [newExpertId, selectableExperts, turnExpertId])
+  const pendingIdentity = useMemo(() => {
+    if (pendingMeta) {
+      const id = formatModelIdentity(pendingMeta)
+      if (id) return id
+    }
+    if (turnExpertId.trim()) {
+      const id = formatModelIdentity({ expert_id: turnExpertId.trim() })
+      if (id) return id
+    }
+    if (activeSession) {
+      const id = formatModelIdentity({
+        expert_id: activeSession.expert_id,
+        provider: activeSession.provider,
+        model: activeSession.model,
+      })
+      if (id) return id
+    }
+    return ''
+  }, [activeSession, formatModelIdentity, pendingMeta, turnExpertId])
 
   if (health.status === 'error') {
     return <Alert color="danger" title="无法连接守护进程" description={health.message} />
@@ -237,14 +425,18 @@ export function ChatSessionsPage() {
           }}
           size="sm"
           disallowEmptySelection
+          isDisabled={selectableExperts.length === 0}
         >
-          {experts
-            .filter((e) => e.provider !== 'process')
-            .map((e) => (
-              <SelectItem key={e.id}>{e.label || e.id}</SelectItem>
-            ))}
+          {selectableExperts.map((e) => (
+            <SelectItem key={e.id}>{e.label || e.id}</SelectItem>
+          ))}
         </Select>
-        <Button color="primary" size="sm" onPress={() => void onCreate()}>
+        <Button
+          color="primary"
+          size="sm"
+          isDisabled={selectableExperts.length === 0}
+          onPress={() => void onCreate()}
+        >
           新建会话
         </Button>
 
@@ -253,10 +445,10 @@ export function ChatSessionsPage() {
         <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
           {loading ? (
             <div className="text-xs text-muted-foreground">加载中…</div>
-          ) : sessions.length === 0 ? (
+          ) : visibleSessions.length === 0 ? (
             <div className="text-xs text-muted-foreground">暂无会话</div>
           ) : (
-            sessions.map((s) => (
+            visibleSessions.map((s) => (
               <button
                 key={s.session_id}
                 className={`w-full rounded-lg border p-2 text-left ${
@@ -264,7 +456,19 @@ export function ChatSessionsPage() {
                 }`}
                 onClick={() => setActiveSession(s.session_id)}
               >
-                <div className="truncate text-sm font-medium">{s.title}</div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="truncate text-sm font-medium">{s.title}</div>
+                  <span
+                    className="shrink-0 cursor-pointer text-red-500 transition-colors hover:text-red-600"
+                    title="删除会话"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void onDeleteSession(s.session_id)
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" focusable="false" />
+                  </span>
+                </div>
                 <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span className="truncate">{s.provider}/{s.model}</span>
                   <span>{formatRelativeTime(s.updated_at)}</span>
@@ -289,14 +493,8 @@ export function ChatSessionsPage() {
             </div>
           </div>
           <div className="flex gap-2">
-            <Button size="sm" variant="flat" isDisabled={!activeSessionId} onPress={() => void onCompact()}>
-              压缩
-            </Button>
             <Button size="sm" variant="flat" isDisabled={!activeSessionId} onPress={() => void onFork()}>
               分叉
-            </Button>
-            <Button size="sm" variant="flat" isDisabled={!activeSessionId} onPress={() => void onArchive()}>
-              归档
             </Button>
           </div>
         </div>
@@ -312,6 +510,27 @@ export function ChatSessionsPage() {
             const isUser = m.role === 'user'
             const isAssistant = m.role === 'assistant'
             const fullWidth = shouldUseFullWidth(m.content_text)
+            const identity = formatModelIdentity({
+              expert_id: m.expert_id,
+              provider: m.provider,
+              model: m.model,
+            })
+            const inputMeta = isUser ? turnInputByUserMessageId[m.message_id] : undefined
+            const tokenUsage = isAssistant
+              ? formatTokenUsage({
+                  tokenIn: m.token_in ?? usageByMessageId[m.message_id]?.token_in,
+                  tokenOut: m.token_out ?? usageByMessageId[m.message_id]?.token_out,
+                  cachedInputTokens: usageByMessageId[m.message_id]?.cached_input_tokens,
+                })
+              : ''
+            const contextModeLabel =
+              inputMeta?.context_mode === 'anchor'
+                ? '上下文模式：Anchor 续写'
+                : inputMeta?.context_mode === 'reconstructed'
+                  ? '上下文模式：重建上下文'
+                  : inputMeta?.context_mode === 'demo'
+                    ? '上下文模式：Demo'
+                    : ''
             const showThinkingDrawer =
               isAssistant &&
               m.message_id === lastAssistantMessageId &&
@@ -326,7 +545,18 @@ export function ChatSessionsPage() {
                 >
                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     {isUser ? '你' : 'AI'}
+                    {identity ? ` · ${identity}` : ''}
                   </div>
+                  {showThinkingDrawer ? (
+                    <details className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
+                      <summary className="cursor-pointer select-none text-muted-foreground">
+                        查看完整思考过程
+                      </summary>
+                      <div className="chat-markdown mt-2 text-xs text-muted-foreground">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{thinking}</ReactMarkdown>
+                      </div>
+                    </details>
+                  ) : null}
                   {isAssistant ? (
                     <div className="chat-markdown text-sm">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content_text}</ReactMarkdown>
@@ -334,15 +564,21 @@ export function ChatSessionsPage() {
                   ) : (
                     <div className="whitespace-pre-wrap text-sm">{m.content_text}</div>
                   )}
-                  {showThinkingDrawer ? (
+                  {isUser && inputMeta?.model_input ? (
                     <details className="mt-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
                       <summary className="cursor-pointer select-none text-muted-foreground">
-                        查看完整思考过程
+                        查看实际携带内容
                       </summary>
+                      {contextModeLabel ? (
+                        <div className="mt-2 text-[11px] text-muted-foreground">{contextModeLabel}</div>
+                      ) : null}
                       <div className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
-                        {thinking}
+                        {inputMeta.model_input}
                       </div>
                     </details>
+                  ) : null}
+                  {isAssistant && tokenUsage ? (
+                    <div className="mt-2 border-t pt-2 text-[11px] text-muted-foreground">{tokenUsage}</div>
                   ) : null}
                 </div>
               </div>
@@ -356,8 +592,18 @@ export function ChatSessionsPage() {
                 }`}
               >
                 <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  AI {streaming ? '回复中' : '思考中'}
+                  AI{pendingIdentity ? ` · ${pendingIdentity}` : ''} {streaming ? '回复中' : '思考中'}
                 </div>
+                {thinking.trim() ? (
+                  <details className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
+                    <summary className="cursor-pointer select-none text-muted-foreground">
+                      查看完整思考过程
+                    </summary>
+                    <div className="chat-markdown mt-2 text-xs text-muted-foreground">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{thinking}</ReactMarkdown>
+                    </div>
+                  </details>
+                ) : null}
                 {streaming ? (
                   <div className="chat-markdown text-sm">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{streaming}</ReactMarkdown>
@@ -365,16 +611,6 @@ export function ChatSessionsPage() {
                 ) : (
                   <div className="text-sm text-muted-foreground">正在思考…</div>
                 )}
-                {thinking.trim() ? (
-                  <details className="mt-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
-                    <summary className="cursor-pointer select-none text-muted-foreground">
-                      查看完整思考过程
-                    </summary>
-                    <div className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
-                      {thinking}
-                    </div>
-                  </details>
-                ) : null}
               </div>
             </div>
           ) : null}
@@ -389,9 +625,31 @@ export function ChatSessionsPage() {
             isDisabled={!activeSessionId || sending}
             className="flex-1"
           />
-          <Button color="primary" isDisabled={!activeSessionId || sending || !input.trim()} onPress={() => void onSend()}>
-            {sending ? '发送中…' : '发送'}
-          </Button>
+          <div className="flex w-[200px] flex-col gap-2">
+            <Select
+              label="Expert"
+              selectedKeys={new Set([turnExpertId])}
+              onSelectionChange={(keys) => {
+                if (keys === 'all') return
+                const first = keys.values().next().value
+                if (typeof first === 'string') setTurnExpertId(first)
+              }}
+              size="sm"
+              disallowEmptySelection
+              isDisabled={!activeSessionId || sending || selectableExperts.length === 0}
+            >
+              {selectableExperts.map((e) => (
+                <SelectItem key={e.id}>{e.label || e.id}</SelectItem>
+              ))}
+            </Select>
+            <Button
+              color="primary"
+              isDisabled={!activeSessionId || sending || !input.trim()}
+              onPress={() => void onSend()}
+            >
+              {sending ? '发送中…' : '发送'}
+            </Button>
+          </div>
         </div>
       </section>
     </div>

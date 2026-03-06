@@ -12,12 +12,32 @@ import {
   type ChatSession,
 } from '@/lib/daemon'
 
+type TurnMeta = {
+  expert_id?: string
+  provider?: string
+  model?: string
+}
+
+type TurnInputMeta = {
+  model_input: string
+  context_mode?: string
+}
+
+type UsageMeta = {
+  token_in?: number
+  token_out?: number
+  cached_input_tokens?: number
+}
+
 export type ChatStore = {
   sessions: ChatSession[]
   activeSessionId: string | null
   messagesBySession: Record<string, ChatMessage[]>
   streamingBySession: Record<string, string>
   thinkingBySession: Record<string, string>
+  turnMetaBySession: Record<string, TurnMeta | null>
+  turnInputByUserMessageId: Record<string, TurnInputMeta | undefined>
+  usageByMessageId: Record<string, UsageMeta | undefined>
   loading: boolean
   sending: boolean
   error: string | null
@@ -31,13 +51,21 @@ export type ChatStore = {
   setThinking: (sessionId: string, thinking: string) => void
   clearStreaming: (sessionId: string) => void
   clearThinking: (sessionId: string) => void
+  setTurnMeta: (sessionId: string, meta: TurnMeta | null) => void
+  setTurnInputMeta: (userMessageId: string, meta: TurnInputMeta) => void
+  setUsageMeta: (messageId: string, meta: UsageMeta) => void
   refreshSessions: (daemonUrl: string) => Promise<void>
   loadMessages: (daemonUrl: string, sessionId: string) => Promise<void>
   createSession: (
     daemonUrl: string,
     req: { title?: string; expert_id?: string; workspace_path?: string },
   ) => Promise<ChatSession>
-  sendTurn: (daemonUrl: string, sessionId: string, input: string) => Promise<void>
+  sendTurn: (
+    daemonUrl: string,
+    sessionId: string,
+    input: string,
+    expertId?: string,
+  ) => Promise<void>
   compactSession: (daemonUrl: string, sessionId: string) => Promise<void>
   forkSession: (daemonUrl: string, sessionId: string) => Promise<ChatSession>
   archiveSession: (daemonUrl: string, sessionId: string) => Promise<void>
@@ -49,6 +77,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   messagesBySession: {},
   streamingBySession: {},
   thinkingBySession: {},
+  turnMetaBySession: {},
+  turnInputByUserMessageId: {},
+  usageByMessageId: {},
   loading: false,
   sending: false,
   error: null,
@@ -118,17 +149,40 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         [sessionId]: '',
       },
     })),
+  setTurnMeta: (sessionId, meta) =>
+    set((state) => ({
+      turnMetaBySession: {
+        ...state.turnMetaBySession,
+        [sessionId]: meta,
+      },
+    })),
+  setTurnInputMeta: (userMessageId, meta) =>
+    set((state) => ({
+      turnInputByUserMessageId: {
+        ...state.turnInputByUserMessageId,
+        [userMessageId]: meta,
+      },
+    })),
+  setUsageMeta: (messageId, meta) =>
+    set((state) => ({
+      usageByMessageId: {
+        ...state.usageByMessageId,
+        [messageId]: meta,
+      },
+    })),
   refreshSessions: async (daemonUrl) => {
     set({ loading: true, error: null })
     try {
       const sessions = await fetchChatSessions(daemonUrl)
+      const activeSessions = sessions.filter((s) => s.status === 'active')
+      const fallbackSessionId = activeSessions[0]?.session_id ?? sessions[0]?.session_id ?? null
       set((state) => ({
         sessions,
         loading: false,
         activeSessionId:
           state.activeSessionId && sessions.some((s) => s.session_id === state.activeSessionId)
             ? state.activeSessionId
-            : sessions[0]?.session_id ?? null,
+            : fallbackSessionId,
       }))
     } catch (err: unknown) {
       set({
@@ -148,10 +202,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set({ activeSessionId: session.session_id })
     return session
   },
-  sendTurn: async (daemonUrl, sessionId, input) => {
+  sendTurn: async (daemonUrl, sessionId, input, expertId) => {
     set({ sending: true, error: null })
     get().clearStreaming(sessionId)
     get().clearThinking(sessionId)
+    get().setTurnMeta(sessionId, expertId ? { expert_id: expertId } : null)
     const now = Date.now()
     const lastTurn = (get().messagesBySession[sessionId] ?? []).at(-1)?.turn ?? 0
     get().appendMessage(sessionId, {
@@ -160,10 +215,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       turn: lastTurn + 1,
       role: 'user',
       content_text: input,
+      expert_id: expertId,
       created_at: now,
     })
     try {
-      await postChatTurn(daemonUrl, sessionId, { input })
+      await postChatTurn(daemonUrl, sessionId, { input, expert_id: expertId })
       await get().loadMessages(daemonUrl, sessionId)
       await get().refreshSessions(daemonUrl)
       set((state) => ({
@@ -173,6 +229,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           [sessionId]: '',
         },
       }))
+      get().setTurnMeta(sessionId, null)
     } catch (err: unknown) {
       await get().loadMessages(daemonUrl, sessionId).catch(() => undefined)
       set((state) => ({
@@ -183,6 +240,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           [sessionId]: '',
         },
       }))
+      get().setTurnMeta(sessionId, null)
       throw err
     }
   },

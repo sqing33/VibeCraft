@@ -52,6 +52,7 @@ type Manager struct {
 
 type TurnParams struct {
 	Session    store.ChatSession
+	ExpertID   string
 	UserInput  string
 	ModelInput string
 	SDK        runner.SDKSpec
@@ -59,9 +60,20 @@ type TurnParams struct {
 }
 
 type TurnResult struct {
-	UserMessage      store.ChatMessage `json:"user_message"`
-	AssistantMessage store.ChatMessage `json:"assistant_message"`
-	ReasoningText    *string           `json:"reasoning_text,omitempty"`
+	UserMessage       store.ChatMessage `json:"user_message"`
+	AssistantMessage  store.ChatMessage `json:"assistant_message"`
+	ReasoningText     *string           `json:"reasoning_text,omitempty"`
+	ModelInput        *string           `json:"model_input,omitempty"`
+	ContextMode       *string           `json:"context_mode,omitempty"`
+	CachedInputTokens *int64            `json:"cached_input_tokens,omitempty"`
+}
+
+type providerCallMeta struct {
+	ModelInput        string
+	ContextMode       string
+	TokenIn           *int64
+	TokenOut          *int64
+	CachedInputTokens *int64
 }
 
 func NewManager(st *store.Store, hub *ws.Hub, opts Options) *Manager {
@@ -118,6 +130,13 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 	if params.Session.Status != "active" {
 		return TurnResult{}, fmt.Errorf("%w: session is not active", store.ErrValidation)
 	}
+	expertID := strings.TrimSpace(params.ExpertID)
+	if expertID == "" {
+		expertID = strings.TrimSpace(params.Session.ExpertID)
+	}
+	if expertID == "" {
+		return TurnResult{}, fmt.Errorf("%w: expert_id is required", store.ErrValidation)
+	}
 	userText := strings.TrimSpace(params.UserInput)
 	if userText == "" {
 		return TurnResult{}, fmt.Errorf("%w: input is required", store.ErrValidation)
@@ -127,10 +146,16 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 		modelInput = userText
 	}
 
+	provider := strings.ToLower(strings.TrimSpace(params.SDK.Provider))
+	model := strings.TrimSpace(params.SDK.Model)
+
 	userMsg, err := m.store.AppendChatMessage(ctx, store.AppendChatMessageParams{
 		SessionID:   params.Session.ID,
 		Role:        "user",
 		ContentText: userText,
+		ExpertID:    pointerString(expertID),
+		Provider:    pointerString(provider),
+		Model:       pointerString(model),
 	})
 	if err != nil {
 		return TurnResult{}, err
@@ -139,18 +164,25 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 		"session_id":      params.Session.ID,
 		"user_message_id": userMsg.ID,
 		"turn":            userMsg.Turn,
+		"expert_id":       expertID,
+		"provider":        provider,
+		"model":           model,
 	})
 
-	if err := m.ensureCompaction(ctx, params.Session, modelInput); err != nil {
+	if err := m.ensureCompaction(ctx, params.Session, modelInput, params.SDK, params.Env); err != nil {
 		return TurnResult{}, err
 	}
 
-	anchor, _ := m.store.GetChatAnchor(ctx, params.Session.ID)
-	respText, reasoningText, anchorUpdate, err := m.callProvider(ctx, params.Session, params.SDK, params.Env, modelInput, anchor)
+	var anchor store.ChatAnchor
+	if strings.EqualFold(provider, params.Session.Provider) && strings.EqualFold(model, params.Session.Model) {
+		anchor, _ = m.store.GetChatAnchor(ctx, params.Session.ID)
+	}
+
+	respText, reasoningText, anchorUpdate, callMeta, err := m.callProvider(ctx, params.Session, params.SDK, params.Env, modelInput, anchor)
 	if err != nil {
-		if (params.Session.Provider == "openai" && anchor.PreviousResponse != nil && strings.TrimSpace(*anchor.PreviousResponse) != "") ||
-			(params.Session.Provider == "anthropic" && anchor.ContainerID != nil && strings.TrimSpace(*anchor.ContainerID) != "") {
-			respText, reasoningText, anchorUpdate, err = m.callProvider(ctx, params.Session, params.SDK, params.Env, modelInput, store.ChatAnchor{})
+		if (provider == "openai" && anchor.PreviousResponse != nil && strings.TrimSpace(*anchor.PreviousResponse) != "") ||
+			(provider == "anthropic" && anchor.ContainerID != nil && strings.TrimSpace(*anchor.ContainerID) != "") {
+			respText, reasoningText, anchorUpdate, callMeta, err = m.callProvider(ctx, params.Session, params.SDK, params.Env, modelInput, store.ChatAnchor{})
 		}
 	}
 	if err != nil {
@@ -161,6 +193,11 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 		SessionID:         params.Session.ID,
 		Role:              "assistant",
 		ContentText:       respText,
+		ExpertID:          pointerString(expertID),
+		Provider:          pointerString(provider),
+		Model:             pointerString(model),
+		TokenIn:           callMeta.TokenIn,
+		TokenOut:          callMeta.TokenOut,
 		ProviderMessageID: anchorUpdate.ProviderMessageID,
 	})
 	if err != nil {
@@ -169,23 +206,42 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 	if anchorUpdate.PreviousResponse != nil || anchorUpdate.ContainerID != nil || anchorUpdate.ProviderMessageID != nil {
 		_ = m.store.UpsertChatAnchor(ctx, store.UpsertChatAnchorParams{
 			SessionID:         params.Session.ID,
-			Provider:          params.Session.Provider,
+			Provider:          provider,
 			PreviousResponse:  anchorUpdate.PreviousResponse,
 			ContainerID:       anchorUpdate.ContainerID,
 			ProviderMessageID: anchorUpdate.ProviderMessageID,
 		})
 	}
-
-	m.broadcast("chat.turn.completed", map[string]any{
-		"session_id":     params.Session.ID,
-		"message":        assistantMsg,
-		"reasoning_text": reasoningText,
+	_, _ = m.store.UpdateChatSessionDefaults(ctx, store.UpdateChatSessionDefaultsParams{
+		SessionID: params.Session.ID,
+		ExpertID:  expertID,
+		Provider:  provider,
+		Model:     model,
 	})
 
-	return TurnResult{UserMessage: userMsg, AssistantMessage: assistantMsg, ReasoningText: pointerString(reasoningText)}, nil
+	m.broadcast("chat.turn.completed", map[string]any{
+		"session_id":          params.Session.ID,
+		"user_message_id":     userMsg.ID,
+		"message":             assistantMsg,
+		"reasoning_text":      reasoningText,
+		"model_input":         callMeta.ModelInput,
+		"context_mode":        callMeta.ContextMode,
+		"token_in":            callMeta.TokenIn,
+		"token_out":           callMeta.TokenOut,
+		"cached_input_tokens": callMeta.CachedInputTokens,
+	})
+
+	return TurnResult{
+		UserMessage:       userMsg,
+		AssistantMessage:  assistantMsg,
+		ReasoningText:     pointerString(reasoningText),
+		ModelInput:        pointerString(callMeta.ModelInput),
+		ContextMode:       pointerString(callMeta.ContextMode),
+		CachedInputTokens: callMeta.CachedInputTokens,
+	}, nil
 }
 
-func (m *Manager) CompactSession(ctx context.Context, sessionID string) (store.ChatSession, *store.ChatCompaction, error) {
+func (m *Manager) CompactSession(ctx context.Context, sessionID string, sdk runner.SDKSpec, env map[string]string) (store.ChatSession, *store.ChatCompaction, error) {
 	if m == nil || m.store == nil {
 		return store.ChatSession{}, nil, fmt.Errorf("chat manager not configured")
 	}
@@ -197,7 +253,8 @@ func (m *Manager) CompactSession(ctx context.Context, sessionID string) (store.C
 	if err != nil {
 		return store.ChatSession{}, nil, err
 	}
-	rec, err := m.compactMessages(ctx, sess, messages, m.keepRecent)
+	messages = filterModelContextMessages(messages)
+	rec, err := m.compactMessages(ctx, sess, messages, m.keepRecent, sdk, env)
 	if err != nil {
 		return store.ChatSession{}, nil, err
 	}
@@ -211,17 +268,18 @@ func (m *Manager) CompactSession(ctx context.Context, sessionID string) (store.C
 	return sess, rec, nil
 }
 
-func (m *Manager) ensureCompaction(ctx context.Context, sess store.ChatSession, input string) error {
+func (m *Manager) ensureCompaction(ctx context.Context, sess store.ChatSession, input string, sdk runner.SDKSpec, env map[string]string) error {
 	messages, err := m.store.ListChatMessages(ctx, sess.ID, 1000)
 	if err != nil {
 		return err
 	}
+	messages = filterModelContextMessages(messages)
 
 	ratio := m.usageRatio(sess, messages, input, m.keepRecent)
 	if ratio < m.softRatio {
 		return nil
 	}
-	_, err = m.compactMessages(ctx, sess, messages, m.keepRecent)
+	_, err = m.compactMessages(ctx, sess, messages, m.keepRecent, sdk, env)
 	if err != nil {
 		return err
 	}
@@ -234,13 +292,14 @@ func (m *Manager) ensureCompaction(ctx context.Context, sess store.ChatSession, 
 	if err != nil {
 		return err
 	}
+	messages = filterModelContextMessages(messages)
 	ratio = m.usageRatio(sess, messages, input, m.keepRecent)
 	if ratio >= m.forceRatio {
 		forceKeep := m.keepRecent / 2
 		if forceKeep < 4 {
 			forceKeep = 4
 		}
-		_, err = m.compactMessages(ctx, sess, messages, forceKeep)
+		_, err = m.compactMessages(ctx, sess, messages, forceKeep, sdk, env)
 		if err != nil {
 			return err
 		}
@@ -252,6 +311,7 @@ func (m *Manager) ensureCompaction(ctx context.Context, sess store.ChatSession, 
 		if err != nil {
 			return err
 		}
+		messages = filterModelContextMessages(messages)
 		ratio = m.usageRatio(sess, messages, input, forceKeep)
 	}
 	if ratio >= m.hardRatio {
@@ -260,7 +320,8 @@ func (m *Manager) ensureCompaction(ctx context.Context, sess store.ChatSession, 
 	return nil
 }
 
-func (m *Manager) compactMessages(ctx context.Context, sess store.ChatSession, messages []store.ChatMessage, keepRecent int) (*store.ChatCompaction, error) {
+func (m *Manager) compactMessages(ctx context.Context, sess store.ChatSession, messages []store.ChatMessage, keepRecent int, sdk runner.SDKSpec, env map[string]string) (*store.ChatCompaction, error) {
+	messages = filterModelContextMessages(messages)
 	if keepRecent < 2 {
 		keepRecent = 2
 	}
@@ -272,12 +333,11 @@ func (m *Manager) compactMessages(ctx context.Context, sess store.ChatSession, m
 	if len(old) == 0 {
 		return nil, nil
 	}
-	delta := summarizeMessages(old)
-	if strings.TrimSpace(delta) == "" {
+	before := estimateTokens(renderConversation(sess.Summary, messages, "", keepRecent+len(old)))
+	delta, mergedSummary := m.generateCompactionSummary(ctx, sess.Summary, old, keepRecent, sdk, env)
+	if strings.TrimSpace(mergedSummary) == "" || strings.TrimSpace(delta) == "" {
 		return nil, nil
 	}
-	before := estimateTokens(renderConversation(sess.Summary, messages, "", keepRecent+len(old)))
-	mergedSummary := strings.TrimSpace(strings.Join([]string{stringOrEmpty(sess.Summary), delta}, "\n\n"))
 	if _, err := m.store.UpdateChatSummary(ctx, sess.ID, mergedSummary); err != nil {
 		return nil, err
 	}
@@ -325,6 +385,196 @@ func summarizeMessages(messages []store.ChatMessage) string {
 	return "Compacted context:\n- " + strings.Join(lines, "\n- ")
 }
 
+func (m *Manager) generateCompactionSummary(ctx context.Context, existingSummary *string, old []store.ChatMessage, keepRecent int, sdk runner.SDKSpec, env map[string]string) (summaryDelta string, mergedSummary string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if m != nil {
+		if out, err := m.summarizeWithLLM(ctx, sdk, env, buildCompactionPrompt(existingSummary, old)); err == nil {
+			if v := strings.TrimSpace(out); v != "" {
+				// LLM path: treat output as the full new summary.
+				return v, v
+			}
+		}
+	}
+
+	// Fallback path: deterministic local summary delta appended to existing summary.
+	delta := summarizeMessages(old)
+	if strings.TrimSpace(delta) == "" {
+		return "", ""
+	}
+	merged := strings.TrimSpace(strings.Join([]string{stringOrEmpty(existingSummary), delta}, "\n\n"))
+	return delta, merged
+}
+
+func buildCompactionPrompt(existingSummary *string, old []store.ChatMessage) string {
+	var b strings.Builder
+	b.WriteString("你是一个对话记录压缩器。请把以下“历史对话片段”压缩为可持续续聊的会话摘要。\n")
+	b.WriteString("要求：\n")
+	b.WriteString("- 使用简体中文\n")
+	b.WriteString("- 只输出摘要正文（不要解释你的做法）\n")
+	b.WriteString("- 尽量保留：关键事实、关键约束、重要决策、未决问题与待办\n")
+	b.WriteString("\n")
+
+	if s := strings.TrimSpace(stringOrEmpty(existingSummary)); s != "" {
+		b.WriteString("已有会话摘要（可重写/更新）：\n")
+		b.WriteString(s)
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString("历史对话片段（按时间顺序）：\n")
+	for _, msg := range old {
+		text := strings.TrimSpace(msg.ContentText)
+		if text == "" {
+			continue
+		}
+		b.WriteString(fmt.Sprintf("%d %s: %s\n", msg.Turn, strings.ToUpper(msg.Role), text))
+	}
+	b.WriteString("\n输出格式建议（可按需增删小节）：\n")
+	b.WriteString("目标:\n- ...\n\n已知事实:\n- ...\n\n约束/偏好:\n- ...\n\n关键结论/决策:\n- ...\n\n未决问题:\n- ...\n\n待办:\n- ...\n")
+	return strings.TrimSpace(b.String())
+}
+
+func (m *Manager) summarizeWithLLM(ctx context.Context, sdk runner.SDKSpec, env map[string]string, prompt string) (string, error) {
+	if m == nil {
+		return "", errors.New("chat manager not configured")
+	}
+	provider := strings.ToLower(strings.TrimSpace(sdk.Provider))
+	if provider == "" {
+		return "", errors.New("summarizer provider is required")
+	}
+	if provider == "demo" {
+		return "", errors.New("demo provider does not support summarization")
+	}
+	if strings.TrimSpace(sdk.Model) == "" {
+		return "", errors.New("summarizer model is required")
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return "", errors.New("summarizer prompt is required")
+	}
+
+	system := strings.TrimSpace(sdk.Instructions)
+	if system == "" {
+		system = "你是一个对话摘要生成器。"
+	}
+	temp := sdk.Temperature
+	if temp == nil {
+		v := 0.1
+		temp = &v
+	}
+	maxTokens := sdk.MaxOutputTokens
+	if maxTokens <= 0 || maxTokens > 1200 {
+		maxTokens = 1200
+	}
+
+	switch provider {
+	case "openai":
+		body := openai_responses.ResponseNewParams{
+			Model: openai_shared.ResponsesModel(strings.TrimSpace(sdk.Model)),
+			Input: openai_responses.ResponseNewParamsInputUnion{
+				OfString: openai.String(prompt),
+			},
+			Instructions:    openai.String(system),
+			MaxOutputTokens: openai.Int(int64(maxTokens)),
+			Temperature:     openai.Float(*temp),
+		}
+
+		opts := make([]openai_option.RequestOption, 0, 4)
+		if v := strings.TrimSpace(env["OPENAI_API_KEY"]); v != "" {
+			opts = append(opts, openai_option.WithAPIKey(v))
+		}
+		if v := strings.TrimSpace(env["OPENAI_ORG_ID"]); v != "" {
+			opts = append(opts, openai_option.WithOrganization(v))
+		}
+		if v := strings.TrimSpace(env["OPENAI_PROJECT_ID"]); v != "" {
+			opts = append(opts, openai_option.WithProject(v))
+		}
+		if baseURL := strings.TrimSpace(sdk.BaseURL); baseURL != "" {
+			opts = append(opts, openai_option.WithBaseURL(runner.NormalizeBaseURL("openai", baseURL)))
+		} else if baseURL := strings.TrimSpace(env["OPENAI_BASE_URL"]); baseURL != "" {
+			opts = append(opts, openai_option.WithBaseURL(runner.NormalizeBaseURL("openai", baseURL)))
+		}
+
+		stream := m.openaiClient.Responses.NewStreaming(ctx, body, opts...)
+		if stream == nil {
+			return "", errors.New("openai summary stream is nil")
+		}
+		defer stream.Close()
+
+		var text strings.Builder
+		for stream.Next() {
+			ev := stream.Current()
+			switch ev.Type {
+			case "response.output_text.delta":
+				delta := ev.AsResponseOutputTextDelta().Delta
+				if delta == "" {
+					continue
+				}
+				text.WriteString(delta)
+			case "error":
+				msg := strings.TrimSpace(ev.AsError().Message)
+				if msg != "" {
+					return "", errors.New(msg)
+				}
+			}
+		}
+		if err := stream.Err(); err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(text.String()), nil
+	case "anthropic":
+		body := anthropic.MessageNewParams{
+			Model:     anthropic.Model(strings.TrimSpace(sdk.Model)),
+			MaxTokens: int64(maxTokens),
+			Messages: []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
+			},
+			System: []anthropic.TextBlockParam{{Text: system}},
+		}
+		body.Temperature = anthropic.Float(*temp)
+
+		opts := make([]anthropic_option.RequestOption, 0, 2)
+		if v := strings.TrimSpace(env["ANTHROPIC_API_KEY"]); v != "" {
+			opts = append(opts, anthropic_option.WithAPIKey(v))
+		}
+		if baseURL := strings.TrimSpace(sdk.BaseURL); baseURL != "" {
+			opts = append(opts, anthropic_option.WithBaseURL(runner.NormalizeBaseURL("anthropic", baseURL)))
+		} else if baseURL := strings.TrimSpace(env["ANTHROPIC_BASE_URL"]); baseURL != "" {
+			opts = append(opts, anthropic_option.WithBaseURL(runner.NormalizeBaseURL("anthropic", baseURL)))
+		}
+
+		stream := m.anthropicClient.Messages.NewStreaming(ctx, body, opts...)
+		if stream == nil {
+			return "", errors.New("anthropic summary stream is nil")
+		}
+		defer stream.Close()
+
+		var text strings.Builder
+		for stream.Next() {
+			ev := stream.Current()
+			switch ev.Type {
+			case "content_block_delta":
+				de := ev.AsContentBlockDelta()
+				if strings.TrimSpace(de.Delta.Type) != "text_delta" {
+					continue
+				}
+				delta := de.Delta.AsTextDelta().Text
+				if delta == "" {
+					continue
+				}
+				text.WriteString(delta)
+			}
+		}
+		if err := stream.Err(); err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(text.String()), nil
+	default:
+		return "", fmt.Errorf("unsupported summarizer provider %q", provider)
+	}
+}
+
 func (m *Manager) usageRatio(sess store.ChatSession, messages []store.ChatMessage, input string, keepRecent int) float64 {
 	context := renderConversation(sess.Summary, messages, input, keepRecent)
 	toks := estimateTokens(context)
@@ -335,6 +585,7 @@ func (m *Manager) usageRatio(sess store.ChatSession, messages []store.ChatMessag
 }
 
 func renderConversation(summary *string, messages []store.ChatMessage, input string, keepRecent int) string {
+	messages = filterModelContextMessages(messages)
 	parts := make([]string, 0, 4)
 	if s := strings.TrimSpace(stringOrEmpty(summary)); s != "" {
 		parts = append(parts, "Session summary:\n"+s)
@@ -362,6 +613,20 @@ func renderConversation(summary *string, messages []store.ChatMessage, input str
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 
+func filterModelContextMessages(messages []store.ChatMessage) []store.ChatMessage {
+	if len(messages) == 0 {
+		return messages
+	}
+	filtered := make([]store.ChatMessage, 0, len(messages))
+	for _, msg := range messages {
+		if msg.Provider != nil && strings.EqualFold(strings.TrimSpace(*msg.Provider), store.ForkContextProvider) {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	return filtered
+}
+
 func estimateTokens(s string) int64 {
 	if s == "" {
 		return 0
@@ -373,10 +638,9 @@ func estimateTokens(s string) int64 {
 	return int64((n + 3) / 4)
 }
 
-func (m *Manager) callProvider(ctx context.Context, sess store.ChatSession, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, error) {
-	provider := strings.ToLower(strings.TrimSpace(sess.Provider))
+func (m *Manager) callProvider(ctx context.Context, sess store.ChatSession, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, providerCallMeta, error) {
+	provider := strings.ToLower(strings.TrimSpace(sdk.Provider))
 	sdk.Provider = provider
-	sdk.Model = sess.Model
 
 	switch provider {
 	case "openai":
@@ -384,9 +648,12 @@ func (m *Manager) callProvider(ctx context.Context, sess store.ChatSession, sdk 
 	case "anthropic":
 		return m.callAnthropic(ctx, sess, sdk, env, modelInput, anchor)
 	case "demo":
-		return m.callDemo(sess, modelInput), "", store.ChatAnchor{}, nil
+		return m.callDemo(sess, modelInput), "", store.ChatAnchor{}, providerCallMeta{
+			ModelInput:  strings.TrimSpace(modelInput),
+			ContextMode: "demo",
+		}, nil
 	default:
-		return "", "", store.ChatAnchor{}, fmt.Errorf("unsupported provider %q", provider)
+		return "", "", store.ChatAnchor{}, providerCallMeta{}, fmt.Errorf("unsupported provider %q", provider)
 	}
 }
 
@@ -402,7 +669,7 @@ func (m *Manager) callDemo(sess store.ChatSession, modelInput string) string {
 	return out
 }
 
-func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, error) {
+func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, providerCallMeta, error) {
 	body := openai_responses.ResponseNewParams{
 		Model: openai_shared.ResponsesModel(strings.TrimSpace(sdk.Model)),
 	}
@@ -413,7 +680,9 @@ func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, sdk ru
 		}
 	}
 	inputText := strings.TrimSpace(modelInput)
+	contextMode := "anchor"
 	if anchor.PreviousResponse == nil || strings.TrimSpace(*anchor.PreviousResponse) == "" {
+		contextMode = "reconstructed"
 		msgs, err := m.store.ListChatMessages(ctx, sess.ID, 1000)
 		if err == nil {
 			inputText = renderConversation(sess.Summary, msgs, modelInput, m.keepRecent)
@@ -453,7 +722,7 @@ func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, sdk ru
 
 	stream := m.openaiClient.Responses.NewStreaming(ctx, body, opts...)
 	if stream == nil {
-		return "", "", store.ChatAnchor{}, errors.New("openai stream is nil")
+		return "", "", store.ChatAnchor{}, providerCallMeta{}, errors.New("openai stream is nil")
 	}
 	defer stream.Close()
 
@@ -461,6 +730,10 @@ func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, sdk ru
 	var reasoning strings.Builder
 	var responseID string
 	var sawReasoningDelta bool
+	var tokenIn int64
+	var tokenOut int64
+	var cachedInputTokens int64
+	var usageSeen bool
 	for stream.Next() {
 		ev := stream.Current()
 		switch ev.Type {
@@ -471,6 +744,11 @@ func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, sdk ru
 			if id != "" {
 				responseID = id
 			}
+			usage := ev.AsResponseCompleted().Response.Usage
+			tokenIn = usage.InputTokens
+			tokenOut = usage.OutputTokens
+			cachedInputTokens = usage.InputTokensDetails.CachedTokens
+			usageSeen = true
 		case "response.output_text.delta":
 			delta := ev.AsResponseOutputTextDelta().Delta
 			if delta == "" {
@@ -505,12 +783,12 @@ func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, sdk ru
 		case "error":
 			msg := strings.TrimSpace(ev.AsError().Message)
 			if msg != "" {
-				return "", "", store.ChatAnchor{}, errors.New(msg)
+				return "", "", store.ChatAnchor{}, providerCallMeta{}, errors.New(msg)
 			}
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return "", "", store.ChatAnchor{}, err
+		return "", "", store.ChatAnchor{}, providerCallMeta{}, err
 	}
 	out := strings.TrimSpace(text.String())
 	if out == "" {
@@ -526,16 +804,27 @@ func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, sdk ru
 		PreviousResponse:  prevID,
 		ProviderMessageID: prevID,
 	}
-	return out, strings.TrimSpace(reasoning.String()), anchorOut, nil
+	meta := providerCallMeta{
+		ModelInput:  inputText,
+		ContextMode: contextMode,
+	}
+	if usageSeen {
+		meta.TokenIn = pointerInt64(tokenIn)
+		meta.TokenOut = pointerInt64(tokenOut)
+		meta.CachedInputTokens = pointerInt64(cachedInputTokens)
+	}
+	return out, strings.TrimSpace(reasoning.String()), anchorOut, meta, nil
 }
 
-func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, error) {
+func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, providerCallMeta, error) {
 	maxTokens := sdk.MaxOutputTokens
 	if maxTokens <= 0 {
 		maxTokens = 4096
 	}
 	inputText := strings.TrimSpace(modelInput)
+	contextMode := "anchor"
 	if anchor.ContainerID == nil || strings.TrimSpace(*anchor.ContainerID) == "" {
+		contextMode = "reconstructed"
 		msgs, err := m.store.ListChatMessages(ctx, sess.ID, 1000)
 		if err == nil {
 			inputText = renderConversation(sess.Summary, msgs, modelInput, m.keepRecent)
@@ -576,7 +865,7 @@ func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, sdk
 
 	stream := m.anthropicClient.Messages.NewStreaming(ctx, body, opts...)
 	if stream == nil {
-		return "", "", store.ChatAnchor{}, errors.New("anthropic stream is nil")
+		return "", "", store.ChatAnchor{}, providerCallMeta{}, errors.New("anthropic stream is nil")
 	}
 	defer stream.Close()
 
@@ -584,6 +873,10 @@ func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, sdk
 	var thinking strings.Builder
 	var containerID string
 	var providerMsgID string
+	var tokenIn int64
+	var tokenOut int64
+	var cachedInputTokens int64
+	var usageSeen bool
 	for stream.Next() {
 		ev := stream.Current()
 		switch ev.Type {
@@ -591,6 +884,12 @@ func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, sdk
 			me := ev.AsMessageStart().Message
 			providerMsgID = strings.TrimSpace(me.ID)
 			containerID = strings.TrimSpace(me.Container.ID)
+		case "message_delta":
+			usage := ev.AsMessageDelta().Usage
+			tokenIn = usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
+			tokenOut = usage.OutputTokens
+			cachedInputTokens = usage.CacheReadInputTokens
+			usageSeen = true
 		case "content_block_start":
 			block := ev.AsContentBlockStart().ContentBlock
 			if strings.TrimSpace(block.Type) != "thinking" {
@@ -642,7 +941,7 @@ func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, sdk
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return "", "", store.ChatAnchor{}, err
+		return "", "", store.ChatAnchor{}, providerCallMeta{}, err
 	}
 	out := strings.TrimSpace(text.String())
 	if out == "" {
@@ -662,7 +961,16 @@ func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, sdk
 		ContainerID:       cid,
 		ProviderMessageID: pid,
 	}
-	return out, strings.TrimSpace(thinking.String()), anchorOut, nil
+	meta := providerCallMeta{
+		ModelInput:  inputText,
+		ContextMode: contextMode,
+	}
+	if usageSeen {
+		meta.TokenIn = pointerInt64(tokenIn)
+		meta.TokenOut = pointerInt64(tokenOut)
+		meta.CachedInputTokens = pointerInt64(cachedInputTokens)
+	}
+	return out, strings.TrimSpace(thinking.String()), anchorOut, meta, nil
 }
 
 func (m *Manager) broadcast(typ string, payload any) {
@@ -685,6 +993,10 @@ func pointerString(v string) *string {
 		return nil
 	}
 	return &s
+}
+
+func pointerInt64(v int64) *int64 {
+	return &v
 }
 
 func stringOrEmpty(v *string) string {

@@ -5,6 +5,7 @@ Use this method when task intent is:
 - explain feature implementation logic
 - explain runtime mechanism and boundaries
 - compare implementation principles across features
+- analyze project characteristics from README before feature deep-dive
 
 Required inputs:
 - `repo_url`
@@ -44,7 +45,14 @@ For each feature, the final report must cover five dimensions:
 
 Function or file mapping is supporting evidence, not the main narrative.
 
-## 5. Two-phase Process
+## 5. README-first Repository Characteristic Pass (default)
+Before feature-specific analysis:
+- read repository root README first (`README.md`/`README`/`readme*`)
+- extract 3 project characteristics or signature capabilities
+- for each characteristic, provide mechanism explanation and limited evidence refs
+- if README is missing/weak, fallback to index/code inference and mark as `inference`
+
+## 6. Two-phase Feature Process
 1. Internal retrieval/indexing phase:
 - normalize feature terms
 - score files by path and line evidence
@@ -57,7 +65,7 @@ Function or file mapping is supporting evidence, not the main narrative.
 - provide `path:line` evidence for each key conclusion
 - list concrete risks and unknowns
 
-## 6. Evidence Rules
+## 7. Evidence Rules
 Every key conclusion must include evidence:
 - preferred format: `relative/path/to/file.ext:line`
 - include short snippet when useful
@@ -66,19 +74,23 @@ If no direct evidence exists:
 - mark as `inference`
 - state what was searched and why confirmation is missing
 
-## 7. Noise Control
+## 8. Noise Control
 Apply code-first filtering:
 - prefer production runtime code over docs/comments-only files
 - include docs only if code evidence is insufficient
 - keep internal scoring artifacts out of final report
 
-## 8. Multi-feature Handling
+## 9. Multi-feature Handling
 When multiple features are requested:
 - analyze each feature in an independent section
 - identify shared modules and coupling points
 - report coupling risks only if overlap is evidence-backed
 
-## 9. Depth Modes
+When feature text mentions runtime invocation form (SDK/CLI/sub-agent/working dir):
+- classify path as `SDK`, `CLI`, or `Hybrid`
+- explain working directory resolution basis (`working_dir`/`current_dir`/container mapping) with evidence or explicit `inference`
+
+## 10. Depth Modes
 `standard` mode:
 - principle-first answer
 - five-dimension mechanism summary
@@ -90,8 +102,9 @@ When multiple features are requested:
 - evidence-based performance/concurrency signals
 - evidence-based failure-path and test-signal notes
 
-## 10. Quality Bar
+## 11. Quality Bar
 A report is acceptable only if:
+- project characteristic section is present and includes 3 items (or explicit fallback note)
 - each feature has at least one evidence item, or explicit “no evidence found”
 - each conclusion maps to concrete file/line references
 - unresolved ambiguities are listed explicitly

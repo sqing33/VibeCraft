@@ -4,9 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 // Migrate 功能：执行 state DB schema 迁移（MVP：使用 PRAGMA user_version 管理版本）。
 // 参数/返回：ctx 控制超时；成功返回 nil。
@@ -48,6 +49,14 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		}
 		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 2;"); err != nil {
 			return fmt.Errorf("set user_version=2: %w", err)
+		}
+	}
+	if userVersion < 3 {
+		if err := migrateV3(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 3;"); err != nil {
+			return fmt.Errorf("set user_version=3: %w", err)
 		}
 	}
 
@@ -193,6 +202,24 @@ CREATE INDEX IF NOT EXISTS idx_chat_compactions_session_created ON chat_compacti
 	}
 	for _, stmt := range stmts {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("exec migration stmt: %w", err)
+		}
+	}
+	return nil
+}
+
+func migrateV3(ctx context.Context, tx *sql.Tx) error {
+	stmts := []string{
+		`ALTER TABLE chat_messages ADD COLUMN expert_id TEXT;`,
+		`ALTER TABLE chat_messages ADD COLUMN provider TEXT;`,
+		`ALTER TABLE chat_messages ADD COLUMN model TEXT;`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			// Best-effort compatibility: tolerate manual pre-migrations.
+			if strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+				continue
+			}
 			return fmt.Errorf("exec migration stmt: %w", err)
 		}
 	}
