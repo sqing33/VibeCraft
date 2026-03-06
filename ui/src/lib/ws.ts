@@ -3,6 +3,9 @@ export type WsEnvelope = {
   ts: number
   workflow_id?: string
   node_id?: string
+  orchestration_id?: string
+  round_id?: string
+  agent_run_id?: string
   execution_id?: string
   payload?: unknown
 }
@@ -17,4 +20,3 @@ export function parseWsEnvelope(raw: string): WsEnvelope | null {
     return null
   }
 }
-

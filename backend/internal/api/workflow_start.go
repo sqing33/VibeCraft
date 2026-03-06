@@ -16,6 +16,7 @@ import (
 
 	"vibe-tree/backend/internal/dag"
 	"vibe-tree/backend/internal/execution"
+	"vibe-tree/backend/internal/executionflow"
 	"vibe-tree/backend/internal/logx"
 	"vibe-tree/backend/internal/paths"
 	"vibe-tree/backend/internal/store"
@@ -95,14 +96,9 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 		}
 
 		spec := resolved.Spec
-		execCtx := context.Background()
-		cancelExec := func() {}
-		if resolved.Timeout > 0 {
-			execCtx, cancelExec = context.WithTimeout(context.Background(), resolved.Timeout)
-		}
+		execCtx, cancelExec := executionflow.NewExecutionContext(resolved.Timeout)
 
-		var exec execution.Execution
-		exec, err = deps.Executions.StartOneshotWithOptions(execCtx, spec, execution.StartOptions{
+		exec, err := executionflow.StartRecordedExecution(execCtx, deps.Executions, spec, execution.StartOptions{
 			WorkflowID: wf.ID,
 			NodeID:     node.ID,
 			OnExit: func(final execution.Execution) {
@@ -153,22 +149,11 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 				}
 				startedAt := final.StartedAt.UnixMilli()
 
-				if finalStatus == "failed" && finalError == "" {
-					if final.Signal != "" {
-						finalError = fmt.Sprintf("signal=%s exit_code=%d", final.Signal, final.ExitCode)
-					} else {
-						finalError = fmt.Sprintf("exit_code=%d", final.ExitCode)
-					}
-				} else if finalStatus == "canceled" && finalError == "" {
-					finalError = "canceled"
-				} else if finalStatus == "timeout" && finalError == "" {
-					finalError = "timeout"
+				if finalError == "" {
+					finalError = executionflow.ErrorMessage(final)
 				}
 				if (finalStatus == "failed" || finalStatus == "timeout") && finalSummary == nil {
-					if b, err := execution.ReadLogTail(final.ID, 4000); err == nil && len(b) > 0 {
-						s := string(b)
-						finalSummary = &s
-					}
+					finalSummary = executionflow.TailSummary(final.ID, 4000)
 				}
 
 				updatedWf, updatedNodes, err := deps.Store.FinalizeExecution(ctx, store.FinalizeExecutionParams{
@@ -193,6 +178,20 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 					broadcastNodeUpdated(deps.Hub, n)
 				}
 			},
+		}, func(exec execution.Execution) error {
+			_, err := deps.Store.StartExecution(c.Request.Context(), store.StartExecutionParams{
+				ExecutionID: exec.ID,
+				WorkflowID:  wf.ID,
+				NodeID:      node.ID,
+				Attempt:     0,
+				PID:         exec.PID,
+				LogPath:     mustWorkflowExecutionLogPath(exec.ID),
+				StartedAt:   exec.StartedAt.UnixMilli(),
+				Command:     exec.Command,
+				Args:        exec.Args,
+				Cwd:         exec.Cwd,
+			})
+			return err
 		})
 		if err != nil {
 			cancelExec()
@@ -201,26 +200,7 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 			return
 		}
 
-		logPath, err := paths.ExecutionLogPath(exec.ID)
-		if err != nil {
-			_ = deps.Store.MarkNodeAndWorkflowFailed(context.Background(), wf.ID, node.ID, err.Error())
-			_ = deps.Executions.Cancel(exec.ID)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		updatedNode, err := deps.Store.StartExecution(c.Request.Context(), store.StartExecutionParams{
-			ExecutionID: exec.ID,
-			WorkflowID:  wf.ID,
-			NodeID:      node.ID,
-			Attempt:     0,
-			PID:         exec.PID,
-			LogPath:     logPath,
-			StartedAt:   exec.StartedAt.UnixMilli(),
-			Command:     exec.Command,
-			Args:        exec.Args,
-			Cwd:         exec.Cwd,
-		})
+		updatedNode, err := deps.Store.GetNode(c.Request.Context(), node.ID)
 		if err != nil {
 			_ = deps.Store.MarkNodeAndWorkflowFailed(context.Background(), wf.ID, node.ID, err.Error())
 			_ = deps.Executions.Cancel(exec.ID)
@@ -237,6 +217,14 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 			Execution: exec,
 		})
 	}
+}
+
+func mustWorkflowExecutionLogPath(executionID string) string {
+	path, err := paths.ExecutionLogPath(executionID)
+	if err != nil {
+		return executionID + ".log"
+	}
+	return path
 }
 
 // listWorkflowNodesHandler 功能：列出 workflow 下的所有 nodes。

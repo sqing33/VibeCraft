@@ -39,7 +39,9 @@
 | `backend/cmd/vibe-tree-daemon/main.go`     | daemon 进程入口，负责加载配置、启动 HTTP Server、处理优雅退出                                                                         |
 | `backend/internal/server/server.go`        | Gin Engine 装配：恢复中间件、请求日志、dev CORS，并挂载 `internal/api` 路由；可选挂载 UI 静态资源（`ui/dist` 或 `VIBE_TREE_UI_DIST`） |
 | `backend/internal/api/api.go`              | HTTP/WS handlers：health、workflow CRUD、execution start/log/cancel、WebSocket 升级入口                                               |
+| `backend/internal/api/orchestrations.go`   | Orchestration HTTP handlers：create/list/detail/cancel 与 agent-run retry                                                              |
 | `backend/internal/api/chat.go`             | Chat Session API：会话创建/列表/消息查询/多轮发送/附件上传/附件内容预览（JSON + multipart）/手动压缩/分叉/归档（`/api/v1/chat/*`）                |
+| `backend/internal/executionflow/runtime.go` | Execution 共享 helper：统一 execution 启动记录、超时上下文与终态摘要/错误信息                                                         |
 | `backend/internal/api/info.go`             | 排障信息 API：`GET /api/v1/info`（version + XDG paths）                                                                               |
 | `backend/internal/api/experts.go`          | Experts 列表 API：`GET /api/v1/experts`（仅安全字段，供 UI 下拉）                                                                     |
 | `backend/internal/api/settings_llm.go`     | 模型设置 API：`GET/PUT /api/v1/settings/llm`（sources/models；key masking；写盘并热更新 experts）                                     |
@@ -54,15 +56,20 @@
 | `backend/internal/expert/expert.go`        | Expert 注册表：基于 config 解析 `expert_id` -> RunSpec（`{{prompt}}`/`${ENV}` 模板替换、timeout），并提供已知 expert 集合             |
 | `backend/internal/runner/pty_runner.go`    | PTY runner：启动子进程、流式输出、Cancel（SIGTERM→grace→SIGKILL）                                                                     |
 | `backend/internal/execution/manager.go`    | Execution 管理：启动/取消、日志落盘、WS 推送 `execution.*`/`node.log`                                                                 |
+| `backend/internal/orchestration/manager.go` | Orchestration 管理：goal 拆分首轮 agent runs、并发调度 queued agent run、cancel/retry/synthesis 收敛                                 |
 | `backend/internal/chat/manager.go`         | Chat 管理：多轮会话、provider anchor（OpenAI/Anthropic）、附件持久化接入、自动上下文压缩/跳过策略、WS `chat.*` 推送                |
 | `backend/internal/chat/attachments.go`      | Chat 附件能力：附件类型校验、大小限制、文件落盘、provider 多模态 block 构造、调试输入摘要                                               |
 | `backend/internal/chat/provider_input.go`    | Chat 多模态重建：基于本地消息 + 附件重建 OpenAI/Anthropic provider 输入                                                                |
+| `backend/internal/workspace/manager.go`    | Workspace 策略管理：`read_only/shared_workspace/git_worktree` 解析、worktree 分配、代码变更检查与 artifact 生成                      |
 | `backend/internal/dag/dag.go`              | DAG 解析与校验：从 master 输出提取第一个 JSON 对象并做 MVP 约束校验（无环/引用存在/expert 校验）                                      |
 | `backend/internal/scheduler/scheduler.go`  | Workflow 调度器：依赖 + 并发上限 + fail-fast（启动 queued worker nodes 并收敛终态）                                                   |
 | `backend/internal/ws/hub.go`               | WebSocket hub：连接管理与广播（配合 log tail 断线补齐）                                                                               |
 | `backend/internal/store/sqlite.go`         | SQLite state DB 打开与 pragma 初始化（WAL/busy_timeout/foreign_keys）                                                                 |
 | `backend/internal/store/migrate.go`        | SQLite migrations（使用 `PRAGMA user_version` 管理 schema 版本；含 chat attachments 与 expert builder sessions）                     |
 | `backend/internal/store/chat.go`           | Chat 存储：chat sessions/messages/attachments/anchors/compactions 的 SQLite CRUD + hydration                                          |
+| `backend/internal/store/orchestrations.go` | Orchestration 存储：SQLite orchestration/round/agent_run/synthesis/artifact CRUD 与详情查询                                           |
+| `backend/internal/store/orchestration_executions.go` | Agent-run execution 存储：agent_run_executions 落库、终态收敛、synthesis 生成与 retry/cancel 支撑                        |
+| `backend/internal/store/orchestration_recovery.go` | Orchestration 恢复：daemon 重启后把遗留 running agent run 标记为 failed/retryable                                          |
 | `backend/internal/store/workflows.go`      | Workflow 存储：SQLite CRUD + events 写入                                                                                              |
 | `backend/internal/store/dag.go`            | DAG 落库：从 master DAG 创建 worker nodes/edges，并提供 edges 查询                                                                    |
 | `backend/internal/store/nodes.go`          | Node 存储：master node 创建、nodes 列表查询、GetNode、RetryNode（解开 fail-fast skipped 并重试）                                      |
@@ -76,7 +83,9 @@
 | `backend/internal/id/id.go`                | ID 生成：`wf_`/`nd_`/`ex_` 前缀 ID（MVP 先用短随机）                                                                                  |
 | `backend/internal/logx/logx.go`            | 后端统一日志格式封装（`level=... module=... action=... msg="..."`）                                                                   |
 | `backend/internal/version/version.go`      | 版本信息（Commit/BuiltAt，可用 ldflags 注入；用于 `/api/v1/info`）                                                                    |
-| `ui/src/App.tsx`                           | 前端入口：daemon health + WS 连接管理 + 路由（`#/` workflows、`#/chat` chat sessions、`#/workflows/:id` 详情）                       |
+| `ui/src/App.tsx`                           | 前端入口：daemon health + WS 连接管理 + 路由（`#/orchestrations` 主入口、`#/chat`、隐藏兼容的 legacy workflow 路由）                 |
+| `ui/src/app/pages/OrchestrationsPage.tsx`  | Orchestrations 首页：顶部 goal 输入区 + orchestration 列表                                                                            |
+| `ui/src/app/pages/OrchestrationDetailPage.tsx` | Orchestration 详情页：按 round 展示并行 agent 卡片、详情面板、日志、artifact、continue/retry/cancel 控制                    |
 | `ui/src/app/pages/ChatSessionsPage.tsx`    | Chat 会话页：会话列表、消息流式渲染、发送消息/上传附件、拖拽上传、附件标签与图片/PDF/文本代码预览、手动压缩/分叉/归档                                       |
 | `ui/src/app/components/AttachmentPreviewModal.tsx` | Chat 附件预览弹窗：图片/PDF 预览、Markdown 渲染、代码高亮与纯文本展示                                                              |
 | `ui/src/lib/chatAttachmentPreview.ts`      | Chat 附件预览判断：按文件后缀/MIME 推断图片/PDF/Markdown/代码/纯文本预览模式                                                         |
@@ -118,6 +127,12 @@
 | Chat provider anchor 续上下文      | `backend/internal/chat/manager.go`, `backend/internal/store/chat.go`                                                                                                                                                                                           |
 | Chat 附件上传与多模态输入          | `backend/internal/api/chat.go`, `backend/internal/chat/attachments.go`, `backend/internal/chat/provider_input.go`, `backend/internal/store/chat.go`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/lib/daemon.ts`                                 |
 | Chat 附件预览与拖拽上传            | `backend/internal/api/api.go`, `backend/internal/api/chat.go`, `backend/internal/store/chat.go`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/app/components/AttachmentPreviewModal.tsx`, `ui/src/lib/chatAttachmentPreview.ts`, `ui/src/lib/daemon.ts` |
+| Orchestration 列表/创建 UI         | `ui/src/App.tsx`, `ui/src/app/pages/OrchestrationsPage.tsx`, `ui/src/lib/daemon.ts`                                                                                                                                                      |
+| Orchestration 详情 UI              | `ui/src/App.tsx`, `ui/src/app/pages/OrchestrationDetailPage.tsx`, `ui/src/lib/daemon.ts`, `ui/src/lib/ws.ts`                                                                                                                             |
+| Legacy Workflows 隐藏兼容入口      | `ui/src/app/routes.ts`, `ui/src/app/pages/WorkflowsPage.tsx`, `ui/src/app/pages/WorkflowDetailPage.tsx`                                                                                                                                   |
+| Orchestration API                  | `backend/internal/api/orchestrations.go`, `backend/internal/orchestration/manager.go`, `backend/internal/store/orchestrations.go`, `backend/internal/store/orchestration_executions.go`                                                   |
+| Orchestration continue / retry / cancel | `backend/internal/api/orchestrations.go`, `backend/internal/orchestration/manager.go`, `backend/internal/store/orchestration_updates.go`, `ui/src/app/pages/OrchestrationDetailPage.tsx`                                             |
+| Workspace / Worktree 策略         | `backend/internal/workspace/manager.go`, `backend/internal/store/orchestration_updates.go`, `backend/internal/store/orchestration_executions.go`                                                                                           |
 | Workflow CRUD API                  | `backend/internal/api/workflows.go`, `backend/internal/store/workflows.go`                                                                                                                                                                 |
 | Workflow Start（master 执行）      | `backend/internal/api/workflow_start.go`, `backend/internal/store/nodes.go`, `backend/internal/store/executions.go`                                                                                                                        |
 | Workflow Nodes API                 | `backend/internal/api/workflow_start.go`, `backend/internal/store/nodes.go`                                                                                                                                                                |

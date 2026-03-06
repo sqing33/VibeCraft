@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"vibe-tree/backend/internal/execution"
+	"vibe-tree/backend/internal/executionflow"
 	"vibe-tree/backend/internal/expert"
 	"vibe-tree/backend/internal/logx"
 	"vibe-tree/backend/internal/paths"
@@ -98,31 +99,14 @@ func (s *Scheduler) startNode(ctx context.Context, n store.RunnableNode) error {
 		return err
 	}
 
-	execCtx := context.Background()
-	cancelExec := func() {}
-	if resolved.Timeout > 0 {
-		execCtx, cancelExec = context.WithTimeout(context.Background(), resolved.Timeout)
-	}
-
-	exec, err := s.executions.StartOneshotWithOptions(execCtx, resolved.Spec, execution.StartOptions{
+	execCtx, cancelExec := executionflow.NewExecutionContext(resolved.Timeout)
+	_, err = executionflow.StartRecordedExecution(execCtx, s.executions, resolved.Spec, execution.StartOptions{
 		WorkflowID: n.WorkflowID,
 		NodeID:     n.ID,
 		OnExit: func(final execution.Execution) {
 			cancelExec()
 
-			finalErr := ""
-			if final.Status == execution.StatusFailed {
-				if final.Signal != "" {
-					finalErr = fmt.Sprintf("signal=%s exit_code=%d", final.Signal, final.ExitCode)
-				} else {
-					finalErr = fmt.Sprintf("exit_code=%d", final.ExitCode)
-				}
-			} else if final.Status == execution.StatusCanceled {
-				finalErr = "canceled"
-			} else if final.Status == execution.StatusTimeout {
-				finalErr = "timeout"
-			}
-
+			finalErr := executionflow.ErrorMessage(final)
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 
@@ -131,14 +115,7 @@ func (s *Scheduler) startNode(ctx context.Context, n store.RunnableNode) error {
 				endedAt = final.EndedAt.UnixMilli()
 			}
 			startedAt := final.StartedAt.UnixMilli()
-
-			var summary *string
-			if final.Status == execution.StatusFailed || final.Status == execution.StatusTimeout {
-				if b, err := execution.ReadLogTail(final.ID, 4000); err == nil && len(b) > 0 {
-					s := string(b)
-					summary = &s
-				}
-			}
+			summary := executionflow.TailSummary(final.ID, 4000)
 
 			updatedWf, updatedNodes, err := s.store.FinalizeExecution(ctx, store.FinalizeExecutionParams{
 				ExecutionID:   final.ID,
@@ -162,38 +139,37 @@ func (s *Scheduler) startNode(ctx context.Context, n store.RunnableNode) error {
 				broadcastNodeUpdated(s.hub, nn)
 			}
 		},
+	}, func(exec execution.Execution) error {
+		_, err := s.store.StartExecution(ctx, store.StartExecutionParams{
+			ExecutionID: exec.ID,
+			WorkflowID:  n.WorkflowID,
+			NodeID:      n.ID,
+			Attempt:     0,
+			PID:         exec.PID,
+			LogPath:     mustSchedulerExecutionLogPath(exec.ID),
+			StartedAt:   exec.StartedAt.UnixMilli(),
+			Command:     exec.Command,
+			Args:        exec.Args,
+			Cwd:         exec.Cwd,
+		})
+		return err
 	})
 	if err != nil {
 		cancelExec()
 		return err
 	}
-
-	logPath, err := paths.ExecutionLogPath(exec.ID)
-	if err != nil {
-		_ = s.executions.Cancel(exec.ID)
-		return err
+	if updatedNode, err := s.store.GetNode(ctx, n.ID); err == nil {
+		broadcastNodeUpdated(s.hub, updatedNode)
 	}
-
-	updatedNode, err := s.store.StartExecution(ctx, store.StartExecutionParams{
-		ExecutionID: exec.ID,
-		WorkflowID:  n.WorkflowID,
-		NodeID:      n.ID,
-		Attempt:     0,
-		PID:         exec.PID,
-		LogPath:     logPath,
-		StartedAt:   exec.StartedAt.UnixMilli(),
-		Command:     exec.Command,
-		Args:        exec.Args,
-		Cwd:         exec.Cwd,
-	})
-	if err != nil {
-		logx.Warn("workflow-scheduler", "start-execution", "execution 启动落库失败，将尝试 cancel", "err", err, "workflow_id", n.WorkflowID, "node_id", n.ID, "execution_id", exec.ID)
-		_ = s.executions.Cancel(exec.ID)
-		return err
-	}
-
-	broadcastNodeUpdated(s.hub, updatedNode)
 	return nil
+}
+
+func mustSchedulerExecutionLogPath(executionID string) string {
+	path, err := paths.ExecutionLogPath(executionID)
+	if err != nil {
+		return executionID + ".log"
+	}
+	return path
 }
 
 func broadcastWorkflowUpdated(hub *ws.Hub, wf store.Workflow) {

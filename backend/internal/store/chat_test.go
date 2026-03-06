@@ -252,3 +252,83 @@ func TestChatStore_ListMessagesHydratesAttachments(t *testing.T) {
 		t.Fatalf("unexpected attachment metadata: %+v", msgs[0].Attachments[0])
 	}
 }
+
+
+func TestMigrate_RepairsMalformedChatAttachmentsSchema(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.DB().ExecContext(context.Background(), `PRAGMA user_version = 6;`); err != nil {
+		t.Fatalf("set user_version: %v", err)
+	}
+	if _, err := st.DB().ExecContext(context.Background(), `
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  turn INTEGER NOT NULL,
+  role TEXT NOT NULL,
+  content_text TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);`); err != nil {
+		t.Fatalf("create chat_messages: %v", err)
+	}
+	if _, err := st.DB().ExecContext(context.Background(), `
+CREATE TABLE IF NOT EXISTS executions (
+  id TEXT PRIMARY KEY,
+  node_id TEXT NOT NULL,
+  attempt INTEGER NOT NULL,
+  pid INTEGER,
+  exit_code INTEGER,
+  status TEXT NOT NULL,
+  log_path TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  ended_at INTEGER,
+  error_message TEXT
+);`); err != nil {
+		t.Fatalf("create executions: %v", err)
+	}
+	if _, err := st.DB().ExecContext(context.Background(), `
+CREATE TABLE chat_attachments (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  storage_rel_path TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);`); err != nil {
+		t.Fatalf("create malformed chat_attachments: %v", err)
+	}
+
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate store: %v", err)
+	}
+
+	rows, err := st.DB().QueryContext(context.Background(), `PRAGMA table_info(chat_attachments);`)
+	if err != nil {
+		t.Fatalf("pragma table_info: %v", err)
+	}
+	defer rows.Close()
+	cols := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			t.Fatalf("scan table_info: %v", err)
+		}
+		cols[name] = true
+	}
+	for _, name := range []string{"session_id", "message_id", "kind", "file_name", "mime_type", "size_bytes", "storage_rel_path", "created_at"} {
+		if !cols[name] {
+			t.Fatalf("expected repaired column %q in chat_attachments, got %+v", name, cols)
+		}
+	}
+}

@@ -30,18 +30,21 @@ const (
 )
 
 type Execution struct {
-	ID         string     `json:"execution_id"`
-	WorkflowID string     `json:"workflow_id,omitempty"`
-	NodeID     string     `json:"node_id,omitempty"`
-	Status     Status     `json:"status"`
-	Command    string     `json:"command"`
-	Args       []string   `json:"args,omitempty"`
-	Cwd        string     `json:"cwd,omitempty"`
-	PID        int        `json:"pid,omitempty"`
-	StartedAt  time.Time  `json:"started_at"`
-	EndedAt    *time.Time `json:"ended_at,omitempty"`
-	ExitCode   int        `json:"exit_code,omitempty"`
-	Signal     string     `json:"signal,omitempty"`
+	ID              string     `json:"execution_id"`
+	WorkflowID      string     `json:"workflow_id,omitempty"`
+	NodeID          string     `json:"node_id,omitempty"`
+	OrchestrationID string     `json:"orchestration_id,omitempty"`
+	RoundID         string     `json:"round_id,omitempty"`
+	AgentRunID      string     `json:"agent_run_id,omitempty"`
+	Status          Status     `json:"status"`
+	Command         string     `json:"command"`
+	Args            []string   `json:"args,omitempty"`
+	Cwd             string     `json:"cwd,omitempty"`
+	PID             int        `json:"pid,omitempty"`
+	StartedAt       time.Time  `json:"started_at"`
+	EndedAt         *time.Time `json:"ended_at,omitempty"`
+	ExitCode        int        `json:"exit_code,omitempty"`
+	Signal          string     `json:"signal,omitempty"`
 }
 
 type Manager struct {
@@ -53,9 +56,12 @@ type Manager struct {
 }
 
 type StartOptions struct {
-	WorkflowID string
-	NodeID     string
-	OnExit     func(exec Execution)
+	WorkflowID      string
+	NodeID          string
+	OrchestrationID string
+	RoundID         string
+	AgentRunID      string
+	OnExit          func(exec Execution)
 }
 
 type executionState struct {
@@ -117,15 +123,18 @@ func (m *Manager) StartOneshotWithOptions(ctx context.Context, spec runner.RunSp
 	}
 
 	exec := Execution{
-		ID:         executionID,
-		WorkflowID: opts.WorkflowID,
-		NodeID:     opts.NodeID,
-		Status:     StatusRunning,
-		Command:    spec.Command,
-		Args:       spec.Args,
-		Cwd:        spec.Cwd,
-		PID:        handle.PID(),
-		StartedAt:  time.Now(),
+		ID:              executionID,
+		WorkflowID:      opts.WorkflowID,
+		NodeID:          opts.NodeID,
+		OrchestrationID: opts.OrchestrationID,
+		RoundID:         opts.RoundID,
+		AgentRunID:      opts.AgentRunID,
+		Status:          StatusRunning,
+		Command:         spec.Command,
+		Args:            spec.Args,
+		Cwd:             spec.Cwd,
+		PID:             handle.PID(),
+		StartedAt:       time.Now(),
 	}
 
 	st := &executionState{
@@ -140,11 +149,14 @@ func (m *Manager) StartOneshotWithOptions(ctx context.Context, spec runner.RunSp
 	m.mu.Unlock()
 
 	m.broadcast(ws.Envelope{
-		Type:        "execution.started",
-		Ts:          time.Now().UnixMilli(),
-		WorkflowID:  exec.WorkflowID,
-		NodeID:      exec.NodeID,
-		ExecutionID: executionID,
+		Type:            "execution.started",
+		Ts:              time.Now().UnixMilli(),
+		WorkflowID:      exec.WorkflowID,
+		NodeID:          exec.NodeID,
+		OrchestrationID: exec.OrchestrationID,
+		RoundID:         exec.RoundID,
+		AgentRunID:      exec.AgentRunID,
+		ExecutionID:     executionID,
 		Payload: executionStartedPayload{
 			Command: exec.Command,
 			Args:    exec.Args,
@@ -206,6 +218,9 @@ func (m *Manager) streamToLogAndFinalize(ctx context.Context, executionID string
 
 	workflowID := st.exec.WorkflowID
 	nodeID := st.exec.NodeID
+	orchID := st.exec.OrchestrationID
+	roundID := st.exec.RoundID
+	agentRunID := st.exec.AgentRunID
 
 	output := handle.Output()
 	buf := make([]byte, 16*1024)
@@ -228,11 +243,14 @@ func (m *Manager) streamToLogAndFinalize(ctx context.Context, executionID string
 			// 降低 WS 事件频率：按时间或字节数合并 chunk，减少 UI JSON.parse/xterm 写入压力。
 			if now.Sub(lastBroadcast) >= 50*time.Millisecond || broadcastBuf.Len() >= 16*1024 {
 				m.broadcast(ws.Envelope{
-					Type:        "node.log",
-					Ts:          now.UnixMilli(),
-					WorkflowID:  workflowID,
-					NodeID:      nodeID,
-					ExecutionID: executionID,
+					Type:            "node.log",
+					Ts:              now.UnixMilli(),
+					WorkflowID:      workflowID,
+					NodeID:          nodeID,
+					OrchestrationID: orchID,
+					RoundID:         roundID,
+					AgentRunID:      agentRunID,
+					ExecutionID:     executionID,
 					Payload: nodeLogPayload{
 						Chunk: broadcastBuf.String(),
 					},
@@ -252,11 +270,14 @@ func (m *Manager) streamToLogAndFinalize(ctx context.Context, executionID string
 	_ = writer.Flush()
 	if broadcastBuf.Len() > 0 {
 		m.broadcast(ws.Envelope{
-			Type:        "node.log",
-			Ts:          time.Now().UnixMilli(),
-			WorkflowID:  workflowID,
-			NodeID:      nodeID,
-			ExecutionID: executionID,
+			Type:            "node.log",
+			Ts:              time.Now().UnixMilli(),
+			WorkflowID:      workflowID,
+			NodeID:          nodeID,
+			OrchestrationID: orchID,
+			RoundID:         roundID,
+			AgentRunID:      agentRunID,
+			ExecutionID:     executionID,
 			Payload: nodeLogPayload{
 				Chunk: broadcastBuf.String(),
 			},
@@ -303,11 +324,14 @@ func (m *Manager) streamToLogAndFinalize(ctx context.Context, executionID string
 
 	durationMs := exitRes.EndedAt.Sub(exitRes.StartedAt).Milliseconds()
 	m.broadcast(ws.Envelope{
-		Type:        "execution.exited",
-		Ts:          time.Now().UnixMilli(),
-		WorkflowID:  workflowID,
-		NodeID:      nodeID,
-		ExecutionID: executionID,
+		Type:            "execution.exited",
+		Ts:              time.Now().UnixMilli(),
+		WorkflowID:      workflowID,
+		NodeID:          nodeID,
+		OrchestrationID: orchID,
+		RoundID:         roundID,
+		AgentRunID:      agentRunID,
+		ExecutionID:     executionID,
 		Payload: executionExitedPayload{
 			Status:     string(status),
 			ExitCode:   exitRes.ExitCode,

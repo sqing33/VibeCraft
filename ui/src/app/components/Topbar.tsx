@@ -58,11 +58,11 @@ export function Topbar() {
             Chat
           </Button>
           <Button
-            variant={route.name === 'workflows' || route.name === 'workflow_detail' ? 'flat' : 'light'}
+            variant={route.name === 'orchestrations' || route.name === 'orchestration_detail' ? 'flat' : 'light'}
             size="sm"
             onPress={goHome}
           >
-            Workflows
+            Orchestrations
           </Button>
         </div>
 

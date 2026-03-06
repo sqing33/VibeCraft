@@ -15,6 +15,7 @@ import (
 	"vibe-tree/backend/internal/chat"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/expert"
+	"vibe-tree/backend/internal/orchestration"
 	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/store"
 	"vibe-tree/backend/internal/ws"
@@ -26,6 +27,7 @@ type Deps struct {
 	Store      *store.Store
 	Experts    *expert.Registry
 	Chat       *chat.Manager
+	Orchestration *orchestration.Manager
 }
 
 // Register 功能：注册 HTTP/WS 路由到 `/api/v1` 路由组。
@@ -58,6 +60,13 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.POST("/chat/sessions/:id/turns", postChatTurnHandler(deps))
 	v1.POST("/chat/sessions/:id/compact", compactChatSessionHandler(deps))
 	v1.POST("/chat/sessions/:id/fork", forkChatSessionHandler(deps))
+
+	v1.GET("/orchestrations", listOrchestrationsHandler(deps))
+	v1.POST("/orchestrations", createOrchestrationHandler(deps))
+	v1.GET("/orchestrations/:id", getOrchestrationHandler(deps))
+	v1.POST("/orchestrations/:id/cancel", cancelOrchestrationHandler(deps))
+	v1.POST("/orchestrations/:id/continue", continueOrchestrationHandler(deps))
+	v1.POST("/agent-runs/:id/retry", retryAgentRunHandler(deps))
 
 	v1.GET("/workflows", listWorkflowsHandler(deps))
 	v1.POST("/workflows", createWorkflowHandler(deps))

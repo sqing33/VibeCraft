@@ -351,10 +351,9 @@ func (r SDKRunner) streamAnthropic(ctx context.Context, sdk SDKSpec, env map[str
 
 func (r SDKRunner) streamDemo(ctx context.Context, sdk SDKSpec, out io.Writer) error {
 	_ = ctx // demo does not need ctx right now; keep signature consistent for future cancellation points.
-	_ = sdk
-
-	// 输出一个稳定 DAG，便于本地链路验证（不依赖网络/密钥）。
-	_, err := io.WriteString(out, `{
+	if strings.TrimSpace(sdk.OutputSchema) != "" {
+		// 输出一个稳定 DAG，便于本地链路验证（不依赖网络/密钥）。
+		_, err := io.WriteString(out, `{
   "workflow_title": "",
   "nodes": [
     {
@@ -387,6 +386,14 @@ func (r SDKRunner) streamDemo(ctx context.Context, sdk SDKSpec, out io.Writer) e
   ]
 }
 `)
+		return err
+	}
+
+	prompt := strings.TrimSpace(sdk.Prompt)
+	if prompt == "" {
+		prompt = "demo task"
+	}
+	_, err := fmt.Fprintf(out, "[demo]\n目标：%s\n\n摘要：已完成一次本地 demo 执行。\n建议：检查日志与产物摘要后决定是否继续下一轮。\n", prompt)
 	return err
 }
 

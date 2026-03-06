@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const schemaVersion = 5
+const schemaVersion = 6
 
 // Migrate 功能：执行 state DB schema 迁移（MVP：使用 PRAGMA user_version 管理版本）。
 // 参数/返回：ctx 控制超时；成功返回 nil。
@@ -24,9 +24,6 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	var userVersion int
 	if err := db.QueryRowContext(ctx, "PRAGMA user_version;").Scan(&userVersion); err != nil {
 		return fmt.Errorf("read user_version: %w", err)
-	}
-	if userVersion >= schemaVersion {
-		return nil
 	}
 
 	tx, err := db.BeginTx(ctx, nil)
@@ -75,9 +72,26 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("set user_version=5: %w", err)
 		}
 	}
+	if userVersion < 6 {
+		if err := migrateV6(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 6;"); err != nil {
+			return fmt.Errorf("set user_version=6: %w", err)
+		}
+	}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit migration: %w", err)
+	if userVersion < schemaVersion {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit migration: %w", err)
+		}
+	} else {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			return fmt.Errorf("rollback noop migration tx: %w", err)
+		}
+	}
+	if err := reconcileCompatibility(ctx, db); err != nil {
+		return err
 	}
 	return nil
 }
@@ -314,4 +328,435 @@ CREATE TABLE IF NOT EXISTS expert_builder_snapshots (
 		}
 	}
 	return nil
+}
+
+func migrateV6(ctx context.Context, tx *sql.Tx) error {
+	alterStmts := []string{
+		`ALTER TABLE executions ADD COLUMN orchestration_id TEXT;`,
+		`ALTER TABLE executions ADD COLUMN round_id TEXT;`,
+		`ALTER TABLE executions ADD COLUMN agent_run_id TEXT;`,
+	}
+	for _, stmt := range alterStmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				continue
+			}
+			return fmt.Errorf("exec migration stmt: %w", err)
+		}
+	}
+
+	createStmts := []string{
+		`
+CREATE TABLE IF NOT EXISTS orchestrations (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  goal TEXT NOT NULL,
+  workspace_path TEXT NOT NULL,
+  status TEXT NOT NULL,
+  current_round INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  error_message TEXT,
+  summary TEXT
+);`,
+		`
+CREATE TABLE IF NOT EXISTS orchestration_rounds (
+  id TEXT PRIMARY KEY,
+  orchestration_id TEXT NOT NULL,
+  round_index INTEGER NOT NULL,
+  goal TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  summary TEXT,
+  synthesis_step_id TEXT,
+  FOREIGN KEY(orchestration_id) REFERENCES orchestrations(id)
+);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestration_rounds_unique ON orchestration_rounds(orchestration_id, round_index);`,
+		`
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id TEXT PRIMARY KEY,
+  orchestration_id TEXT NOT NULL,
+  round_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  title TEXT NOT NULL,
+  goal TEXT NOT NULL,
+  expert_id TEXT NOT NULL,
+  intent TEXT NOT NULL,
+  workspace_mode TEXT NOT NULL,
+  workspace_path TEXT NOT NULL,
+  branch_name TEXT,
+  base_ref TEXT,
+  worktree_path TEXT,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  last_execution_id TEXT,
+  result_summary TEXT,
+  error_message TEXT,
+  modified_code INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY(orchestration_id) REFERENCES orchestrations(id),
+  FOREIGN KEY(round_id) REFERENCES orchestration_rounds(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_runs_orchestration_round ON agent_runs(orchestration_id, round_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status, created_at);`,
+		`
+CREATE TABLE IF NOT EXISTS synthesis_steps (
+  id TEXT PRIMARY KEY,
+  orchestration_id TEXT NOT NULL,
+  round_id TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(orchestration_id) REFERENCES orchestrations(id),
+  FOREIGN KEY(round_id) REFERENCES orchestration_rounds(id)
+);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_synthesis_steps_round_unique ON synthesis_steps(round_id);`,
+		`
+CREATE TABLE IF NOT EXISTS orchestration_artifacts (
+  id TEXT PRIMARY KEY,
+  orchestration_id TEXT NOT NULL,
+  round_id TEXT,
+  agent_run_id TEXT,
+  synthesis_step_id TEXT,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  summary TEXT,
+  payload_json TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(orchestration_id) REFERENCES orchestrations(id),
+  FOREIGN KEY(round_id) REFERENCES orchestration_rounds(id),
+  FOREIGN KEY(agent_run_id) REFERENCES agent_runs(id),
+  FOREIGN KEY(synthesis_step_id) REFERENCES synthesis_steps(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_orchestration_artifacts_lookup ON orchestration_artifacts(orchestration_id, round_id, agent_run_id, created_at);`,
+		`
+CREATE TABLE IF NOT EXISTS orchestration_events (
+  id TEXT PRIMARY KEY,
+  orchestration_id TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  payload_json TEXT NOT NULL,
+  FOREIGN KEY(orchestration_id) REFERENCES orchestrations(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_orchestration_events_ts ON orchestration_events(orchestration_id, ts);`,
+		`
+CREATE TABLE IF NOT EXISTS agent_run_executions (
+  id TEXT PRIMARY KEY,
+  agent_run_id TEXT NOT NULL,
+  attempt INTEGER NOT NULL,
+  pid INTEGER,
+  exit_code INTEGER,
+  status TEXT NOT NULL,
+  log_path TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  ended_at INTEGER,
+  signal TEXT,
+  error_message TEXT,
+  FOREIGN KEY(agent_run_id) REFERENCES agent_runs(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_run_executions_agent_run ON agent_run_executions(agent_run_id, attempt);`,
+	}
+	for _, stmt := range createStmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("exec migration stmt: %w", err)
+		}
+	}
+	return nil
+}
+
+
+func reconcileCompatibility(ctx context.Context, db *sql.DB) error {
+	if db == nil {
+		return fmt.Errorf("db is nil")
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin compatibility tx: %w", err)
+	}
+	defer tx.Rollback()
+	if err := ensureChatMessageMetadataColumns(ctx, tx); err != nil {
+		return err
+	}
+	if err := ensureChatAttachmentsSchema(ctx, tx); err != nil {
+		return err
+	}
+	if err := ensureExpertBuilderSchema(ctx, tx); err != nil {
+		return err
+	}
+	if err := ensureOrchestrationSchema(ctx, tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit compatibility tx: %w", err)
+	}
+	return nil
+}
+
+func ensureChatMessageMetadataColumns(ctx context.Context, tx *sql.Tx) error {
+	for _, stmt := range []string{
+		`ALTER TABLE chat_messages ADD COLUMN expert_id TEXT;`,
+		`ALTER TABLE chat_messages ADD COLUMN provider TEXT;`,
+		`ALTER TABLE chat_messages ADD COLUMN model TEXT;`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				continue
+			}
+			return fmt.Errorf("ensure chat_messages metadata columns: %w", err)
+		}
+	}
+	return nil
+}
+
+func ensureChatAttachmentsSchema(ctx context.Context, tx *sql.Tx) error {
+	columns, err := tableColumns(ctx, tx, "chat_attachments")
+	if err != nil {
+		return err
+	}
+	expected := []string{"id", "session_id", "message_id", "kind", "file_name", "mime_type", "size_bytes", "storage_rel_path", "created_at"}
+	if len(columns) == 0 {
+		return createChatAttachmentsTable(ctx, tx)
+	}
+	for _, col := range expected {
+		if !columns[col] {
+			if _, err := tx.ExecContext(ctx, `ALTER TABLE chat_attachments RENAME TO chat_attachments_legacy_broken;`); err != nil {
+				return fmt.Errorf("rename malformed chat_attachments: %w", err)
+			}
+			return createChatAttachmentsTable(ctx, tx)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_chat_attachments_message_id ON chat_attachments(message_id);`); err != nil {
+		return fmt.Errorf("ensure chat_attachments message index: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_chat_attachments_session_created ON chat_attachments(session_id, created_at);`); err != nil {
+		return fmt.Errorf("ensure chat_attachments session index: %w", err)
+	}
+	return nil
+}
+
+func createChatAttachmentsTable(ctx context.Context, tx *sql.Tx) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS chat_attachments (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  storage_rel_path TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES chat_sessions(id),
+  FOREIGN KEY(message_id) REFERENCES chat_messages(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_attachments_message_id ON chat_attachments(message_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_attachments_session_created ON chat_attachments(session_id, created_at);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("create chat_attachments compatibility table: %w", err)
+		}
+	}
+	return nil
+}
+
+func ensureExpertBuilderSchema(ctx context.Context, tx *sql.Tx) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS expert_builder_sessions (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  target_expert_id TEXT,
+  builder_model_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  latest_snapshot_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_expert_builder_sessions_updated_at ON expert_builder_sessions(updated_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_expert_builder_sessions_target_expert ON expert_builder_sessions(target_expert_id, updated_at DESC);`,
+		`CREATE TABLE IF NOT EXISTS expert_builder_messages (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  content_text TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES expert_builder_sessions(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_expert_builder_messages_session_created ON expert_builder_messages(session_id, created_at);`,
+		`CREATE TABLE IF NOT EXISTS expert_builder_snapshots (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  assistant_message TEXT NOT NULL,
+  draft_json TEXT NOT NULL,
+  raw_json TEXT,
+  warnings_json TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES expert_builder_sessions(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_expert_builder_snapshots_session_version ON expert_builder_snapshots(session_id, version DESC);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("ensure expert builder schema: %w", err)
+		}
+	}
+	return nil
+}
+
+func ensureOrchestrationSchema(ctx context.Context, tx *sql.Tx) error {
+	for _, stmt := range []string{
+		`ALTER TABLE executions ADD COLUMN orchestration_id TEXT;`,
+		`ALTER TABLE executions ADD COLUMN round_id TEXT;`,
+		`ALTER TABLE executions ADD COLUMN agent_run_id TEXT;`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				continue
+			}
+			return fmt.Errorf("ensure orchestration execution columns: %w", err)
+		}
+	}
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS orchestrations (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  goal TEXT NOT NULL,
+  workspace_path TEXT NOT NULL,
+  status TEXT NOT NULL,
+  current_round INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  error_message TEXT,
+  summary TEXT
+);`,
+		`CREATE TABLE IF NOT EXISTS orchestration_rounds (
+  id TEXT PRIMARY KEY,
+  orchestration_id TEXT NOT NULL,
+  round_index INTEGER NOT NULL,
+  goal TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  summary TEXT,
+  synthesis_step_id TEXT,
+  FOREIGN KEY(orchestration_id) REFERENCES orchestrations(id)
+);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestration_rounds_unique ON orchestration_rounds(orchestration_id, round_index);`,
+		`CREATE TABLE IF NOT EXISTS agent_runs (
+  id TEXT PRIMARY KEY,
+  orchestration_id TEXT NOT NULL,
+  round_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  title TEXT NOT NULL,
+  goal TEXT NOT NULL,
+  expert_id TEXT NOT NULL,
+  intent TEXT NOT NULL,
+  workspace_mode TEXT NOT NULL,
+  workspace_path TEXT NOT NULL,
+  branch_name TEXT,
+  base_ref TEXT,
+  worktree_path TEXT,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  last_execution_id TEXT,
+  result_summary TEXT,
+  error_message TEXT,
+  modified_code INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY(orchestration_id) REFERENCES orchestrations(id),
+  FOREIGN KEY(round_id) REFERENCES orchestration_rounds(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_runs_orchestration_round ON agent_runs(orchestration_id, round_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status, created_at);`,
+		`CREATE TABLE IF NOT EXISTS synthesis_steps (
+  id TEXT PRIMARY KEY,
+  orchestration_id TEXT NOT NULL,
+  round_id TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(orchestration_id) REFERENCES orchestrations(id),
+  FOREIGN KEY(round_id) REFERENCES orchestration_rounds(id)
+);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_synthesis_steps_round_unique ON synthesis_steps(round_id);`,
+		`CREATE TABLE IF NOT EXISTS orchestration_artifacts (
+  id TEXT PRIMARY KEY,
+  orchestration_id TEXT NOT NULL,
+  round_id TEXT,
+  agent_run_id TEXT,
+  synthesis_step_id TEXT,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  summary TEXT,
+  payload_json TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(orchestration_id) REFERENCES orchestrations(id),
+  FOREIGN KEY(round_id) REFERENCES orchestration_rounds(id),
+  FOREIGN KEY(agent_run_id) REFERENCES agent_runs(id),
+  FOREIGN KEY(synthesis_step_id) REFERENCES synthesis_steps(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_orchestration_artifacts_lookup ON orchestration_artifacts(orchestration_id, round_id, agent_run_id, created_at);`,
+		`CREATE TABLE IF NOT EXISTS orchestration_events (
+  id TEXT PRIMARY KEY,
+  orchestration_id TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  payload_json TEXT NOT NULL,
+  FOREIGN KEY(orchestration_id) REFERENCES orchestrations(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_orchestration_events_ts ON orchestration_events(orchestration_id, ts);`,
+		`CREATE TABLE IF NOT EXISTS agent_run_executions (
+  id TEXT PRIMARY KEY,
+  agent_run_id TEXT NOT NULL,
+  attempt INTEGER NOT NULL,
+  pid INTEGER,
+  exit_code INTEGER,
+  status TEXT NOT NULL,
+  log_path TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  ended_at INTEGER,
+  signal TEXT,
+  error_message TEXT,
+  FOREIGN KEY(agent_run_id) REFERENCES agent_runs(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_run_executions_agent_run ON agent_run_executions(agent_run_id, attempt);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("ensure orchestration schema: %w", err)
+		}
+	}
+	return nil
+}
+
+func tableColumns(ctx context.Context, tx *sql.Tx, table string) (map[string]bool, error) {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s);", table))
+	if err != nil {
+		return nil, fmt.Errorf("pragma table_info(%s): %w", table, err)
+	}
+	defer rows.Close()
+	cols := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return nil, fmt.Errorf("scan table_info(%s): %w", table, err)
+		}
+		cols[strings.TrimSpace(strings.ToLower(name))] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate table_info(%s): %w", table, err)
+	}
+	return cols, nil
 }

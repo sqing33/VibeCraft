@@ -339,11 +339,3 @@ func scanExpertBuilderSnapshot(s scanner) (ExpertBuilderSnapshot, error) {
 	}
 	return snapshot, nil
 }
-
-func pointerString(s string) *string {
-	v := strings.TrimSpace(s)
-	if v == "" {
-		return nil
-	}
-	return &v
-}

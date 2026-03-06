@@ -21,6 +21,7 @@ import (
 	"vibe-tree/backend/internal/config"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/expert"
+	"vibe-tree/backend/internal/orchestration"
 	"vibe-tree/backend/internal/paths"
 	"vibe-tree/backend/internal/scheduler"
 	"vibe-tree/backend/internal/server"
@@ -32,6 +33,7 @@ type testEnv struct {
 	httpSrv *httptest.Server
 	store   *store.Store
 	sched   *scheduler.Scheduler
+	orchMgr *orchestration.Manager
 	execMgr *execution.Manager
 }
 
@@ -53,8 +55,9 @@ func newTestEnv(t *testing.T, cfg config.Config, maxConcurrency int) *testEnv {
 		t.Fatalf("migrate store: %v", err)
 	}
 	chatMgr := chat.NewManager(st, hub, chat.Options{})
+	orchMgr := orchestration.NewManager(orchestration.Options{Store: st, Executions: execMgr, Experts: experts, Hub: hub, MaxConcurrency: maxConcurrency})
 
-	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub, Store: st, Experts: experts, Chat: chatMgr})
+	engine := server.New(server.Options{DevCORS: false}, api.Deps{Executions: execMgr, Hub: hub, Store: st, Experts: experts, Chat: chatMgr, Orchestration: orchMgr})
 	httpSrv := httptest.NewServer(engine)
 	t.Cleanup(httpSrv.Close)
 
@@ -64,6 +67,7 @@ func newTestEnv(t *testing.T, cfg config.Config, maxConcurrency int) *testEnv {
 		httpSrv: httpSrv,
 		store:   st,
 		sched:   sched,
+		orchMgr: orchMgr,
 		execMgr: execMgr,
 	}
 }

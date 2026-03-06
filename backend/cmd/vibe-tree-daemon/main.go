@@ -16,6 +16,7 @@ import (
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/expert"
 	"vibe-tree/backend/internal/logx"
+	"vibe-tree/backend/internal/orchestration"
 	"vibe-tree/backend/internal/paths"
 	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/scheduler"
@@ -71,6 +72,11 @@ func main() {
 	} else if fixed > 0 {
 		logx.Warn("daemon", "recover", "检测到未收敛的 running execution，已标记为 failed", "count", fixed)
 	}
+	if fixed, err := stateStore.RecoverOrchestrationsAfterRestart(context.Background()); err != nil {
+		logx.Warn("daemon", "recover-orchestrations", "orchestration 启动恢复失败（将由后续状态机兜底）", "err", err)
+	} else if fixed > 0 {
+		logx.Warn("daemon", "recover-orchestrations", "检测到未收敛的 running agent run，已标记为 failed", "count", fixed)
+	}
 
 	hub := ws.NewHub()
 	execRunner := runner.MultiRunner{
@@ -80,6 +86,13 @@ func main() {
 	execMgr := execution.NewManager(execRunner, grace, hub)
 	experts := expert.NewRegistry(cfg)
 	chatMgr := chat.NewManager(stateStore, hub, chat.Options{})
+	orchMgr := orchestration.NewManager(orchestration.Options{
+		Store:          stateStore,
+		Executions:     execMgr,
+		Experts:        experts,
+		Hub:            hub,
+		MaxConcurrency: cfg.Execution.MaxConcurrency,
+	})
 
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
@@ -104,6 +117,9 @@ func main() {
 				if err := sched.Tick(tickCtx); err != nil {
 					logx.Warn("workflow-scheduler", "tick", "调度 tick 失败", "err", err)
 				}
+				if err := orchMgr.Tick(tickCtx); err != nil {
+					logx.Warn("orchestration", "tick", "调度 tick 失败", "err", err)
+				}
 				cancel()
 			}
 		}
@@ -111,7 +127,7 @@ func main() {
 
 	engine := server.New(
 		server.Options{DevCORS: server.DevCORSFromEnv()},
-		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore, Experts: experts, Chat: chatMgr},
+		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore, Experts: experts, Chat: chatMgr, Orchestration: orchMgr},
 	)
 	srv := &http.Server{
 		Addr:              cfg.Addr(),

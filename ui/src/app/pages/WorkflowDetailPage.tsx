@@ -29,7 +29,7 @@ import {
   type Workflow,
 } from '@/lib/daemon'
 import { onWsEnvelope } from '@/lib/wsBus'
-import { goHome } from '@/app/routes'
+import { goToLegacyWorkflows } from '@/app/routes'
 import { useDaemonStore } from '@/stores/daemonStore'
 
 type WorkflowDetailPageProps = {
@@ -459,7 +459,7 @@ export function WorkflowDetailPage(props: WorkflowDetailPageProps) {
           <Button
             color="secondary"
             variant="flat"
-            onPress={goHome}
+            onPress={goToLegacyWorkflows}
             startContent={
               <ChevronLeft
                 className="h-4 w-4"
@@ -491,7 +491,7 @@ export function WorkflowDetailPage(props: WorkflowDetailPageProps) {
           <Button
             color="secondary"
             variant="flat"
-            onPress={goHome}
+            onPress={goToLegacyWorkflows}
             startContent={
               <ChevronLeft
                 className="h-4 w-4"

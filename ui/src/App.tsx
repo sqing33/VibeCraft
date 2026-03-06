@@ -3,6 +3,8 @@ import { useEffect } from 'react'
 import { useHashRoute } from '@/app/routes'
 import { Topbar } from '@/app/components/Topbar'
 import { ChatSessionsPage } from '@/app/pages/ChatSessionsPage'
+import { OrchestrationDetailPage } from '@/app/pages/OrchestrationDetailPage'
+import { OrchestrationsPage } from '@/app/pages/OrchestrationsPage'
 import { WorkflowsPage } from '@/app/pages/WorkflowsPage'
 import { WorkflowDetailPage } from '@/app/pages/WorkflowDetailPage'
 import { fetchExperts, fetchHealth, fetchInfo } from '@/lib/daemon'
@@ -140,10 +142,14 @@ export default function App() {
             : 'mx-auto max-w-6xl p-4'
         }
       >
-        {route.name === 'workflows' ? (
+        {route.name === 'orchestrations' ? (
+          <OrchestrationsPage />
+        ) : route.name === 'workflows' ? (
           <WorkflowsPage />
         ) : route.name === 'chat' ? (
           <ChatSessionsPage />
+        ) : route.name === 'orchestration_detail' ? (
+          <OrchestrationDetailPage orchestrationId={route.orchestrationId} />
         ) : (
           <WorkflowDetailPage workflowId={route.workflowId} />
         )}

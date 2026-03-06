@@ -9,6 +9,9 @@ type Envelope struct {
 	Ts          int64       `json:"ts"`
 	WorkflowID  string      `json:"workflow_id,omitempty"`
 	NodeID      string      `json:"node_id,omitempty"`
+	OrchestrationID string   `json:"orchestration_id,omitempty"`
+	RoundID     string      `json:"round_id,omitempty"`
+	AgentRunID  string      `json:"agent_run_id,omitempty"`
 	ExecutionID string      `json:"execution_id,omitempty"`
 	Payload     interface{} `json:"payload,omitempty"`
 }

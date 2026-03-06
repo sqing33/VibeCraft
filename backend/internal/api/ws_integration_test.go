@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"vibe-tree/backend/internal/api"
+	"vibe-tree/backend/internal/config"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/server"
 	"vibe-tree/backend/internal/ws"
@@ -189,6 +191,71 @@ func TestCancelExecutionBroadcastsCanceledExit(t *testing.T) {
 		}
 		if payload.Status != "canceled" {
 			t.Fatalf("expected canceled status, got %q", payload.Status)
+		}
+		return
+	}
+}
+
+func TestOrchestrationExecutionEventsIncludeCorrelation(t *testing.T) {
+	env := newTestEnv(t, config.Default(), 4)
+	wsURL := "ws" + strings.TrimPrefix(env.httpSrv.URL, "http") + "/api/v1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer conn.Close()
+
+	body, _ := json.Marshal(map[string]any{
+		"title":          "ws-orch",
+		"goal":           "分析聊天页差异，并改进工作流页",
+		"workspace_path": initGitRepo(t),
+	})
+	res, err := http.Post(env.httpSrv.URL+"/api/v1/orchestrations", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("create orchestration: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected create orchestration status: %s", res.Status)
+	}
+	var created struct {
+		Orchestration struct {
+			ID string `json:"orchestration_id"`
+		} `json:"orchestration"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create orchestration response: %v", err)
+	}
+	if created.Orchestration.ID == "" {
+		t.Fatalf("missing orchestration id")
+	}
+	if err := env.orchMgr.Tick(context.Background()); err != nil {
+		t.Fatalf("orchestration tick: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("ws read: %v", err)
+		}
+		var envMsg struct {
+			Type            string `json:"type"`
+			ExecutionID     string `json:"execution_id"`
+			OrchestrationID string `json:"orchestration_id"`
+			RoundID         string `json:"round_id"`
+			AgentRunID      string `json:"agent_run_id"`
+		}
+		if err := json.Unmarshal(msg, &envMsg); err != nil {
+			continue
+		}
+		if envMsg.Type != "execution.started" {
+			continue
+		}
+		if envMsg.OrchestrationID != created.Orchestration.ID {
+			continue
+		}
+		if envMsg.RoundID == "" || envMsg.AgentRunID == "" || envMsg.ExecutionID == "" {
+			t.Fatalf("expected orchestration correlation ids in execution.started, got %+v", envMsg)
 		}
 		return
 	}

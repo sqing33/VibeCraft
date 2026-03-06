@@ -23,7 +23,11 @@ func (s *Store) CountRunningWorkerNodes(ctx context.Context) (int, error) {
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM nodes WHERE node_type != 'master' AND status = 'running';`).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count running worker nodes: %w", err)
 	}
-	return n, nil
+	var agentRuns int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM agent_runs WHERE status = 'running';`).Scan(&agentRuns); err != nil {
+		return 0, fmt.Errorf("count running agent runs: %w", err)
+	}
+	return n + agentRuns, nil
 }
 
 // ListRunnableQueuedWorkerNodes 功能：列出当前可运行的 queued worker nodes（依赖全部 succeeded，且 workflow.status=running）。

@@ -661,6 +661,11 @@ export async function patchChatSession(
 
 export type Execution = {
   execution_id: string
+  workflow_id?: string
+  node_id?: string
+  orchestration_id?: string
+  round_id?: string
+  agent_run_id?: string
   status: string
   command: string
   args?: string[]
@@ -669,6 +674,86 @@ export type Execution = {
   ended_at?: string
   exit_code?: number
   signal?: string
+}
+
+export type Orchestration = {
+  orchestration_id: string
+  title: string
+  goal: string
+  workspace_path: string
+  status: string
+  current_round: number
+  created_at: number
+  updated_at: number
+  running_agent_runs_count?: number
+  error_message?: string
+  summary?: string
+}
+
+export type OrchestrationRound = {
+  round_id: string
+  orchestration_id: string
+  round_index: number
+  goal: string
+  status: string
+  created_at: number
+  updated_at: number
+  summary?: string
+  synthesis_step_id?: string
+}
+
+export type AgentRun = {
+  agent_run_id: string
+  orchestration_id: string
+  round_id: string
+  role: string
+  title: string
+  goal: string
+  expert_id: string
+  intent: string
+  workspace_mode: string
+  workspace_path: string
+  branch_name?: string
+  base_ref?: string
+  worktree_path?: string
+  status: string
+  created_at: number
+  updated_at: number
+  last_execution_id?: string
+  result_summary?: string
+  error_message?: string
+  modified_code: boolean
+}
+
+export type SynthesisStep = {
+  synthesis_step_id: string
+  orchestration_id: string
+  round_id: string
+  decision: string
+  summary: string
+  created_at: number
+  updated_at: number
+}
+
+export type OrchestrationArtifact = {
+  artifact_id: string
+  orchestration_id: string
+  round_id?: string
+  agent_run_id?: string
+  synthesis_step_id?: string
+  kind: string
+  title: string
+  summary?: string
+  payload_json?: string
+  created_at: number
+}
+
+export type OrchestrationDetail = {
+  orchestration: Orchestration
+  rounds: OrchestrationRound[]
+  agent_runs: AgentRun[]
+  synthesis_steps: SynthesisStep[]
+  artifacts: OrchestrationArtifact[]
 }
 
 export type Workflow = {
@@ -682,6 +767,126 @@ export type Workflow = {
   running_nodes_count?: number
   error_message?: string
   summary?: string
+}
+
+/**
+ * 功能：创建一条 orchestration（`POST /api/v1/orchestrations`）。
+ * 参数/返回：接收 daemonUrl 与自然语言 goal/workspace；返回 OrchestrationDetail。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求并在后端创建 orchestration 与首轮 agent runs。
+ */
+export async function createOrchestration(
+  daemonUrl: string,
+  req: { title?: string; goal: string; workspace_path: string },
+): Promise<OrchestrationDetail> {
+  const res = await fetch(`${daemonUrl}/api/v1/orchestrations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as OrchestrationDetail
+}
+
+/**
+ * 功能：读取 orchestration 列表（`GET /api/v1/orchestrations`）。
+ * 参数/返回：接收 daemonUrl；返回 Orchestration[]。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchOrchestrations(
+  daemonUrl: string,
+  limit = 50,
+): Promise<Orchestration[]> {
+  const url = new URL(`${daemonUrl}/api/v1/orchestrations`)
+  url.searchParams.set('limit', String(limit))
+  const res = await fetch(url)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as Orchestration[]
+}
+
+/**
+ * 功能：读取 orchestration 详情（`GET /api/v1/orchestrations/{id}`）。
+ * 参数/返回：接收 daemonUrl 与 orchestrationId；返回 OrchestrationDetail。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchOrchestrationDetail(
+  daemonUrl: string,
+  orchestrationId: string,
+): Promise<OrchestrationDetail> {
+  const res = await fetch(`${daemonUrl}/api/v1/orchestrations/${orchestrationId}`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as OrchestrationDetail
+}
+
+/**
+ * 功能：取消 orchestration（`POST /api/v1/orchestrations/{id}/cancel`）。
+ * 参数/返回：接收 daemonUrl 与 orchestrationId；返回最新 Orchestration。
+ * 失败场景：HTTP 非 2xx 时抛出 Error。
+ * 副作用：发起 HTTP 请求并触发后端取消运行中的 agent runs。
+ */
+export async function cancelOrchestration(
+  daemonUrl: string,
+  orchestrationId: string,
+): Promise<Orchestration> {
+  const res = await fetch(`${daemonUrl}/api/v1/orchestrations/${orchestrationId}/cancel`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as Orchestration
+}
+
+/**
+ * 功能：继续 orchestration（`POST /api/v1/orchestrations/{id}/continue`）。
+ * 参数/返回：接收 daemonUrl 与 orchestrationId；返回最新 OrchestrationDetail。
+ * 失败场景：HTTP 非 2xx 时抛出 Error。
+ * 副作用：发起 HTTP 请求并在后端创建下一轮 round/agent runs。
+ */
+export async function continueOrchestration(
+  daemonUrl: string,
+  orchestrationId: string,
+): Promise<OrchestrationDetail> {
+  const res = await fetch(`${daemonUrl}/api/v1/orchestrations/${orchestrationId}/continue`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as OrchestrationDetail
+}
+
+/**
+ * 功能：重试一个失败的 agent run（`POST /api/v1/agent-runs/{id}/retry`）。
+ * 参数/返回：接收 daemonUrl 与 agentRunId；返回更新后的 orchestration/round/agent_run。
+ * 失败场景：HTTP 非 2xx 时抛出 Error。
+ * 副作用：发起 HTTP 请求并在后端将 agent run 重新排队。
+ */
+export async function retryAgentRun(
+  daemonUrl: string,
+  agentRunId: string,
+): Promise<{ orchestration: Orchestration; round: OrchestrationRound; agent_run: AgentRun }> {
+  const res = await fetch(`${daemonUrl}/api/v1/agent-runs/${agentRunId}/retry`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as { orchestration: Orchestration; round: OrchestrationRound; agent_run: AgentRun }
 }
 
 export type Node = {
