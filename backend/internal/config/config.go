@@ -122,6 +122,9 @@ type LLMModelConfig struct {
 	Model    string `json:"model"`
 	SourceID string `json:"source_id"`
 
+	OpenAIAPIStyle           string `json:"openai_api_style,omitempty"`
+	OpenAIAPIStyleDetectedAt int64  `json:"openai_api_style_detected_at,omitempty"`
+
 	SystemPrompt    string   `json:"system_prompt,omitempty"`
 	MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
 	Temperature     *float64 `json:"temperature,omitempty"`

@@ -260,6 +260,7 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 				SDK: runner.SDKSpec{
 					Provider:        strings.TrimSpace(e.SecondaryProvider),
 					Model:           strings.TrimSpace(e.SecondaryModel),
+					LLMModelID:      strings.TrimSpace(e.SecondaryModelID),
 					Prompt:          finalPrompt,
 					Instructions:    strings.TrimSpace(e.SystemPrompt),
 					BaseURL:         secondaryBaseURL,
@@ -279,6 +280,7 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 				SDK: &runner.SDKSpec{
 					Provider:        provider,
 					Model:           model,
+					LLMModelID:      strings.TrimSpace(e.PrimaryModelID),
 					Prompt:          finalPrompt,
 					Instructions:    strings.TrimSpace(e.SystemPrompt),
 					BaseURL:         baseURL,

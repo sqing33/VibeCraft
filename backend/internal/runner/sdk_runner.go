@@ -18,6 +18,7 @@ import (
 
 	"vibe-tree/backend/internal/dag"
 	"vibe-tree/backend/internal/expertschema"
+	"vibe-tree/backend/internal/openaicompat"
 )
 
 // SDKRunner 功能：使用 OpenAI/Anthropic 官方 SDK 执行一次性生成任务，并以流式方式输出到 execution 日志。
@@ -194,6 +195,66 @@ func (r SDKRunner) streamOpenAI(ctx context.Context, sdk SDKSpec, env map[string
 	if model == "" {
 		return errors.New("openai model is required")
 	}
+	if strings.TrimSpace(sdk.OutputSchema) == "" {
+		style, err := r.ensureOpenAIAPIStyle(ctx, sdk, env)
+		if err != nil {
+			return err
+		}
+		return r.streamOpenAIPlainText(ctx, sdk, env, out, style)
+	}
+	style, err := r.ensureOpenAIAPIStyle(ctx, sdk, env)
+	if err != nil {
+		return err
+	}
+	if style == openaicompat.APIStyleChatCompletions {
+		return openaicompat.ErrResponsesCompatibleEndpointRequired
+	}
+	if err := r.streamOpenAIResponses(ctx, sdk, env, out); err != nil {
+		if openaicompat.IsEndpointMismatch(err) && strings.TrimSpace(sdk.LLMModelID) != "" {
+			detectReq := openAITextRequest(sdk, env, openaicompat.DetectionPrompt)
+			style, _, retryErr := openaicompat.ReprobeSavedModelAPIStyle(ctx, sdk.LLMModelID, openaicompat.APIStyleResponses, detectReq)
+			if retryErr != nil {
+				return retryErr
+			}
+			if style == openaicompat.APIStyleChatCompletions {
+				return openaicompat.ErrResponsesCompatibleEndpointRequired
+			}
+			return r.streamOpenAIResponses(ctx, sdk, env, out)
+		}
+		return err
+	}
+	return nil
+}
+
+func (r SDKRunner) streamOpenAIPlainText(ctx context.Context, sdk SDKSpec, env map[string]string, out io.Writer, style openaicompat.APIStyle) error {
+	request := openAITextRequest(sdk, env, sdk.Prompt)
+	_, err := openaicompat.StreamText(ctx, style, request, func(delta string) {
+		if delta == "" {
+			return
+		}
+		_, _ = io.WriteString(out, delta)
+	})
+	if err != nil && openaicompat.IsEndpointMismatch(err) && strings.TrimSpace(sdk.LLMModelID) != "" {
+		detectReq := openAITextRequest(sdk, env, openaicompat.DetectionPrompt)
+		nextStyle, _, retryErr := openaicompat.ReprobeSavedModelAPIStyle(ctx, sdk.LLMModelID, style, detectReq)
+		if retryErr != nil {
+			return retryErr
+		}
+		_, err = openaicompat.StreamText(ctx, nextStyle, request, func(delta string) {
+			if delta == "" {
+				return
+			}
+			_, _ = io.WriteString(out, delta)
+		})
+	}
+	return err
+}
+
+func (r SDKRunner) streamOpenAIResponses(ctx context.Context, sdk SDKSpec, env map[string]string, out io.Writer) error {
+	model := strings.TrimSpace(sdk.Model)
+	if model == "" {
+		return errors.New("openai model is required")
+	}
 
 	body := openai_responses.ResponseNewParams{
 		Model: openai_shared.ResponsesModel(model),
@@ -265,6 +326,33 @@ func (r SDKRunner) streamOpenAI(ctx context.Context, sdk SDKSpec, env map[string
 		return err
 	}
 	return nil
+}
+
+func (r SDKRunner) ensureOpenAIAPIStyle(ctx context.Context, sdk SDKSpec, env map[string]string) (openaicompat.APIStyle, error) {
+	if strings.TrimSpace(sdk.LLMModelID) == "" {
+		return openaicompat.APIStyleResponses, nil
+	}
+	detectReq := openAITextRequest(sdk, env, openaicompat.DetectionPrompt)
+	style, _, err := openaicompat.EnsureSavedModelAPIStyle(ctx, sdk.LLMModelID, detectReq)
+	return style, err
+}
+
+func openAITextRequest(sdk SDKSpec, env map[string]string, prompt string) openaicompat.TextRequest {
+	baseURL := strings.TrimSpace(sdk.BaseURL)
+	if baseURL == "" {
+		baseURL = strings.TrimSpace(env["OPENAI_BASE_URL"])
+	}
+	return openaicompat.TextRequest{
+		Model:           strings.TrimSpace(sdk.Model),
+		BaseURL:         baseURL,
+		APIKey:          strings.TrimSpace(env["OPENAI_API_KEY"]),
+		OrganizationID:  strings.TrimSpace(env["OPENAI_ORG_ID"]),
+		ProjectID:       strings.TrimSpace(env["OPENAI_PROJECT_ID"]),
+		Prompt:          strings.TrimSpace(prompt),
+		Instructions:    strings.TrimSpace(sdk.Instructions),
+		MaxOutputTokens: sdk.MaxOutputTokens,
+		Temperature:     sdk.Temperature,
+	}
 }
 
 func (r SDKRunner) streamAnthropic(ctx context.Context, sdk SDKSpec, env map[string]string, out io.Writer) error {

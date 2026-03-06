@@ -135,6 +135,7 @@ func putLLMSettingsHandler(deps Deps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		config.PreserveOpenAIAPIStyles(cfg.LLM, next)
 
 		cfg.LLM = next
 		config.ReconcileBasicSettingsWithLLM(&cfg.Basic, cfg.LLM)

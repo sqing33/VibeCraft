@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,12 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"vibe-tree/backend/internal/config"
+	"vibe-tree/backend/internal/openaicompat"
 	"vibe-tree/backend/internal/runner"
-
-	openai "github.com/openai/openai-go"
-	openai_option "github.com/openai/openai-go/option"
-	openai_responses "github.com/openai/openai-go/responses"
-	openai_shared "github.com/openai/openai-go/shared"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	anthropic_option "github.com/anthropics/anthropic-sdk-go/option"
@@ -54,6 +49,8 @@ func llmTestHandler() gin.HandlerFunc {
 		apiKey := strings.TrimSpace(req.APIKey)
 		sourceID := strings.TrimSpace(req.SourceID)
 		baseURL := strings.TrimSpace(req.BaseURL)
+		var llm *config.LLMSettings
+		var savedModelID string
 
 		if provider != "openai" && provider != "anthropic" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "provider must be openai or anthropic"})
@@ -79,34 +76,42 @@ func llmTestHandler() gin.HandlerFunc {
 			}
 		}
 
-		if apiKey == "" || baseURL == "" {
-			cfg, _, err := config.LoadPersisted()
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			llm := cfg.LLM
+		cfg, _, err := config.LoadPersisted()
+		if err == nil {
+			llm = cfg.LLM
 			if llm == nil || (len(llm.Sources) == 0 && len(llm.Models) == 0) {
 				derived := deriveLLMFromExperts(cfg.Experts)
 				llm = &derived
 			}
+		}
 
-			for _, s := range llm.Sources {
-				if strings.TrimSpace(s.ID) != sourceID {
+		if apiKey == "" || baseURL == "" {
+			if llm == nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			for _, source := range llm.Sources {
+				if strings.TrimSpace(source.ID) != sourceID {
 					continue
 				}
-				srcProvider := strings.ToLower(strings.TrimSpace(s.Provider))
-				if srcProvider != "" && srcProvider != provider {
+				sourceProvider := strings.ToLower(strings.TrimSpace(source.Provider))
+				if sourceProvider != "" && sourceProvider != provider {
 					c.JSON(http.StatusBadRequest, gin.H{"error": "source provider mismatch"})
 					return
 				}
 				if apiKey == "" {
-					apiKey = strings.TrimSpace(s.APIKey)
+					apiKey = strings.TrimSpace(source.APIKey)
 				}
 				if baseURL == "" {
-					baseURL = strings.TrimSpace(s.BaseURL)
+					baseURL = strings.TrimSpace(source.BaseURL)
 				}
 				break
+			}
+		}
+
+		if provider == "openai" && llm != nil {
+			if modelCfg, _, _, ok := config.FindLLMModelByIdentity(llm, provider, sourceID, model); ok {
+				savedModelID = strings.TrimSpace(modelCfg.ID)
 			}
 		}
 
@@ -117,7 +122,7 @@ func llmTestHandler() gin.HandlerFunc {
 
 		prompt := strings.TrimSpace(req.Prompt)
 		if prompt == "" {
-			prompt = "Reply with a single word: OK"
+			prompt = openaicompat.DetectionPrompt
 		}
 
 		started := time.Now()
@@ -125,17 +130,15 @@ func llmTestHandler() gin.HandlerFunc {
 		defer cancel()
 
 		var out string
-		var err error
 		switch provider {
 		case "openai":
 			baseURL = runner.NormalizeBaseURL("openai", baseURL)
-			out, err = testOpenAI(ctx, model, baseURL, apiKey, prompt)
+			out, err = testOpenAI(ctx, savedModelID, model, baseURL, apiKey, prompt)
 		case "anthropic":
 			baseURL = runner.NormalizeBaseURL("anthropic", baseURL)
 			out, err = testAnthropic(ctx, model, baseURL, apiKey, prompt)
 		}
 		if err != nil {
-			// Avoid leaking secrets by returning only error string.
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -149,49 +152,33 @@ func llmTestHandler() gin.HandlerFunc {
 	}
 }
 
-func testOpenAI(ctx context.Context, model, baseURL, apiKey, prompt string) (string, error) {
-	client := openai.NewClient()
-	opts := []openai_option.RequestOption{
-		openai_option.WithAPIKey(apiKey),
+func testOpenAI(ctx context.Context, savedModelID, model, baseURL, apiKey, prompt string) (string, error) {
+	request := openaicompat.TextRequest{
+		Model:           model,
+		BaseURL:         baseURL,
+		APIKey:          apiKey,
+		Prompt:          prompt,
+		MaxOutputTokens: 32,
 	}
-	if baseURL != "" {
-		opts = append(opts, openai_option.WithBaseURL(baseURL))
+	if strings.TrimSpace(savedModelID) == "" {
+		_, out, err := openaicompat.ProbeTextAPIStyle(ctx, request)
+		return out, err
 	}
-
-	body := openai_responses.ResponseNewParams{
-		Model: openai_shared.ResponsesModel(model),
-		Input: openai_responses.ResponseNewParamsInputUnion{
-			OfString: openai.String(prompt),
-		},
-		MaxOutputTokens: openai.Int(int64(32)),
-	}
-
-	stream := client.Responses.NewStreaming(ctx, body, opts...)
-	if stream == nil {
-		return "", errors.New("openai stream is nil")
-	}
-	defer stream.Close()
-
-	var sb strings.Builder
-	for stream.Next() {
-		ev := stream.Current()
-		switch ev.Type {
-		case "response.output_text.delta":
-			delta := ev.AsResponseOutputTextDelta().Delta
-			if delta != "" {
-				sb.WriteString(delta)
-			}
-		case "error":
-			msg := strings.TrimSpace(ev.AsError().Message)
-			if msg != "" {
-				return "", errors.New(msg)
-			}
-		}
-	}
-	if err := stream.Err(); err != nil {
+	detectRequest := request
+	detectRequest.Prompt = openaicompat.DetectionPrompt
+	style, _, err := openaicompat.EnsureSavedModelAPIStyle(ctx, savedModelID, detectRequest)
+	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(sb.String()), nil
+	out, _, err := openaicompat.CompleteText(ctx, style, request)
+	if err != nil && openaicompat.IsEndpointMismatch(err) {
+		style, _, retryErr := openaicompat.ReprobeSavedModelAPIStyle(ctx, savedModelID, style, detectRequest)
+		if retryErr != nil {
+			return "", retryErr
+		}
+		out, _, err = openaicompat.CompleteText(ctx, style, request)
+	}
+	return out, err
 }
 
 func testAnthropic(ctx context.Context, model, baseURL, apiKey, prompt string) (string, error) {
@@ -217,9 +204,9 @@ func testAnthropic(ctx context.Context, model, baseURL, apiKey, prompt string) (
 	}
 
 	var sb strings.Builder
-	for _, b := range res.Content {
-		if b.Type == "text" {
-			sb.WriteString(b.AsText().Text)
+	for _, block := range res.Content {
+		if block.Type == "text" {
+			sb.WriteString(block.AsText().Text)
 		}
 	}
 	return strings.TrimSpace(sb.String()), nil

@@ -36,6 +36,7 @@ type SDKFallback struct {
 type SDKSpec struct {
 	Provider        string
 	Model           string
+	LLMModelID      string
 	Prompt          string
 	Instructions    string
 	BaseURL         string

@@ -10,11 +10,8 @@ import (
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	anthropic_option "github.com/anthropics/anthropic-sdk-go/option"
-	openai "github.com/openai/openai-go"
-	openai_option "github.com/openai/openai-go/option"
-	openai_responses "github.com/openai/openai-go/responses"
-	openai_shared "github.com/openai/openai-go/shared"
 
+	"vibe-tree/backend/internal/openaicompat"
 	"vibe-tree/backend/internal/runner"
 )
 
@@ -220,55 +217,17 @@ func (m *Manager) generatePlainTextWithLLM(ctx context.Context, sdk runner.SDKSp
 
 	switch provider {
 	case "openai":
-		body := openai_responses.ResponseNewParams{
-			Model:           openai_shared.ResponsesModel(strings.TrimSpace(sdk.Model)),
-			Input:           openai_responses.ResponseNewParamsInputUnion{OfString: openai.String(prompt)},
-			MaxOutputTokens: openai.Int(int64(maxTokens)),
-			Temperature:     openai.Float(temperature),
+		request := openaicompat.TextRequest{
+			Model:           strings.TrimSpace(sdk.Model),
+			BaseURL:         strings.TrimSpace(sdk.BaseURL),
+			APIKey:          strings.TrimSpace(env["OPENAI_API_KEY"]),
+			Prompt:          prompt,
+			Instructions:    strings.TrimSpace(system),
+			MaxOutputTokens: maxTokens,
+			Temperature:     &temperature,
 		}
-		if strings.TrimSpace(system) != "" {
-			body.Instructions = openai.String(strings.TrimSpace(system))
-		}
-		opts := make([]openai_option.RequestOption, 0, 4)
-		if v := strings.TrimSpace(env["OPENAI_API_KEY"]); v != "" {
-			opts = append(opts, openai_option.WithAPIKey(v))
-		}
-		if v := strings.TrimSpace(env["OPENAI_ORG_ID"]); v != "" {
-			opts = append(opts, openai_option.WithOrganization(v))
-		}
-		if v := strings.TrimSpace(env["OPENAI_PROJECT_ID"]); v != "" {
-			opts = append(opts, openai_option.WithProject(v))
-		}
-		if baseURL := strings.TrimSpace(sdk.BaseURL); baseURL != "" {
-			opts = append(opts, openai_option.WithBaseURL(runner.NormalizeBaseURL("openai", baseURL)))
-		} else if baseURL := strings.TrimSpace(env["OPENAI_BASE_URL"]); baseURL != "" {
-			opts = append(opts, openai_option.WithBaseURL(runner.NormalizeBaseURL("openai", baseURL)))
-		}
-		stream := m.openaiClient.Responses.NewStreaming(ctx, body, opts...)
-		if stream == nil {
-			return "", errors.New("openai text stream is nil")
-		}
-		defer stream.Close()
-		var out strings.Builder
-		for stream.Next() {
-			ev := stream.Current()
-			switch ev.Type {
-			case "response.output_text.delta":
-				delta := ev.AsResponseOutputTextDelta().Delta
-				if delta != "" {
-					out.WriteString(delta)
-				}
-			case "error":
-				msg := strings.TrimSpace(ev.AsError().Message)
-				if msg != "" {
-					return "", errors.New(msg)
-				}
-			}
-		}
-		if err := stream.Err(); err != nil {
-			return "", err
-		}
-		return strings.TrimSpace(out.String()), nil
+		out, _, err := openaicompat.CompleteText(ctx, openaicompat.APIStyleResponses, request)
+		return strings.TrimSpace(out), err
 	case "anthropic":
 		body := anthropic.MessageNewParams{
 			Model:     anthropic.Model(strings.TrimSpace(sdk.Model)),

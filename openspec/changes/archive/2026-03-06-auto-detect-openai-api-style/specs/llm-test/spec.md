@@ -1,8 +1,7 @@
-# llm-test Specification
+# llm-test (delta): auto-detect-openai-api-style
 
-## Purpose
-TBD - created by archiving change llm-model-test-button. Update Purpose after archive.
-## Requirements
+## MODIFIED Requirements
+
 ### Requirement: Daemon exposes LLM test API
 
 The system MUST provide `POST /api/v1/settings/llm/test` to perform a short SDK-based test call.
@@ -27,22 +26,6 @@ The response on success MUST include:
 
 The API MUST return HTTP 400 for invalid request payloads and HTTP 500 for provider/network errors.
 
-#### Scenario: Test OpenAI model succeeds
-
-- **WHEN** client posts a valid `openai` test payload
-- **THEN** the response is HTTP 200 with `ok: true`
-- **AND** the response includes `output` and `latency_ms`
-
-#### Scenario: Reject empty api_key
-
-- **WHEN** client posts a payload with neither `api_key` nor `source_id`
-- **THEN** the daemon returns HTTP 400
-
-#### Scenario: Normalize mixed-case model name before test call
-
-- **WHEN** client posts `model="GPT-5-CODEX"`
-- **THEN** the daemon lowercases it before calling the provider SDK
-
 #### Scenario: Test OpenAI model persists detected style for saved profile
 
 - **WHEN** client posts a valid `openai` test payload that matches a saved model profile
@@ -56,12 +39,3 @@ The API MUST return HTTP 400 for invalid request payloads and HTTP 500 for provi
 - **AND** the daemon successfully detects a supported API style
 - **THEN** the response is HTTP 200 with `ok: true`
 - **AND** the daemon does not persist the detected API style
-
-### Requirement: LLM test API MUST NOT leak API keys
-
-The daemon MUST NOT include plaintext API keys in the HTTP response.
-
-#### Scenario: Response does not contain api_key
-
-- **WHEN** client posts to `/api/v1/settings/llm/test`
-- **THEN** the response body does not include the request API key content

@@ -75,6 +75,14 @@ func ValidateLLMSettings(llm *LLMSettings) error {
 			return fmt.Errorf("llm.models[%d].model is required", i)
 		}
 
+		style := normalizeOpenAIAPIStyle(m.OpenAIAPIStyle)
+		if style != "" && provider != "openai" {
+			return fmt.Errorf("llm.models[%d].openai_api_style is only supported for openai models", i)
+		}
+		if strings.TrimSpace(m.OpenAIAPIStyle) != "" && style == "" {
+			return fmt.Errorf("llm.models[%d].openai_api_style %q is not supported", i, strings.TrimSpace(m.OpenAIAPIStyle))
+		}
+
 		sourceID := strings.TrimSpace(m.SourceID)
 		if sourceID == "" {
 			return fmt.Errorf("llm.models[%d].source_id is required", i)
@@ -115,6 +123,10 @@ func NormalizeLLMSettings(llm *LLMSettings) error {
 		llm.Models[i].Provider = normalizeProvider(llm.Models[i].Provider)
 		llm.Models[i].Model = normalizeModelIdentifier(llm.Models[i].Model)
 		llm.Models[i].SourceID = strings.TrimSpace(llm.Models[i].SourceID)
+		llm.Models[i].OpenAIAPIStyle = normalizeOpenAIAPIStyle(llm.Models[i].OpenAIAPIStyle)
+		if llm.Models[i].OpenAIAPIStyle == "" {
+			llm.Models[i].OpenAIAPIStyleDetectedAt = 0
+		}
 	}
 
 	return nil
@@ -126,4 +138,15 @@ func normalizeProvider(v string) string {
 
 func normalizeModelIdentifier(v string) string {
 	return strings.ToLower(strings.TrimSpace(v))
+}
+
+func normalizeOpenAIAPIStyle(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "responses":
+		return OpenAIAPIStyleResponses
+	case "chat_completions":
+		return OpenAIAPIStyleChatCompletions
+	default:
+		return ""
+	}
 }

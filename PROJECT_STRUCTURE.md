@@ -45,7 +45,7 @@
 | `backend/internal/api/info.go`             | 排障信息 API：`GET /api/v1/info`（version + XDG paths）                                                                               |
 | `backend/internal/api/experts.go`          | Experts 列表 API：`GET /api/v1/experts`（仅安全字段，供 UI 下拉）                                                                     |
 | `backend/internal/api/settings_basic.go`   | 基本设置 API：`GET/PUT /api/v1/settings/basic`（思考过程翻译 Source/模型/目标模型列表）                                              |
-| `backend/internal/api/settings_llm.go`     | 模型设置 API：`GET/PUT /api/v1/settings/llm`（sources/models；key masking；写盘并热更新 experts，并自动裁剪失效的翻译设置）         |
+| `backend/internal/api/settings_llm.go`     | 模型设置 API：`GET/PUT /api/v1/settings/llm`（sources/models；key masking；写盘并热更新 experts，并自动裁剪失效的翻译设置；保留/失效 OpenAI 接口风格隐藏元数据） |
 | `backend/internal/api/settings_experts.go` | 专家设置 API：`GET/PUT /api/v1/settings/experts` 与 `POST /api/v1/settings/experts/generate`（专家详情、保存、AI 生成）              |
 | `backend/internal/api/settings_expert_sessions.go` | 专家生成会话 API：session 列表/详情、追加消息、快照发布与继续优化                                                             |
 | `backend/internal/api/workflows.go`        | Workflow HTTP handlers：create/list/get/patch，并广播 `workflow.updated`                                                              |
@@ -62,6 +62,7 @@
 | `backend/internal/chat/attachments.go`      | Chat 附件能力：附件类型校验、大小限制、文件落盘、provider 多模态 block 构造、调试输入摘要                                               |
 | `backend/internal/chat/provider_input.go`    | Chat 多模态重建：基于本地消息 + 附件重建 OpenAI/Anthropic provider 输入                                                                |
 | `backend/internal/chat/thinking_translation.go` | Chat 思考过程翻译：按分段阈值缓冲 reasoning、调用翻译模型并广播中文 delta / 失败事件                                             |
+| `backend/internal/openaicompat/compat.go`   | OpenAI 兼容适配：按模型探测/持久化 `responses` 或 `chat/completions`，并提供 endpoint mismatch 分类与 plain-text 调用帮助         |
 | `backend/internal/workspace/manager.go`    | Workspace 策略管理：`read_only/shared_workspace/git_worktree` 解析、worktree 分配、代码变更检查与 artifact 生成                      |
 | `backend/internal/dag/dag.go`              | DAG 解析与校验：从 master 输出提取第一个 JSON 对象并做 MVP 约束校验（无环/引用存在/expert 校验）                                      |
 | `backend/internal/scheduler/scheduler.go`  | Workflow 调度器：依赖 + 并发上限 + fail-fast（启动 queued worker nodes 并收敛终态）                                                   |
@@ -120,6 +121,7 @@
 | UI 运行时切换 daemon URL           | `ui/src/App.tsx`                                                                                                                                                                                                                           |
 | 模型设置（Sources/Models）         | `backend/internal/api/settings_llm.go`, `backend/internal/config/llm_settings.go`, `backend/internal/config/llm_mirror.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/LLMSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
 | 基本设置 / 思考过程翻译            | `backend/internal/api/settings_basic.go`, `backend/internal/config/basic_settings.go`, `backend/internal/api/chat.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/thinking_translation.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/BasicSettingsTab.tsx`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/daemon.ts` |
+| OpenAI 兼容接口自动切换            | `backend/internal/openaicompat/compat.go`, `backend/internal/api/settings_llm_test_call.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/thinking_translation.go`, `backend/internal/runner/sdk_runner.go`, `backend/internal/config/openai_api_style.go` |
 | 专家设置 / AI 创建专家             | `backend/internal/api/settings_experts.go`, `backend/internal/api/settings_expert_sessions.go`, `backend/internal/expertbuilder/service.go`, `backend/internal/skillcatalog/catalog.go`, `.codex/skills/expert-creator/SKILL.md`, `ui/src/app/components/ExpertSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
 | XDG 配置路径                       | `backend/internal/config/config.go`                                                                                                                                                                                                        |
 | XDG 日志路径                       | `backend/internal/paths/paths.go`                                                                                                                                                                                                          |

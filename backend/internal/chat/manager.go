@@ -15,6 +15,7 @@ import (
 	openai_responses "github.com/openai/openai-go/responses"
 	openai_shared "github.com/openai/openai-go/shared"
 
+	"vibe-tree/backend/internal/openaicompat"
 	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/store"
 	"vibe-tree/backend/internal/ws"
@@ -567,59 +568,24 @@ func (m *Manager) summarizeWithLLM(ctx context.Context, sdk runner.SDKSpec, env 
 
 	switch provider {
 	case "openai":
-		body := openai_responses.ResponseNewParams{
-			Model: openai_shared.ResponsesModel(strings.TrimSpace(sdk.Model)),
-			Input: openai_responses.ResponseNewParamsInputUnion{
-				OfString: openai.String(prompt),
-			},
-			Instructions:    openai.String(system),
-			MaxOutputTokens: openai.Int(int64(maxTokens)),
-			Temperature:     openai.Float(*temp),
-		}
-
-		opts := make([]openai_option.RequestOption, 0, 4)
-		if v := strings.TrimSpace(env["OPENAI_API_KEY"]); v != "" {
-			opts = append(opts, openai_option.WithAPIKey(v))
-		}
-		if v := strings.TrimSpace(env["OPENAI_ORG_ID"]); v != "" {
-			opts = append(opts, openai_option.WithOrganization(v))
-		}
-		if v := strings.TrimSpace(env["OPENAI_PROJECT_ID"]); v != "" {
-			opts = append(opts, openai_option.WithProject(v))
-		}
-		if baseURL := strings.TrimSpace(sdk.BaseURL); baseURL != "" {
-			opts = append(opts, openai_option.WithBaseURL(runner.NormalizeBaseURL("openai", baseURL)))
-		} else if baseURL := strings.TrimSpace(env["OPENAI_BASE_URL"]); baseURL != "" {
-			opts = append(opts, openai_option.WithBaseURL(runner.NormalizeBaseURL("openai", baseURL)))
-		}
-
-		stream := m.openaiClient.Responses.NewStreaming(ctx, body, opts...)
-		if stream == nil {
-			return "", errors.New("openai summary stream is nil")
-		}
-		defer stream.Close()
-
-		var text strings.Builder
-		for stream.Next() {
-			ev := stream.Current()
-			switch ev.Type {
-			case "response.output_text.delta":
-				delta := ev.AsResponseOutputTextDelta().Delta
-				if delta == "" {
-					continue
-				}
-				text.WriteString(delta)
-			case "error":
-				msg := strings.TrimSpace(ev.AsError().Message)
-				if msg != "" {
-					return "", errors.New(msg)
-				}
-			}
-		}
-		if err := stream.Err(); err != nil {
+		style, err := m.ensureOpenAIAPIStyle(ctx, sdk, env)
+		if err != nil {
 			return "", err
 		}
-		return strings.TrimSpace(text.String()), nil
+		request := m.openAITextRequest(sdk, env, prompt)
+		request.Instructions = system
+		request.MaxOutputTokens = maxTokens
+		request.Temperature = temp
+		out, _, err := openaicompat.CompleteText(ctx, style, request)
+		if err != nil && openaicompat.IsEndpointMismatch(err) && strings.TrimSpace(sdk.LLMModelID) != "" {
+			detectReq := m.openAITextRequest(sdk, env, openaicompat.DetectionPrompt)
+			style, _, retryErr := openaicompat.ReprobeSavedModelAPIStyle(ctx, sdk.LLMModelID, style, detectReq)
+			if retryErr != nil {
+				return "", retryErr
+			}
+			out, _, err = openaicompat.CompleteText(ctx, style, request)
+		}
+		return strings.TrimSpace(out), err
 	case "anthropic":
 		body := anthropic.MessageNewParams{
 			Model:     anthropic.Model(strings.TrimSpace(sdk.Model)),
@@ -767,6 +733,29 @@ func (m *Manager) callDemo(sess store.ChatSession, modelInput string) string {
 }
 
 func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor, translationRuntime *thinkingTranslationRuntime) (string, string, store.ChatAnchor, providerCallMeta, error) {
+	style, err := m.ensureOpenAIAPIStyle(ctx, sdk, env)
+	if err != nil {
+		return "", "", store.ChatAnchor{}, providerCallMeta{}, err
+	}
+	if style == openaicompat.APIStyleChatCompletions {
+		return m.callOpenAIChatCompletions(ctx, sess, currentUser, sdk, env, modelInput)
+	}
+	out, reasoning, anchorOut, meta, err := m.callOpenAIResponses(ctx, sess, currentUser, sdk, env, modelInput, anchor, translationRuntime)
+	if err != nil && openaicompat.IsEndpointMismatch(err) && strings.TrimSpace(sdk.LLMModelID) != "" {
+		detectReq := m.openAITextRequest(sdk, env, openaicompat.DetectionPrompt)
+		style, _, retryErr := openaicompat.ReprobeSavedModelAPIStyle(ctx, sdk.LLMModelID, openaicompat.APIStyleResponses, detectReq)
+		if retryErr != nil {
+			return "", "", store.ChatAnchor{}, providerCallMeta{}, retryErr
+		}
+		if style == openaicompat.APIStyleChatCompletions {
+			return m.callOpenAIChatCompletions(ctx, sess, currentUser, sdk, env, modelInput)
+		}
+		return m.callOpenAIResponses(ctx, sess, currentUser, sdk, env, modelInput, anchor, translationRuntime)
+	}
+	return out, reasoning, anchorOut, meta, err
+}
+
+func (m *Manager) callOpenAIResponses(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor, translationRuntime *thinkingTranslationRuntime) (string, string, store.ChatAnchor, providerCallMeta, error) {
 	body := openai_responses.ResponseNewParams{
 		Model: openai_shared.ResponsesModel(strings.TrimSpace(sdk.Model)),
 	}
@@ -940,6 +929,68 @@ func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, curren
 		meta.CachedInputTokens = pointerInt64(cachedInputTokens)
 	}
 	return out, strings.TrimSpace(reasoning.String()), anchorOut, meta, nil
+}
+
+func (m *Manager) callOpenAIChatCompletions(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string) (string, string, store.ChatAnchor, providerCallMeta, error) {
+	if len(currentUser.Attachments) > 0 {
+		return "", "", store.ChatAnchor{}, providerCallMeta{}, errors.New("openai chat completions fallback does not support attachments")
+	}
+	debugInput := strings.TrimSpace(modelInput)
+	contextMode := "reconstructed"
+	if msgs, err := m.store.ListChatMessages(ctx, sess.ID, 1000); err == nil {
+		if anyMessageHasAttachments(msgs) {
+			return "", "", store.ChatAnchor{}, providerCallMeta{}, errors.New("openai chat completions fallback does not support attachment sessions")
+		}
+		debugInput = renderConversation(sess.Summary, msgs, modelInput, m.keepRecent)
+	}
+	request := m.openAITextRequest(sdk, env, debugInput)
+	var out strings.Builder
+	usage, err := openaicompat.StreamText(ctx, openaicompat.APIStyleChatCompletions, request, func(delta string) {
+		if delta == "" {
+			return
+		}
+		out.WriteString(delta)
+		m.broadcast("chat.turn.delta", map[string]any{
+			"session_id": sess.ID,
+			"delta":      delta,
+		})
+	})
+	if err != nil {
+		return "", "", store.ChatAnchor{}, providerCallMeta{}, err
+	}
+	output := strings.TrimSpace(out.String())
+	if output == "" {
+		output = "(empty response)"
+	}
+	meta := providerCallMeta{ModelInput: debugInput, ContextMode: contextMode, TokenIn: usage.TokenIn, TokenOut: usage.TokenOut, CachedInputTokens: usage.CachedInputTokens}
+	return output, "", store.ChatAnchor{}, meta, nil
+}
+
+func (m *Manager) ensureOpenAIAPIStyle(ctx context.Context, sdk runner.SDKSpec, env map[string]string) (openaicompat.APIStyle, error) {
+	if strings.TrimSpace(sdk.LLMModelID) == "" {
+		return openaicompat.APIStyleResponses, nil
+	}
+	detectReq := m.openAITextRequest(sdk, env, openaicompat.DetectionPrompt)
+	style, _, err := openaicompat.EnsureSavedModelAPIStyle(ctx, sdk.LLMModelID, detectReq)
+	return style, err
+}
+
+func (m *Manager) openAITextRequest(sdk runner.SDKSpec, env map[string]string, prompt string) openaicompat.TextRequest {
+	baseURL := strings.TrimSpace(sdk.BaseURL)
+	if baseURL == "" {
+		baseURL = strings.TrimSpace(env["OPENAI_BASE_URL"])
+	}
+	return openaicompat.TextRequest{
+		Model:           strings.TrimSpace(sdk.Model),
+		BaseURL:         baseURL,
+		APIKey:          strings.TrimSpace(env["OPENAI_API_KEY"]),
+		OrganizationID:  strings.TrimSpace(env["OPENAI_ORG_ID"]),
+		ProjectID:       strings.TrimSpace(env["OPENAI_PROJECT_ID"]),
+		Prompt:          strings.TrimSpace(prompt),
+		Instructions:    strings.TrimSpace(sdk.Instructions),
+		MaxOutputTokens: sdk.MaxOutputTokens,
+		Temperature:     sdk.Temperature,
+	}
 }
 
 func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor, translationRuntime *thinkingTranslationRuntime) (string, string, store.ChatAnchor, providerCallMeta, error) {

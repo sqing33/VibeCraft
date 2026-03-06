@@ -32,6 +32,8 @@ Validation rules:
 - The system MUST lowercase-trim model `id` and model `model` before persistence and before rebuilding the in-memory expert registry.
 - The system MAY preserve the original display casing in model `label`.
 
+For OpenAI models, the daemon MUST internally preserve previously detected API style metadata only when the model identity and source connection fields remain unchanged. If the model name, source reference, source provider, source base_url, or source API key changes, the daemon MUST clear the previously detected API style metadata for affected models.
+
 If validation fails, the API MUST return HTTP 400 with an error message.
 
 #### Scenario: Update LLM settings successfully
@@ -50,6 +52,16 @@ If validation fails, the API MUST return HTTP 400 with an error message.
 - **WHEN** client calls `PUT /api/v1/settings/llm` with model `id="GPT-5-CODEX"` and `model="GPT-5-CODEX"`
 - **THEN** the persisted settings use `id="gpt-5-codex"` and `model="gpt-5-codex"`
 - **AND** the model `label` may still preserve `GPT-5-CODEX`
+
+#### Scenario: Preserve internal API style metadata when model and source are unchanged
+
+- **WHEN** client calls `PUT /api/v1/settings/llm` with an OpenAI model whose provider, source_id, model name, source provider, source base_url, and source API key are unchanged
+- **THEN** the daemon keeps the previously detected internal API style metadata for that model
+
+#### Scenario: Clear internal API style metadata when source connection changes
+
+- **WHEN** client calls `PUT /api/v1/settings/llm` and changes an OpenAI source's base_url or API key
+- **THEN** the daemon clears the previously detected internal API style metadata for OpenAI models using that source
 
 ### Requirement: LLM settings persistence MUST be safe by default
 
