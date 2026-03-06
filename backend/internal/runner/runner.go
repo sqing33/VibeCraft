@@ -21,6 +21,16 @@ type RunSpec struct {
 	// 失败场景：provider 不支持、鉴权失败或网络错误时返回 error。
 	// 副作用：可能发起外部网络请求并产生输出流。
 	SDK *SDKSpec
+	// SDKFallbacks 功能：当主 SDK 请求失败时按顺序重试候选模型。
+	// 参数/返回：仅对 SDK spec 生效；每个 fallback 携带独立 SDK 参数与敏感 env。
+	// 失败场景：fallback provider/model 缺失或全部尝试失败时由调用方收敛错误。
+	// 副作用：可能触发额外一次或多次网络请求。
+	SDKFallbacks []SDKFallback
+}
+
+type SDKFallback struct {
+	SDK SDKSpec
+	Env map[string]string
 }
 
 type SDKSpec struct {
@@ -53,4 +63,3 @@ type ProcessHandle interface {
 type Runner interface {
 	StartOneshot(ctx context.Context, spec RunSpec) (ProcessHandle, error)
 }
-

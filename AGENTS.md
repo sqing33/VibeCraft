@@ -25,6 +25,7 @@
 | `vibe-tree-standards` | 需要统一日志、注释、提交命名；或做功能定位时             | `.codex/skills/vibe-tree-standards/SKILL.md`                 |
 | `tmux-codex-orchestrator` | 需要并行拆分任务、同题多解，或并发启动多个完整 Codex worker 时 | `.codex/skills/tmux-codex-orchestrator/SKILL.md`         |
 | `worktree-lite`       | 当前位于主分支/共享主工作区且需要写入时，先创建新 worktree 再改；若当前已在 `vibe-kanban` 相关 worktree/分支中，则不使用 | `.codex/skills/worktree-lite/SKILL.md`                       |
+| `expert-creator`      | 需要把自然语言需求转成专家配置草稿，或设计新的专家模板 | `.codex/skills/expert-creator/SKILL.md`                      |
 | `ui-ux-pro-max`       | UI/UX 设计与实现（规划/设计/优化界面与交互）         | `/home/sqing/.cc-switch/skills/ui-ux-pro-max/SKILL.md`       |
 | `skill-creator`       | 需要新增或更新 skill                                 | `/home/sqing/.codex/skills/.system/skill-creator/SKILL.md`   |
 | `skill-installer`     | 需要列出/安装 skill（curated 或 GitHub）             | `/home/sqing/.codex/skills/.system/skill-installer/SKILL.md` |

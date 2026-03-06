@@ -230,6 +230,255 @@ export async function postLLMTest(
   return (await res.json()) as LLMTestResponse
 }
 
+
+export type ExpertSettingsItem = {
+  id: string
+  label: string
+  description?: string
+  category?: string
+  avatar?: string
+  managed_source?: string
+  primary_model_id?: string
+  secondary_model_id?: string
+  fallback_on?: string[]
+  enabled_skills?: string[]
+  provider?: string
+  model?: string
+  system_prompt?: string
+  prompt_template?: string
+  output_format?: string
+  max_output_tokens?: number
+  temperature?: number
+  timeout_ms?: number
+  builder_expert_id?: string
+  builder_session_id?: string
+  builder_snapshot_id?: string
+  generated_by?: string
+  generated_at?: number
+  updated_at?: number
+  enabled: boolean
+  editable: boolean
+}
+
+export type SkillCatalogItem = {
+  id: string
+  description?: string
+  path?: string
+}
+
+export type ExpertSettings = {
+  experts: ExpertSettingsItem[]
+  skills: SkillCatalogItem[]
+  builder_experts: Array<{
+    id: string
+    label: string
+    provider: string
+    model: string
+    description?: string
+  }>
+}
+
+export type PutExpertSettingsRequest = {
+  experts: Array<{
+    id: string
+    label: string
+    description?: string
+    category?: string
+    avatar?: string
+    primary_model_id?: string
+    secondary_model_id?: string
+    fallback_on?: string[]
+    enabled_skills?: string[]
+    system_prompt?: string
+    prompt_template?: string
+    output_format?: string
+    max_output_tokens?: number
+    temperature?: number
+    timeout_ms?: number
+    builder_expert_id?: string
+    builder_session_id?: string
+    builder_snapshot_id?: string
+    generated_by?: string
+    generated_at?: number
+    updated_at?: number
+    enabled: boolean
+  }>
+}
+
+export async function fetchExpertSettings(
+  daemonUrl: string,
+): Promise<ExpertSettings> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/experts`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as ExpertSettings
+}
+
+export async function putExpertSettings(
+  daemonUrl: string,
+  req: PutExpertSettingsRequest,
+): Promise<ExpertSettings> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/experts`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as ExpertSettings
+}
+
+export type ExpertBuilderMessage = {
+  role: string
+  content: string
+}
+
+export type ExpertGenerateRequest = {
+  builder_expert_id?: string
+  builder_model_id?: string
+  messages: ExpertBuilderMessage[]
+}
+
+export type ExpertGenerateResponse = {
+  assistant_message: string
+  draft: ExpertSettingsItem
+  warnings?: string[]
+  raw_json?: string
+}
+
+export type ExpertBuilderSession = {
+  id: string
+  title: string
+  target_expert_id?: string
+  builder_model_id: string
+  status: string
+  latest_snapshot_id?: string
+  created_at: number
+  updated_at: number
+}
+
+export type ExpertBuilderMessageItem = {
+  id: string
+  session_id: string
+  role: string
+  content_text: string
+  created_at: number
+}
+
+export type ExpertBuilderSnapshot = {
+  id: string
+  session_id: string
+  version: number
+  assistant_message: string
+  draft: ExpertSettingsItem
+  raw_json?: string
+  warnings?: string[]
+  created_at: number
+}
+
+export type ExpertBuilderSessionDetail = {
+  session: ExpertBuilderSession
+  messages: ExpertBuilderMessageItem[]
+  snapshots: ExpertBuilderSnapshot[]
+}
+
+export async function fetchExpertBuilderSessions(
+  daemonUrl: string,
+  params?: { targetExpertId?: string; limit?: number },
+): Promise<{ sessions: ExpertBuilderSession[] }> {
+  const url = new URL(`${daemonUrl}/api/v1/settings/experts/sessions`)
+  if (params?.targetExpertId) url.searchParams.set('target_expert_id', params.targetExpertId)
+  if (params?.limit) url.searchParams.set('limit', String(params.limit))
+  const res = await fetch(url)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as { sessions: ExpertBuilderSession[] }
+}
+
+export async function postExpertBuilderSession(
+  daemonUrl: string,
+  req: { title?: string; target_expert_id?: string; builder_model_id: string },
+): Promise<{ session: ExpertBuilderSession }> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/experts/sessions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as { session: ExpertBuilderSession }
+}
+
+export async function fetchExpertBuilderSession(
+  daemonUrl: string,
+  sessionId: string,
+): Promise<ExpertBuilderSessionDetail> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/experts/sessions/${sessionId}`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as ExpertBuilderSessionDetail
+}
+
+export async function postExpertBuilderMessage(
+  daemonUrl: string,
+  sessionId: string,
+  req: { content: string },
+): Promise<ExpertBuilderSessionDetail> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/experts/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as ExpertBuilderSessionDetail
+}
+
+export async function postExpertBuilderPublish(
+  daemonUrl: string,
+  sessionId: string,
+  req?: { snapshot_id?: string; expert_id?: string },
+): Promise<{ session: ExpertBuilderSession; published_expert: ExpertSettingsItem; messages: ExpertBuilderMessageItem[]; snapshots: ExpertBuilderSnapshot[] }> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/experts/sessions/${sessionId}/publish`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: req ? JSON.stringify(req) : undefined,
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as { session: ExpertBuilderSession; published_expert: ExpertSettingsItem; messages: ExpertBuilderMessageItem[]; snapshots: ExpertBuilderSnapshot[] }
+}
+
+export async function postExpertGeneration(
+  daemonUrl: string,
+  req: ExpertGenerateRequest,
+): Promise<ExpertGenerateResponse> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/experts/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as ExpertGenerateResponse
+}
+
 export type ChatSession = {
   session_id: string
   title: string

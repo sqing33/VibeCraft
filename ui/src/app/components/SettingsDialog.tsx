@@ -20,6 +20,7 @@ import { daemonUrlFromEnv } from "@/lib/daemon";
 import { type HealthState, useDaemonStore } from "@/stores/daemonStore";
 
 import { LLMSettingsTab } from "./LLMSettingsTab";
+import { ExpertSettingsTab } from "./ExpertSettingsTab";
 
 function normalizeBaseUrl(raw: string): string {
   const url = (raw ?? "").trim();
@@ -61,8 +62,6 @@ export function SettingsDialog() {
   const wsState = useDaemonStore((s) => s.wsState);
   const info = useDaemonStore((s) => s.info);
   const infoError = useDaemonStore((s) => s.infoError);
-  const experts = useDaemonStore((s) => s.experts);
-  const expertsError = useDaemonStore((s) => s.expertsError);
   const setDaemonUrl = useDaemonStore((s) => s.setDaemonUrl);
   const resetDaemonUrl = useDaemonStore((s) => s.resetDaemonUrl);
 
@@ -141,7 +140,7 @@ export function SettingsDialog() {
       <Modal
         isOpen={open}
         onOpenChange={setOpen}
-        size="2xl"
+        size="5xl"
         scrollBehavior="inside"
         classNames={{
           base: "max-h-[85vh] min-h-0",
@@ -158,7 +157,7 @@ export function SettingsDialog() {
                   classNames={{
                     base: "min-h-0",
                     panel: "min-h-0 overflow-y-auto pr-1",
-                    tabList: "grid w-full grid-cols-2",
+                    tabList: "grid w-full grid-cols-3",
                   }}
                 >
                   <Tab key="diagnostics" title="连接与诊断">
@@ -312,41 +311,15 @@ export function SettingsDialog() {
                           </div>
                         )}
                       </section>
-
-                      <section className="space-y-3">
-                        <div className="text-sm font-medium">专家列表</div>
-                        {experts.length > 0 ? (
-                          <div className="rounded-md border bg-muted/30 p-3 text-xs">
-                            <div className="text-muted-foreground">
-                              已配置 {experts.length} 个
-                            </div>
-                            <div className="mt-1 flex flex-wrap gap-1">
-                              {experts.map((e) => (
-                                <Chip key={e.id} variant="flat" size="sm">
-                                  {e.id}
-                                </Chip>
-                              ))}
-                            </div>
-                          </div>
-                        ) : expertsError ? (
-                          <Alert
-                            color="danger"
-                            title="加载专家列表失败"
-                            description={expertsError}
-                          />
-                        ) : health.status === "error" ? (
-                          <div className="text-xs text-muted-foreground">
-                            无法使用专家列表（守护进程不可达）。
-                          </div>
-                        ) : (
-                          <Skeleton className="h-16 w-full rounded-md" />
-                        )}
-                      </section>
                     </div>
                   </Tab>
 
                   <Tab key="llm" title="模型">
                     <LLMSettingsTab />
+                  </Tab>
+
+                  <Tab key="experts" title="专家">
+                    <ExpertSettingsTab />
                   </Tab>
                 </Tabs>
               </ModalBody>

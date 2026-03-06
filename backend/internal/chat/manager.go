@@ -58,6 +58,7 @@ type TurnParams struct {
 	Attachments []UploadedAttachment
 	SDK         runner.SDKSpec
 	Env         map[string]string
+	Fallbacks   []runner.SDKFallback
 }
 
 type TurnResult struct {
@@ -190,16 +191,12 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 		anchor, _ = m.store.GetChatAnchor(ctx, params.Session.ID)
 	}
 
-	respText, reasoningText, anchorUpdate, callMeta, err := m.callProvider(ctx, params.Session, userMsg, params.SDK, params.Env, modelInput, anchor)
-	if err != nil {
-		if (provider == "openai" && anchor.PreviousResponse != nil && strings.TrimSpace(*anchor.PreviousResponse) != "") ||
-			(provider == "anthropic" && anchor.ContainerID != nil && strings.TrimSpace(*anchor.ContainerID) != "") {
-			respText, reasoningText, anchorUpdate, callMeta, err = m.callProvider(ctx, params.Session, userMsg, params.SDK, params.Env, modelInput, store.ChatAnchor{})
-		}
-	}
+	usedSDK, respText, reasoningText, anchorUpdate, callMeta, err := m.callProviderWithFallbacks(ctx, params.Session, userMsg, params.SDK, params.Env, modelInput, anchor, params.Fallbacks)
 	if err != nil {
 		return TurnResult{}, err
 	}
+	provider = strings.ToLower(strings.TrimSpace(usedSDK.Provider))
+	model = strings.TrimSpace(usedSDK.Model)
 
 	assistantMsg, err := m.store.AppendChatMessage(ctx, store.AppendChatMessageParams{
 		SessionID:         params.Session.ID,
@@ -251,6 +248,35 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 		ContextMode:       pointerString(callMeta.ContextMode),
 		CachedInputTokens: callMeta.CachedInputTokens,
 	}, nil
+}
+
+func (m *Manager) callProviderWithFallbacks(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor, fallbacks []runner.SDKFallback) (runner.SDKSpec, string, string, store.ChatAnchor, providerCallMeta, error) {
+	respText, reasoningText, anchorUpdate, callMeta, err := m.callProviderWithAnchorRetry(ctx, sess, currentUser, sdk, env, modelInput, anchor)
+	if err == nil {
+		return sdk, respText, reasoningText, anchorUpdate, callMeta, nil
+	}
+	lastErr := err
+	for _, fallback := range fallbacks {
+		respText, reasoningText, anchorUpdate, callMeta, err = m.callProviderWithAnchorRetry(ctx, sess, currentUser, fallback.SDK, fallback.Env, modelInput, store.ChatAnchor{})
+		if err == nil {
+			return fallback.SDK, respText, reasoningText, anchorUpdate, callMeta, nil
+		}
+		lastErr = err
+	}
+	return runner.SDKSpec{}, "", "", store.ChatAnchor{}, providerCallMeta{}, lastErr
+}
+
+func (m *Manager) callProviderWithAnchorRetry(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, providerCallMeta, error) {
+	provider := strings.ToLower(strings.TrimSpace(sdk.Provider))
+	respText, reasoningText, anchorUpdate, callMeta, err := m.callProvider(ctx, sess, currentUser, sdk, env, modelInput, anchor)
+	if err == nil {
+		return respText, reasoningText, anchorUpdate, callMeta, nil
+	}
+	if (provider == "openai" && anchor.PreviousResponse != nil && strings.TrimSpace(*anchor.PreviousResponse) != "") ||
+		(provider == "anthropic" && anchor.ContainerID != nil && strings.TrimSpace(*anchor.ContainerID) != "") {
+		return m.callProvider(ctx, sess, currentUser, sdk, env, modelInput, store.ChatAnchor{})
+	}
+	return "", "", store.ChatAnchor{}, providerCallMeta{}, err
 }
 
 func (m *Manager) CompactSession(ctx context.Context, sessionID string, sdk runner.SDKSpec, env map[string]string) (store.ChatSession, *store.ChatCompaction, error) {

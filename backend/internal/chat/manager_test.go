@@ -209,3 +209,51 @@ func TestRunTurn_AttachmentsSkipAutomaticCompaction(t *testing.T) {
 		t.Fatalf("expected summary to remain empty when attachments are present, got %q", *updated.Summary)
 	}
 }
+
+func TestRunTurn_ModelFallbackUsesSecondarySpec(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate store: %v", err)
+	}
+
+	sess, err := st.CreateChatSession(context.Background(), store.CreateChatSessionParams{
+		Title:         "fallback",
+		ExpertID:      "ui-expert",
+		Provider:      "demo",
+		Model:         "demo",
+		WorkspacePath: ".",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	mgr := chat.NewManager(st, nil, chat.Options{KeepRecent: 4})
+	result, err := mgr.RunTurn(context.Background(), chat.TurnParams{
+		Session:    sess,
+		ExpertID:   "ui-expert",
+		UserInput:  "hello world",
+		ModelInput: "hello world",
+		SDK: runner.SDKSpec{
+			Provider: "broken-provider",
+			Model:    "broken-model",
+		},
+		Fallbacks: []runner.SDKFallback{{
+			SDK: runner.SDKSpec{Provider: "demo", Model: "demo"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("run turn: %v", err)
+	}
+	if result.AssistantMessage.Provider == nil || *result.AssistantMessage.Provider != "demo" {
+		t.Fatalf("expected fallback provider demo, got: %+v", result.AssistantMessage.Provider)
+	}
+	if result.AssistantMessage.Model == nil || *result.AssistantMessage.Model != "demo" {
+		t.Fatalf("expected fallback model demo, got: %+v", result.AssistantMessage.Model)
+	}
+}

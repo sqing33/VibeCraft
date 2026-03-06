@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 // Migrate 功能：执行 state DB schema 迁移（MVP：使用 PRAGMA user_version 管理版本）。
 // 参数/返回：ctx 控制超时；成功返回 nil。
@@ -65,6 +65,14 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		}
 		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 4;"); err != nil {
 			return fmt.Errorf("set user_version=4: %w", err)
+		}
+	}
+	if userVersion < 5 {
+		if err := migrateV5(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 5;"); err != nil {
+			return fmt.Errorf("set user_version=5: %w", err)
 		}
 	}
 
@@ -252,6 +260,53 @@ CREATE TABLE IF NOT EXISTS chat_attachments (
 );`,
 		`CREATE INDEX IF NOT EXISTS idx_chat_attachments_message_id ON chat_attachments(message_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_chat_attachments_session_created ON chat_attachments(session_id, created_at);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("exec migration stmt: %w", err)
+		}
+	}
+	return nil
+}
+
+func migrateV5(ctx context.Context, tx *sql.Tx) error {
+	stmts := []string{
+		`
+CREATE TABLE IF NOT EXISTS expert_builder_sessions (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  target_expert_id TEXT,
+  builder_model_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  latest_snapshot_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_expert_builder_sessions_updated_at ON expert_builder_sessions(updated_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_expert_builder_sessions_target_expert ON expert_builder_sessions(target_expert_id, updated_at DESC);`,
+		`
+CREATE TABLE IF NOT EXISTS expert_builder_messages (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  content_text TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES expert_builder_sessions(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_expert_builder_messages_session_created ON expert_builder_messages(session_id, created_at);`,
+		`
+CREATE TABLE IF NOT EXISTS expert_builder_snapshots (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  assistant_message TEXT NOT NULL,
+  draft_json TEXT NOT NULL,
+  raw_json TEXT,
+  warnings_json TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES expert_builder_sessions(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_expert_builder_snapshots_session_version ON expert_builder_snapshots(session_id, version DESC);`,
 	}
 	for _, stmt := range stmts {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {

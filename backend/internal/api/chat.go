@@ -285,6 +285,7 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 			Attachments: uploads,
 			SDK:         sdk,
 			Env:         resolved.Spec.Env,
+			Fallbacks:   resolved.Spec.SDKFallbacks,
 		})
 		if err != nil {
 			if errors.Is(err, store.ErrValidation) {

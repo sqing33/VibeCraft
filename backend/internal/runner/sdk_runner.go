@@ -17,6 +17,7 @@ import (
 	openai_shared "github.com/openai/openai-go/shared"
 
 	"vibe-tree/backend/internal/dag"
+	"vibe-tree/backend/internal/expertschema"
 )
 
 // SDKRunner 功能：使用 OpenAI/Anthropic 官方 SDK 执行一次性生成任务，并以流式方式输出到 execution 日志。
@@ -68,19 +69,35 @@ func (r SDKRunner) StartOneshot(ctx context.Context, spec RunSpec) (ProcessHandl
 	}
 
 	go h.run(func() error {
-		// Best-effort header for UI 可读性；DAG 解析会跳过 JSON 前的非 `{` 字符。
-		_, _ = fmt.Fprintf(pw, "\x1b[36m[sdk:%s]\x1b[0m model=%s\n", provider, strings.TrimSpace(spec.SDK.Model))
-
-		switch provider {
-		case "openai":
-			return r.streamOpenAI(runCtx, *spec.SDK, spec.Env, pw)
-		case "anthropic":
-			return r.streamAnthropic(runCtx, *spec.SDK, spec.Env, pw)
-		case "demo":
-			return r.streamDemo(runCtx, *spec.SDK, pw)
-		default:
-			return fmt.Errorf("unsupported sdk provider %q", provider)
+		attempts := make([]SDKFallback, 0, 1+len(spec.SDKFallbacks))
+		attempts = append(attempts, SDKFallback{SDK: *spec.SDK, Env: cloneEnv(spec.Env)})
+		attempts = append(attempts, spec.SDKFallbacks...)
+		var lastErr error
+		for idx, attempt := range attempts {
+			attemptProvider := strings.ToLower(strings.TrimSpace(attempt.SDK.Provider))
+			attemptModel := strings.TrimSpace(attempt.SDK.Model)
+			if idx == 0 {
+				_, _ = fmt.Fprintf(pw, "\x1b[36m[sdk:%s]\x1b[0m model=%s\n", attemptProvider, attemptModel)
+			} else {
+				_, _ = fmt.Fprintf(pw, "\n[sdk] fallback retry #%d -> %s/%s\n", idx, attemptProvider, attemptModel)
+			}
+			var err error
+			switch attemptProvider {
+			case "openai":
+				err = r.streamOpenAI(runCtx, attempt.SDK, attempt.Env, pw)
+			case "anthropic":
+				err = r.streamAnthropic(runCtx, attempt.SDK, attempt.Env, pw)
+			case "demo":
+				err = r.streamDemo(runCtx, attempt.SDK, pw)
+			default:
+				err = fmt.Errorf("unsupported sdk provider %q", attemptProvider)
+			}
+			if err == nil {
+				return nil
+			}
+			lastErr = err
 		}
+		return lastErr
 	})
 
 	return h, nil
@@ -377,9 +394,22 @@ func builtinOutputSchema(name string) (map[string]any, error) {
 	switch strings.TrimSpace(strings.ToLower(name)) {
 	case "dag_v1":
 		return dag.JSONSchemaV1(), nil
+	case "expert_builder_v1":
+		return expertschema.ExpertBuilderJSONSchemaV1(), nil
 	case "":
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("unsupported output_schema %q", name)
 	}
+}
+
+func cloneEnv(env map[string]string) map[string]string {
+	if len(env) == 0 {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(env))
+	for k, v := range env {
+		out[k] = v
+	}
+	return out
 }

@@ -24,11 +24,19 @@ type Registry struct {
 }
 
 type PublicExpert struct {
-	ID        string `json:"id"`
-	Label     string `json:"label"`
-	Provider  string `json:"provider"`
-	Model     string `json:"model"`
-	TimeoutMs int    `json:"timeout_ms"`
+	ID               string   `json:"id"`
+	Label            string   `json:"label"`
+	Description      string   `json:"description,omitempty"`
+	Category         string   `json:"category,omitempty"`
+	Avatar           string   `json:"avatar,omitempty"`
+	ManagedSource    string   `json:"managed_source,omitempty"`
+	PrimaryModelID   string   `json:"primary_model_id,omitempty"`
+	SecondaryModelID string   `json:"secondary_model_id,omitempty"`
+	FallbackOn       []string `json:"fallback_on,omitempty"`
+	EnabledSkills    []string `json:"enabled_skills,omitempty"`
+	Provider         string   `json:"provider"`
+	Model            string   `json:"model"`
+	TimeoutMs        int      `json:"timeout_ms"`
 }
 
 // NewRegistry 功能：从运行配置构建 expert 注册表（按 id 去重，后者覆盖前者）。
@@ -92,6 +100,9 @@ func (r *Registry) ListPublic() []PublicExpert {
 	defer r.mu.RUnlock()
 	out := make([]PublicExpert, 0, len(r.experts))
 	for id, e := range r.experts {
+		if e.Disabled {
+			continue
+		}
 		label := strings.TrimSpace(e.Label)
 		if label == "" {
 			label = id
@@ -99,11 +110,19 @@ func (r *Registry) ListPublic() []PublicExpert {
 		provider := strings.TrimSpace(e.Provider)
 		model := strings.TrimSpace(e.Model)
 		out = append(out, PublicExpert{
-			ID:        id,
-			Label:     label,
-			Provider:  provider,
-			Model:     model,
-			TimeoutMs: e.TimeoutMs,
+			ID:               id,
+			Label:            label,
+			Description:      strings.TrimSpace(e.Description),
+			Category:         strings.TrimSpace(e.Category),
+			Avatar:           strings.TrimSpace(e.Avatar),
+			ManagedSource:    strings.TrimSpace(e.ManagedSource),
+			PrimaryModelID:   strings.TrimSpace(e.PrimaryModelID),
+			SecondaryModelID: strings.TrimSpace(e.SecondaryModelID),
+			FallbackOn:       append([]string(nil), e.FallbackOn...),
+			EnabledSkills:    append([]string(nil), e.EnabledSkills...),
+			Provider:         provider,
+			Model:            model,
+			TimeoutMs:        e.TimeoutMs,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -129,6 +148,9 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 	r.mu.RUnlock()
 	if !ok {
 		return Resolved{}, fmt.Errorf("unknown expert_id %q", expertID)
+	}
+	if e.Disabled {
+		return Resolved{}, fmt.Errorf("expert %q is disabled", expertID)
 	}
 
 	provider := strings.TrimSpace(e.Provider)
@@ -207,8 +229,41 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 		}
 
 		outputSchema := strings.TrimSpace(e.OutputSchema)
-		if outputSchema != "" && strings.ToLower(outputSchema) != "dag_v1" {
+		if outputSchema != "" && strings.ToLower(outputSchema) != "dag_v1" && strings.ToLower(outputSchema) != "expert_builder_v1" {
 			return Resolved{}, fmt.Errorf("expert %q: output_schema %q is not supported", expertID, outputSchema)
+		}
+
+		fallbacks := make([]runner.SDKFallback, 0, 1)
+		if strings.TrimSpace(e.SecondaryProvider) != "" && strings.TrimSpace(e.SecondaryModel) != "" {
+			fallbackEnv := make(map[string]string, len(e.SecondaryEnv))
+			for k, v := range e.SecondaryEnv {
+				expanded, err := expandEnvTemplate(v)
+				if err != nil {
+					return Resolved{}, fmt.Errorf("expert %q: secondary env %s: %w", expertID, k, err)
+				}
+				fallbackEnv[k] = expanded
+			}
+			secondaryBaseURL := strings.TrimSpace(e.SecondaryBaseURL)
+			if secondaryBaseURL != "" {
+				expanded, err := expandEnvTemplate(secondaryBaseURL)
+				if err != nil {
+					return Resolved{}, fmt.Errorf("expert %q: secondary_base_url: %w", expertID, err)
+				}
+				secondaryBaseURL = expanded
+			}
+			fallbacks = append(fallbacks, runner.SDKFallback{
+				Env: fallbackEnv,
+				SDK: runner.SDKSpec{
+					Provider:        strings.TrimSpace(e.SecondaryProvider),
+					Model:           strings.TrimSpace(e.SecondaryModel),
+					Prompt:          finalPrompt,
+					Instructions:    strings.TrimSpace(e.SystemPrompt),
+					BaseURL:         secondaryBaseURL,
+					MaxOutputTokens: e.MaxOutputTokens,
+					Temperature:     e.Temperature,
+					OutputSchema:    outputSchema,
+				},
+			})
 		}
 
 		return Resolved{
@@ -227,6 +282,7 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 					Temperature:     e.Temperature,
 					OutputSchema:    outputSchema,
 				},
+				SDKFallbacks: fallbacks,
 			},
 			Timeout: timeout,
 		}, nil

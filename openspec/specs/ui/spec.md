@@ -164,15 +164,16 @@ When no persisted theme value exists, the UI MUST initialize with light theme.
 ### Requirement: Settings uses tab navigation and includes LLM configuration
 
 The UI MUST present the existing System Settings as a tabbed view.
-The UI MUST provide at least two tabs:
+The UI MUST provide at least three tabs:
 
-- `连接与诊断`: contains daemon URL switching and diagnostics (version/paths/experts).
+- `连接与诊断`: contains daemon URL switching and diagnostics (version/paths).
 - `模型`: contains LLM Sources / Model Profiles configuration.
+- `专家`: contains expert list, expert details, and AI creation workflow.
 
 #### Scenario: User switches settings tabs
 
 - **WHEN** user opens System Settings
-- **THEN** the UI shows multiple tabs including `连接与诊断` and `模型`
+- **THEN** the UI shows multiple tabs including `连接与诊断`, `模型`, and `专家`
 - **AND** switching tabs updates the visible settings content
 
 ### Requirement: UI can edit and save LLM settings
@@ -222,6 +223,68 @@ The UI MUST show success or failure feedback to the user (e.g. toast).
 - **THEN** the UI calls `POST /api/v1/settings/llm/test`
 - **AND** the request uses the Source card's SDK and the model row's lowercase-normalized model ID
 - **AND** the UI displays the result to the user
+
+### Requirement: Expert tab shows expert metadata and status
+
+The `专家` settings tab MUST display each expert's identity and runtime strategy, including at least name, category, description, managed source, primary model, secondary model, fallback summary, enabled skills, and whether the expert is editable.
+
+#### Scenario: Read expert details in settings
+
+- **WHEN** the expert tab loads successfully
+- **THEN** the UI renders a list of experts
+- **AND** selecting an expert shows its description, model strategy, skill chips, and prompt summary
+
+### Requirement: Expert tab can create experts through AI conversation
+
+The `专家` settings tab MUST provide an `AI 创建专家` entry that opens a conversation-based creation flow.
+
+The creation flow MUST be session-based rather than stateless. It MUST support loading prior messages, continuing the conversation, and previewing historical draft snapshots.
+
+#### Scenario: Generate expert draft in modal
+
+- **WHEN** user opens AI 创建专家 and sends a requirement message
+- **THEN** the UI calls the expert generation API
+- **AND** shows the assistant reply and a structured expert draft preview side-by-side
+
+#### Scenario: Publish generated expert
+
+- **WHEN** user confirms publish on a valid generated draft
+- **THEN** the UI saves the expert through `PUT /api/v1/settings/experts`
+- **AND** refreshes both the expert settings payload and `GET /api/v1/experts`
+
+#### Scenario: Continue long conversation
+
+- **WHEN** user sends multiple follow-up messages in the same builder session
+- **THEN** the UI appends the full history in order
+- **AND** each round updates the latest draft preview instead of replacing the whole session
+
+#### Scenario: Inspect historical draft snapshots
+
+- **WHEN** user opens a builder session with multiple snapshots
+- **THEN** the UI shows a snapshot list with version and time
+- **AND** selecting a snapshot updates the draft preview
+
+#### Scenario: Continue optimizing an existing expert
+
+- **WHEN** user chooses to optimize a published expert
+- **THEN** the UI loads the related builder session if one exists
+- **AND** allows continuing the conversation using the saved history
+
+### Requirement: Expert tab supports readonly system experts and editable custom experts
+
+The UI MUST distinguish between builtin / llm-model experts and user-managed experts.
+
+#### Scenario: System expert is readonly
+
+- **WHEN** user selects a builtin or llm-model expert
+- **THEN** the UI shows its metadata and readonly badges
+- **AND** does not show delete actions for that expert
+
+#### Scenario: Custom expert can be toggled or deleted
+
+- **WHEN** user selects a user-managed expert
+- **THEN** the UI allows toggling enabled state and deleting the expert
+- **AND** saves the updated custom expert list through the expert settings API
 
 ### Requirement: LLM model profiles require a valid Source
 

@@ -1,6 +1,6 @@
 # vibe-tree 项目结构与功能定位索引
 
-> 更新时间：2026-03-03
+> 更新时间：2026-03-06
 > 说明：本文档用于开发期快速定位功能文件。修改前先读本文件，再做定向检索。
 
 ## 1. 项目概览
@@ -43,6 +43,8 @@
 | `backend/internal/api/info.go`             | 排障信息 API：`GET /api/v1/info`（version + XDG paths）                                                                               |
 | `backend/internal/api/experts.go`          | Experts 列表 API：`GET /api/v1/experts`（仅安全字段，供 UI 下拉）                                                                     |
 | `backend/internal/api/settings_llm.go`     | 模型设置 API：`GET/PUT /api/v1/settings/llm`（sources/models；key masking；写盘并热更新 experts）                                     |
+| `backend/internal/api/settings_experts.go` | 专家设置 API：`GET/PUT /api/v1/settings/experts` 与 `POST /api/v1/settings/experts/generate`（专家详情、保存、AI 生成）              |
+| `backend/internal/api/settings_expert_sessions.go` | 专家生成会话 API：session 列表/详情、追加消息、快照发布与继续优化                                                             |
 | `backend/internal/api/workflows.go`        | Workflow HTTP handlers：create/list/get/patch，并广播 `workflow.updated`                                                              |
 | `backend/internal/api/workflow_start.go`   | Workflow start/nodes handlers：创建 master node + execution，并提供 nodes 查询                                                        |
 | `backend/internal/api/workflow_cancel.go`  | Workflow cancel handler：取消 workflow（取消 running execution + 标记未开始节点 canceled）                                            |
@@ -59,7 +61,7 @@
 | `backend/internal/scheduler/scheduler.go`  | Workflow 调度器：依赖 + 并发上限 + fail-fast（启动 queued worker nodes 并收敛终态）                                                   |
 | `backend/internal/ws/hub.go`               | WebSocket hub：连接管理与广播（配合 log tail 断线补齐）                                                                               |
 | `backend/internal/store/sqlite.go`         | SQLite state DB 打开与 pragma 初始化（WAL/busy_timeout/foreign_keys）                                                                 |
-| `backend/internal/store/migrate.go`        | SQLite migrations（使用 `PRAGMA user_version` 管理 schema 版本）                                                                      |
+| `backend/internal/store/migrate.go`        | SQLite migrations（使用 `PRAGMA user_version` 管理 schema 版本；含 chat attachments 与 expert builder sessions）                     |
 | `backend/internal/store/chat.go`           | Chat 存储：chat sessions/messages/attachments/anchors/compactions 的 SQLite CRUD + hydration                                          |
 | `backend/internal/store/workflows.go`      | Workflow 存储：SQLite CRUD + events 写入                                                                                              |
 | `backend/internal/store/dag.go`            | DAG 落库：从 master DAG 创建 worker nodes/edges，并提供 edges 查询                                                                    |
@@ -81,6 +83,7 @@
 | `ui/src/components/DAGView.tsx`            | React Flow DAG 视图：dagre 自动布局 + 节点按状态上色 + 点击节点联动终端                                                               |
 | `ui/src/components/TerminalPane.tsx`       | xterm.js 封装组件（fit + write/reset 接口）                                                                                           |
 | `ui/src/app/components/LLMSettingsTab.tsx` | 系统设置「模型」Tab：编辑 Sources（base_url+key）与 Models（model+source+SDK），保存后刷新 experts                                    |
+| `ui/src/app/components/ExpertSettingsTab.tsx` | 系统设置「专家」Tab：专家列表、AI 生成专家、生成会话历史、快照发布                                                                   |
 | `ui/src/lib/daemon.ts`                     | daemon URL/WS URL 解析与 health/workflow/execution/chat attachment API 封装                                                           |
 | `ui/src/stores/chatStore.ts`               | Chat 前端状态：sessions/messages/streaming/sending 状态与 chat API actions                                                            |
 | `scripts/dev.sh`                           | 本地开发一键启动脚本（并行拉起 backend 与 UI）                                                                                        |
@@ -104,6 +107,7 @@
 | dotenv/.env 自动加载               | `backend/internal/dotenv/dotenv.go`, `backend/cmd/vibe-tree-daemon/main.go`                                                                                                                                                                |
 | UI 运行时切换 daemon URL           | `ui/src/App.tsx`                                                                                                                                                                                                                           |
 | 模型设置（Sources/Models）         | `backend/internal/api/settings_llm.go`, `backend/internal/config/llm_settings.go`, `backend/internal/config/llm_mirror.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/LLMSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
+| 专家设置 / AI 创建专家             | `backend/internal/api/settings_experts.go`, `backend/internal/api/settings_expert_sessions.go`, `backend/internal/expertbuilder/service.go`, `backend/internal/skillcatalog/catalog.go`, `.codex/skills/expert-creator/SKILL.md`, `ui/src/app/components/ExpertSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
 | XDG 配置路径                       | `backend/internal/config/config.go`                                                                                                                                                                                                        |
 | XDG 日志路径                       | `backend/internal/paths/paths.go`                                                                                                                                                                                                          |
 | Expert 配置/模板解析               | `backend/internal/config/config.go`, `backend/internal/expert/expert.go`                                                                                                                                                                   |

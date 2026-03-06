@@ -27,8 +27,24 @@ type ExecutionConfig struct {
 }
 
 type ExpertConfig struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
+	ID                string   `json:"id"`
+	Label             string   `json:"label"`
+	Description       string   `json:"description,omitempty"`
+	Category          string   `json:"category,omitempty"`
+	Avatar            string   `json:"avatar,omitempty"`
+	ManagedSource     string   `json:"managed_source,omitempty"`
+	PrimaryModelID    string   `json:"primary_model_id,omitempty"`
+	SecondaryModelID  string   `json:"secondary_model_id,omitempty"`
+	FallbackOn        []string `json:"fallback_on,omitempty"`
+	EnabledSkills     []string `json:"enabled_skills,omitempty"`
+	OutputFormat      string   `json:"output_format,omitempty"`
+	BuilderExpertID   string   `json:"builder_expert_id,omitempty"`
+	BuilderSessionID  string   `json:"builder_session_id,omitempty"`
+	BuilderSnapshotID string   `json:"builder_snapshot_id,omitempty"`
+	GeneratedBy       string   `json:"generated_by,omitempty"`
+	GeneratedAt       int64    `json:"generated_at,omitempty"`
+	UpdatedAt         int64    `json:"updated_at,omitempty"`
+	Disabled          bool     `json:"disabled,omitempty"`
 
 	// Provider 表示该 expert 的执行后端（SDK 驱动，不再启动外部 CLI）。
 	// 支持值：
@@ -39,7 +55,11 @@ type ExpertConfig struct {
 	Provider string `json:"provider"`
 
 	// Model 为 SDK 调用的模型名；demo 可留空。
-	Model string `json:"model"`
+	Model             string            `json:"model"`
+	SecondaryProvider string            `json:"secondary_provider,omitempty"`
+	SecondaryModel    string            `json:"secondary_model,omitempty"`
+	SecondaryBaseURL  string            `json:"secondary_base_url,omitempty"`
+	SecondaryEnv      map[string]string `json:"secondary_env,omitempty"`
 
 	// BaseURL 可选：覆盖 SDK 的 base URL（支持 `${ENV}` 注入）。
 	BaseURL string `json:"base_url,omitempty"`
@@ -114,52 +134,57 @@ func Default() Config {
 		},
 		Experts: []ExpertConfig{
 			{
-				ID:           "master",
-				Label:        "Master Planner",
-				Provider:     "anthropic",
-				Model:        "claude-3-7-sonnet-latest",
-				SystemPrompt: "You are the workflow master planner for vibe-tree. Output MUST be a single JSON object (no markdown, no extra text).",
-				Env:          map[string]string{"ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"},
-				OutputSchema: "dag_v1",
+				ID:            "master",
+				Label:         "Master Planner",
+				ManagedSource: ManagedSourceBuiltin,
+				Provider:      "anthropic",
+				Model:         "claude-3-7-sonnet-latest",
+				SystemPrompt:  "You are the workflow master planner for vibe-tree. Output MUST be a single JSON object (no markdown, no extra text).",
+				Env:           map[string]string{"ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"},
+				OutputSchema:  "dag_v1",
 				// 30min：AI 节点默认超时（可按节点覆盖）。
 				TimeoutMs: 30 * 60 * 1000,
 			},
 			{
-				ID:       "bash",
-				Label:    "Bash",
-				Provider: "process",
-				Command:  "bash",
-				Args:     []string{"-lc", "{{prompt}}"},
-				Env:      map[string]string{},
+				ID:            "bash",
+				Label:         "Bash",
+				ManagedSource: ManagedSourceBuiltin,
+				Provider:      "process",
+				Command:       "bash",
+				Args:          []string{"-lc", "{{prompt}}"},
+				Env:           map[string]string{},
 				// 30min：bash 节点默认超时（后续由 scheduler/execution 实际 enforce）。
 				TimeoutMs: 30 * 60 * 1000,
 			},
 			{
-				ID:       "demo",
-				Label:    "Demo",
-				Provider: "demo",
-				Env:      map[string]string{},
+				ID:            "demo",
+				Label:         "Demo",
+				ManagedSource: ManagedSourceBuiltin,
+				Provider:      "demo",
+				Env:           map[string]string{},
 				// 30s：演示执行默认超时（不会触发网络请求）。
 				TimeoutMs: 30 * 1000,
 			},
 			{
-				ID:       "codex",
-				Label:    "Codex",
-				Provider: "openai",
-				Model:    "gpt-5-codex",
-				SystemPrompt: "You are Codex. Respond in plain text suitable for a terminal. Do not use markdown unless explicitly requested.",
-				Env:      map[string]string{"OPENAI_API_KEY": "${OPENAI_API_KEY}"},
+				ID:            "codex",
+				Label:         "Codex",
+				ManagedSource: ManagedSourceBuiltin,
+				Provider:      "openai",
+				Model:         "gpt-5-codex",
+				SystemPrompt:  "You are Codex. Respond in plain text suitable for a terminal. Do not use markdown unless explicitly requested.",
+				Env:           map[string]string{"OPENAI_API_KEY": "${OPENAI_API_KEY}"},
 				// 30min：AI 节点默认超时（可按节点覆盖）。
 				TimeoutMs: 30 * 60 * 1000,
 			},
 			{
-				ID:       "claudecode",
-				Label:    "ClaudeCode",
-				Provider: "anthropic",
-				Model:    "claude-3-7-sonnet-latest",
-				SystemPrompt: "You are Claude. Respond in plain text suitable for a terminal. Do not use markdown unless explicitly requested.",
-				Env:      map[string]string{"ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"},
-				TimeoutMs: 30 * 60 * 1000,
+				ID:            "claudecode",
+				Label:         "ClaudeCode",
+				ManagedSource: ManagedSourceBuiltin,
+				Provider:      "anthropic",
+				Model:         "claude-3-7-sonnet-latest",
+				SystemPrompt:  "You are Claude. Respond in plain text suitable for a terminal. Do not use markdown unless explicitly requested.",
+				Env:           map[string]string{"ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"},
+				TimeoutMs:     30 * 60 * 1000,
 			},
 		},
 	}
@@ -204,6 +229,9 @@ func Load() (Config, string, error) {
 	if b, err := os.ReadFile(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			applyEnvOverrides(&cfg)
+			if err := RebuildExperts(&cfg); err != nil {
+				return Config{}, "", err
+			}
 			return cfg, path, nil
 		}
 		return Config{}, "", fmt.Errorf("read config %s: %w", path, err)
@@ -214,6 +242,9 @@ func Load() (Config, string, error) {
 	}
 
 	applyEnvOverrides(&cfg)
+	if err := RebuildExperts(&cfg); err != nil {
+		return Config{}, "", err
+	}
 	return cfg, path, nil
 }
 
@@ -231,6 +262,9 @@ func LoadPersisted() (Config, string, error) {
 
 	if b, err := os.ReadFile(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if err := RebuildExperts(&cfg); err != nil {
+				return Config{}, "", err
+			}
 			return cfg, path, nil
 		}
 		return Config{}, "", fmt.Errorf("read config %s: %w", path, err)
@@ -240,6 +274,9 @@ func LoadPersisted() (Config, string, error) {
 		}
 	}
 
+	if err := RebuildExperts(&cfg); err != nil {
+		return Config{}, "", err
+	}
 	return cfg, path, nil
 }
 
