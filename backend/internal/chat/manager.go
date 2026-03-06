@@ -51,12 +51,13 @@ type Manager struct {
 }
 
 type TurnParams struct {
-	Session    store.ChatSession
-	ExpertID   string
-	UserInput  string
-	ModelInput string
-	SDK        runner.SDKSpec
-	Env        map[string]string
+	Session     store.ChatSession
+	ExpertID    string
+	UserInput   string
+	ModelInput  string
+	Attachments []UploadedAttachment
+	SDK         runner.SDKSpec
+	Env         map[string]string
 }
 
 type TurnResult struct {
@@ -137,13 +138,17 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 	if expertID == "" {
 		return TurnResult{}, fmt.Errorf("%w: expert_id is required", store.ErrValidation)
 	}
+	hasAttachments := len(params.Attachments) > 0
 	userText := strings.TrimSpace(params.UserInput)
-	if userText == "" {
+	if userText == "" && !hasAttachments {
 		return TurnResult{}, fmt.Errorf("%w: input is required", store.ErrValidation)
 	}
 	modelInput := strings.TrimSpace(params.ModelInput)
 	if modelInput == "" {
 		modelInput = userText
+		if modelInput == "" && hasAttachments {
+			modelInput = attachmentOnlyModelPrompt
+		}
 	}
 
 	provider := strings.ToLower(strings.TrimSpace(params.SDK.Provider))
@@ -159,6 +164,13 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 	})
 	if err != nil {
 		return TurnResult{}, err
+	}
+	if hasAttachments {
+		attachments, err := m.persistTurnAttachments(ctx, userMsg, params.Attachments)
+		if err != nil {
+			return TurnResult{}, err
+		}
+		userMsg.Attachments = attachments
 	}
 	m.broadcast("chat.turn.started", map[string]any{
 		"session_id":      params.Session.ID,
@@ -178,11 +190,11 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 		anchor, _ = m.store.GetChatAnchor(ctx, params.Session.ID)
 	}
 
-	respText, reasoningText, anchorUpdate, callMeta, err := m.callProvider(ctx, params.Session, params.SDK, params.Env, modelInput, anchor)
+	respText, reasoningText, anchorUpdate, callMeta, err := m.callProvider(ctx, params.Session, userMsg, params.SDK, params.Env, modelInput, anchor)
 	if err != nil {
 		if (provider == "openai" && anchor.PreviousResponse != nil && strings.TrimSpace(*anchor.PreviousResponse) != "") ||
 			(provider == "anthropic" && anchor.ContainerID != nil && strings.TrimSpace(*anchor.ContainerID) != "") {
-			respText, reasoningText, anchorUpdate, callMeta, err = m.callProvider(ctx, params.Session, params.SDK, params.Env, modelInput, store.ChatAnchor{})
+			respText, reasoningText, anchorUpdate, callMeta, err = m.callProvider(ctx, params.Session, userMsg, params.SDK, params.Env, modelInput, store.ChatAnchor{})
 		}
 	}
 	if err != nil {
@@ -254,6 +266,13 @@ func (m *Manager) CompactSession(ctx context.Context, sessionID string, sdk runn
 		return store.ChatSession{}, nil, err
 	}
 	messages = filterModelContextMessages(messages)
+	hasAttachments, err := m.store.SessionHasAttachments(ctx, sessionID)
+	if err != nil {
+		return store.ChatSession{}, nil, err
+	}
+	if hasAttachments {
+		return sess, nil, nil
+	}
 	rec, err := m.compactMessages(ctx, sess, messages, m.keepRecent, sdk, env)
 	if err != nil {
 		return store.ChatSession{}, nil, err
@@ -269,6 +288,13 @@ func (m *Manager) CompactSession(ctx context.Context, sessionID string, sdk runn
 }
 
 func (m *Manager) ensureCompaction(ctx context.Context, sess store.ChatSession, input string, sdk runner.SDKSpec, env map[string]string) error {
+	hasAttachments, err := m.store.SessionHasAttachments(ctx, sess.ID)
+	if err != nil {
+		return err
+	}
+	if hasAttachments {
+		return nil
+	}
 	messages, err := m.store.ListChatMessages(ctx, sess.ID, 1000)
 	if err != nil {
 		return err
@@ -638,15 +664,15 @@ func estimateTokens(s string) int64 {
 	return int64((n + 3) / 4)
 }
 
-func (m *Manager) callProvider(ctx context.Context, sess store.ChatSession, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, providerCallMeta, error) {
+func (m *Manager) callProvider(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, providerCallMeta, error) {
 	provider := strings.ToLower(strings.TrimSpace(sdk.Provider))
 	sdk.Provider = provider
 
 	switch provider {
 	case "openai":
-		return m.callOpenAI(ctx, sess, sdk, env, modelInput, anchor)
+		return m.callOpenAI(ctx, sess, currentUser, sdk, env, modelInput, anchor)
 	case "anthropic":
-		return m.callAnthropic(ctx, sess, sdk, env, modelInput, anchor)
+		return m.callAnthropic(ctx, sess, currentUser, sdk, env, modelInput, anchor)
 	case "demo":
 		return m.callDemo(sess, modelInput), "", store.ChatAnchor{}, providerCallMeta{
 			ModelInput:  strings.TrimSpace(modelInput),
@@ -669,7 +695,7 @@ func (m *Manager) callDemo(sess store.ChatSession, modelInput string) string {
 	return out
 }
 
-func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, providerCallMeta, error) {
+func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, providerCallMeta, error) {
 	body := openai_responses.ResponseNewParams{
 		Model: openai_shared.ResponsesModel(strings.TrimSpace(sdk.Model)),
 	}
@@ -679,20 +705,46 @@ func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, sdk ru
 			Summary: openai_shared.ReasoningSummaryAuto,
 		}
 	}
-	inputText := strings.TrimSpace(modelInput)
 	contextMode := "anchor"
+	debugInput := strings.TrimSpace(modelInput)
+	instructions := strings.TrimSpace(sdk.Instructions)
+	currentHasAttachments := len(currentUser.Attachments) > 0
 	if anchor.PreviousResponse == nil || strings.TrimSpace(*anchor.PreviousResponse) == "" {
 		contextMode = "reconstructed"
 		msgs, err := m.store.ListChatMessages(ctx, sess.ID, 1000)
-		if err == nil {
-			inputText = renderConversation(sess.Summary, msgs, modelInput, m.keepRecent)
+		if err == nil && anyMessageHasAttachments(msgs) {
+			msgs = applyCurrentModelInput(msgs, currentUser, modelInput)
+			items, debug, err := buildOpenAIReconstructedInput(sess.Summary, msgs, m.keepRecent)
+			if err != nil {
+				return "", "", store.ChatAnchor{}, providerCallMeta{}, err
+			}
+			body.Input = openai_responses.ResponseNewParamsInputUnion{OfInputItemList: items}
+			debugInput = debug
+			instructions = joinProviderInstructions(instructions, sess.Summary)
+		} else {
+			inputText := strings.TrimSpace(modelInput)
+			if err == nil {
+				inputText = renderConversation(sess.Summary, msgs, modelInput, m.keepRecent)
+			}
+			body.Input = openai_responses.ResponseNewParamsInputUnion{OfString: openai.String(inputText)}
+			debugInput = inputText
 		}
+	} else if currentHasAttachments {
+		content, err := buildOpenAIMessageContent(modelInput, currentUser.Attachments)
+		if err != nil {
+			return "", "", store.ChatAnchor{}, providerCallMeta{}, err
+		}
+		body.Input = openai_responses.ResponseNewParamsInputUnion{OfInputItemList: openai_responses.ResponseInputParam{
+			openai_responses.ResponseInputItemParamOfMessage(content, openai_responses.EasyInputMessageRoleUser),
+		}}
+		debugInput = buildCurrentInputDebug(modelInput, currentUser.Attachments)
+	} else {
+		body.Input = openai_responses.ResponseNewParamsInputUnion{OfString: openai.String(strings.TrimSpace(modelInput))}
 	}
-	body.Input = openai_responses.ResponseNewParamsInputUnion{OfString: openai.String(inputText)}
 	body.Store = openai.Bool(true)
 
-	if strings.TrimSpace(sdk.Instructions) != "" {
-		body.Instructions = openai.String(strings.TrimSpace(sdk.Instructions))
+	if instructions != "" {
+		body.Instructions = openai.String(instructions)
 	}
 	if sdk.MaxOutputTokens > 0 {
 		body.MaxOutputTokens = openai.Int(int64(sdk.MaxOutputTokens))
@@ -805,7 +857,7 @@ func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, sdk ru
 		ProviderMessageID: prevID,
 	}
 	meta := providerCallMeta{
-		ModelInput:  inputText,
+		ModelInput:  debugInput,
 		ContextMode: contextMode,
 	}
 	if usageSeen {
@@ -816,30 +868,56 @@ func (m *Manager) callOpenAI(ctx context.Context, sess store.ChatSession, sdk ru
 	return out, strings.TrimSpace(reasoning.String()), anchorOut, meta, nil
 }
 
-func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, providerCallMeta, error) {
+func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, currentUser store.ChatMessage, sdk runner.SDKSpec, env map[string]string, modelInput string, anchor store.ChatAnchor) (string, string, store.ChatAnchor, providerCallMeta, error) {
 	maxTokens := sdk.MaxOutputTokens
 	if maxTokens <= 0 {
 		maxTokens = 4096
 	}
-	inputText := strings.TrimSpace(modelInput)
+	debugInput := strings.TrimSpace(modelInput)
 	contextMode := "anchor"
+	systemText := strings.TrimSpace(sdk.Instructions)
+	messages := []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock(strings.TrimSpace(modelInput))),
+	}
+	currentHasAttachments := len(currentUser.Attachments) > 0
 	if anchor.ContainerID == nil || strings.TrimSpace(*anchor.ContainerID) == "" {
 		contextMode = "reconstructed"
 		msgs, err := m.store.ListChatMessages(ctx, sess.ID, 1000)
-		if err == nil {
-			inputText = renderConversation(sess.Summary, msgs, modelInput, m.keepRecent)
+		if err == nil && anyMessageHasAttachments(msgs) {
+			msgs = applyCurrentModelInput(msgs, currentUser, modelInput)
+			builtMessages, debug, err := buildAnthropicReconstructedMessages(sess.Summary, msgs, m.keepRecent)
+			if err != nil {
+				return "", "", store.ChatAnchor{}, providerCallMeta{}, err
+			}
+			messages = builtMessages
+			debugInput = debug
+			systemText = joinProviderInstructions(systemText, sess.Summary)
+		} else {
+			inputText := strings.TrimSpace(modelInput)
+			if err == nil {
+				inputText = renderConversation(sess.Summary, msgs, modelInput, m.keepRecent)
+			}
+			messages = []anthropic.MessageParam{
+				anthropic.NewUserMessage(anthropic.NewTextBlock(inputText)),
+			}
+			debugInput = inputText
 		}
+	} else if currentHasAttachments {
+		blocks, err := buildAnthropicMessageBlocks(modelInput, currentUser.Attachments)
+		if err != nil {
+			return "", "", store.ChatAnchor{}, providerCallMeta{}, err
+		}
+		messages = []anthropic.MessageParam{anthropic.NewUserMessage(blocks...)}
+		debugInput = buildCurrentInputDebug(modelInput, currentUser.Attachments)
 	}
 
 	body := anthropic.MessageNewParams{
 		Model:     anthropic.Model(strings.TrimSpace(sdk.Model)),
 		MaxTokens: int64(maxTokens),
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(inputText)),
-		},
+		Messages:  messages,
 	}
-	if strings.TrimSpace(sdk.Instructions) != "" {
-		body.System = []anthropic.TextBlockParam{{Text: strings.TrimSpace(sdk.Instructions)}}
+	if systemText != "" {
+		body.System = []anthropic.TextBlockParam{{Text: systemText}}
 	}
 	if sdk.Temperature != nil {
 		body.Temperature = anthropic.Float(*sdk.Temperature)
@@ -962,7 +1040,7 @@ func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, sdk
 		ProviderMessageID: pid,
 	}
 	meta := providerCallMeta{
-		ModelInput:  inputText,
+		ModelInput:  debugInput,
 		ContextMode: contextMode,
 	}
 	if usageSeen {

@@ -14,6 +14,12 @@ import (
 
 const ForkContextProvider = "fork_context_copy"
 
+const (
+	ChatAttachmentKindImage = "image"
+	ChatAttachmentKindPDF   = "pdf"
+	ChatAttachmentKindText  = "text"
+)
+
 type ChatSession struct {
 	ID            string  `json:"session_id"`
 	Title         string  `json:"title"`
@@ -29,18 +35,31 @@ type ChatSession struct {
 }
 
 type ChatMessage struct {
-	ID                string  `json:"message_id"`
-	SessionID         string  `json:"session_id"`
-	Turn              int64   `json:"turn"`
-	Role              string  `json:"role"`
-	ContentText       string  `json:"content_text"`
-	ExpertID          *string `json:"expert_id,omitempty"`
-	Provider          *string `json:"provider,omitempty"`
-	Model             *string `json:"model,omitempty"`
-	TokenIn           *int64  `json:"token_in,omitempty"`
-	TokenOut          *int64  `json:"token_out,omitempty"`
-	ProviderMessageID *string `json:"provider_message_id,omitempty"`
-	CreatedAt         int64   `json:"created_at"`
+	ID                string           `json:"message_id"`
+	SessionID         string           `json:"session_id"`
+	Turn              int64            `json:"turn"`
+	Role              string           `json:"role"`
+	ContentText       string           `json:"content_text"`
+	Attachments       []ChatAttachment `json:"attachments,omitempty"`
+	ExpertID          *string          `json:"expert_id,omitempty"`
+	Provider          *string          `json:"provider,omitempty"`
+	Model             *string          `json:"model,omitempty"`
+	TokenIn           *int64           `json:"token_in,omitempty"`
+	TokenOut          *int64           `json:"token_out,omitempty"`
+	ProviderMessageID *string          `json:"provider_message_id,omitempty"`
+	CreatedAt         int64            `json:"created_at"`
+}
+
+type ChatAttachment struct {
+	ID             string `json:"attachment_id"`
+	SessionID      string `json:"session_id"`
+	MessageID      string `json:"message_id"`
+	Kind           string `json:"kind"`
+	FileName       string `json:"file_name"`
+	MIMEType       string `json:"mime_type"`
+	SizeBytes      int64  `json:"size_bytes"`
+	StorageRelPath string `json:"-"`
+	CreatedAt      int64  `json:"created_at"`
 }
 
 type ChatAnchor struct {
@@ -414,6 +433,126 @@ func (s *Store) AppendChatMessage(ctx context.Context, params AppendChatMessageP
 	return msg, nil
 }
 
+type CreateChatAttachmentsParams struct {
+	Attachments []ChatAttachment
+}
+
+func (s *Store) CreateChatAttachments(ctx context.Context, params CreateChatAttachmentsParams) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("store not initialized")
+	}
+	if len(params.Attachments) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+	for _, att := range params.Attachments {
+		if strings.TrimSpace(att.ID) == "" {
+			return fmt.Errorf("%w: attachment_id is required", ErrValidation)
+		}
+		if strings.TrimSpace(att.SessionID) == "" || strings.TrimSpace(att.MessageID) == "" {
+			return fmt.Errorf("%w: session_id and message_id are required", ErrValidation)
+		}
+		if strings.TrimSpace(att.FileName) == "" || strings.TrimSpace(att.MIMEType) == "" || strings.TrimSpace(att.StorageRelPath) == "" {
+			return fmt.Errorf("%w: invalid attachment metadata", ErrValidation)
+		}
+		if att.Kind != ChatAttachmentKindImage && att.Kind != ChatAttachmentKindPDF && att.Kind != ChatAttachmentKindText {
+			return fmt.Errorf("%w: invalid attachment kind %q", ErrValidation, att.Kind)
+		}
+		if att.SizeBytes <= 0 {
+			return fmt.Errorf("%w: size_bytes must be positive", ErrValidation)
+		}
+		createdAt := att.CreatedAt
+		if createdAt <= 0 {
+			createdAt = time.Now().UnixMilli()
+		}
+		if _, err := tx.ExecContext(
+			ctx,
+			`INSERT INTO chat_attachments (id, session_id, message_id, kind, file_name, mime_type, size_bytes, storage_rel_path, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+			att.ID,
+			att.SessionID,
+			att.MessageID,
+			att.Kind,
+			att.FileName,
+			att.MIMEType,
+			att.SizeBytes,
+			att.StorageRelPath,
+			createdAt,
+		); err != nil {
+			return fmt.Errorf("insert chat attachment: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit chat attachments: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) SessionHasAttachments(ctx context.Context, sessionID string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("store not initialized")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return false, fmt.Errorf("%w: session_id is required", ErrValidation)
+	}
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM chat_attachments WHERE session_id = ? LIMIT 1;`, sessionID).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("query chat attachments existence: %w", err)
+	}
+	return exists == 1, nil
+}
+
+func (s *Store) listChatAttachmentsByMessageIDs(ctx context.Context, messageIDs []string) (map[string][]ChatAttachment, error) {
+	out := make(map[string][]ChatAttachment)
+	if s == nil || s.db == nil || len(messageIDs) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, 0, len(messageIDs))
+	args := make([]any, 0, len(messageIDs))
+	for _, messageID := range messageIDs {
+		messageID = strings.TrimSpace(messageID)
+		if messageID == "" {
+			continue
+		}
+		placeholders = append(placeholders, "?")
+		args = append(args, messageID)
+	}
+	if len(placeholders) == 0 {
+		return out, nil
+	}
+	rows, err := s.db.QueryContext(
+		ctx,
+		fmt.Sprintf(`SELECT id, session_id, message_id, kind, file_name, mime_type, size_bytes, storage_rel_path, created_at
+		   FROM chat_attachments
+		  WHERE message_id IN (%s)
+		  ORDER BY created_at ASC, id ASC;`, strings.Join(placeholders, ", ")),
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query chat attachments: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		att, err := scanChatAttachment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[att.MessageID] = append(out[att.MessageID], att)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate chat attachments: %w", err)
+	}
+	return out, nil
+}
+
 func (s *Store) ListChatMessages(ctx context.Context, sessionID string, limit int) ([]ChatMessage, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("store not initialized")
@@ -440,15 +579,26 @@ func (s *Store) ListChatMessages(ctx context.Context, sessionID string, limit in
 	}
 	defer rows.Close()
 	out := make([]ChatMessage, 0)
+	messageIDs := make([]string, 0)
 	for rows.Next() {
 		msg, err := scanChatMessage(rows)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, msg)
+		messageIDs = append(messageIDs, msg.ID)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate chat messages: %w", err)
+	}
+	attachmentsByMessage, err := s.listChatAttachmentsByMessageIDs(ctx, messageIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if atts := attachmentsByMessage[out[i].ID]; len(atts) > 0 {
+			out[i].Attachments = atts
+		}
 	}
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
@@ -787,4 +937,22 @@ func scanChatAnchor(s scanner) (ChatAnchor, error) {
 		return ChatAnchor{}, err
 	}
 	return anchor, nil
+}
+
+func scanChatAttachment(s scanner) (ChatAttachment, error) {
+	var attachment ChatAttachment
+	if err := s.Scan(
+		&attachment.ID,
+		&attachment.SessionID,
+		&attachment.MessageID,
+		&attachment.Kind,
+		&attachment.FileName,
+		&attachment.MIMEType,
+		&attachment.SizeBytes,
+		&attachment.StorageRelPath,
+		&attachment.CreatedAt,
+	); err != nil {
+		return ChatAttachment{}, err
+	}
+	return attachment, nil
 }

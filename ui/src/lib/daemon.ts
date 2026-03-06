@@ -244,12 +244,24 @@ export type ChatSession = {
   last_turn: number
 }
 
+export type ChatAttachment = {
+  attachment_id: string
+  session_id: string
+  message_id: string
+  kind: string
+  file_name: string
+  mime_type: string
+  size_bytes: number
+  created_at: number
+}
+
 export type ChatMessage = {
   message_id: string
   session_id: string
   turn: number
   role: string
   content_text: string
+  attachments?: ChatAttachment[]
   expert_id?: string
   provider?: string
   model?: string
@@ -315,13 +327,25 @@ export async function fetchChatMessages(
 export async function postChatTurn(
   daemonUrl: string,
   sessionId: string,
-  req: { input: string; expert_id?: string },
+  req: { input?: string; expert_id?: string; files?: File[] },
 ): Promise<ChatTurnResult> {
-  const res = await fetch(`${daemonUrl}/api/v1/chat/sessions/${sessionId}/turns`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-  })
+  const hasFiles = Array.isArray(req.files) && req.files.length > 0
+  const init: RequestInit = { method: 'POST' }
+  if (hasFiles) {
+    const form = new FormData()
+    if (typeof req.input === 'string') form.set('input', req.input)
+    if (typeof req.expert_id === 'string' && req.expert_id.trim()) {
+      form.set('expert_id', req.expert_id)
+    }
+    for (const file of req.files ?? []) {
+      form.append('files', file)
+    }
+    init.body = form
+  } else {
+    init.headers = { 'Content-Type': 'application/json' }
+    init.body = JSON.stringify({ input: req.input ?? '', expert_id: req.expert_id })
+  }
+  const res = await fetch(`${daemonUrl}/api/v1/chat/sessions/${sessionId}/turns`, init)
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())

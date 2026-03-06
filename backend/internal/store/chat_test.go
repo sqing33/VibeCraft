@@ -181,3 +181,74 @@ func TestChatStoreLifecycle(t *testing.T) {
 		t.Fatalf("missing compaction id")
 	}
 }
+
+func TestChatStore_ListMessagesHydratesAttachments(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate store: %v", err)
+	}
+
+	sess, err := st.CreateChatSession(context.Background(), store.CreateChatSessionParams{
+		Title:         "with-attachments",
+		ExpertID:      "demo",
+		Provider:      "demo",
+		Model:         "demo",
+		WorkspacePath: ".",
+	})
+	if err != nil {
+		t.Fatalf("create chat session: %v", err)
+	}
+
+	expertID := "demo"
+	provider := "demo"
+	model := "demo"
+	msg, err := st.AppendChatMessage(context.Background(), store.AppendChatMessageParams{
+		SessionID:   sess.ID,
+		Role:        "user",
+		ContentText: "see file",
+		ExpertID:    &expertID,
+		Provider:    &provider,
+		Model:       &model,
+	})
+	if err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+
+	err = st.CreateChatAttachments(context.Background(), store.CreateChatAttachmentsParams{Attachments: []store.ChatAttachment{
+		{
+			ID:             "ca_test_1",
+			SessionID:      sess.ID,
+			MessageID:      msg.ID,
+			Kind:           store.ChatAttachmentKindText,
+			FileName:       "note.txt",
+			MIMEType:       "text/plain",
+			SizeBytes:      12,
+			StorageRelPath: "chat-attachments/test/note.txt",
+			CreatedAt:      msg.CreatedAt,
+		},
+	}})
+	if err != nil {
+		t.Fatalf("create attachments: %v", err)
+	}
+
+	msgs, err := st.ListChatMessages(context.Background(), sess.ID, 20)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if len(msgs[0].Attachments) != 1 {
+		t.Fatalf("expected hydrated attachment, got %+v", msgs[0])
+	}
+	if msgs[0].Attachments[0].FileName != "note.txt" {
+		t.Fatalf("unexpected attachment metadata: %+v", msgs[0].Attachments[0])
+	}
+}

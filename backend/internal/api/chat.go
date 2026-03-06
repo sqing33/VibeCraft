@@ -171,9 +171,57 @@ func patchChatSessionHandler(deps Deps) gin.HandlerFunc {
 	}
 }
 
+const maxChatTurnBodyBytes int64 = 24 << 20
+
 type postChatTurnRequest struct {
-	Input   string `json:"input"`
+	Input    string `json:"input"`
 	ExpertID string `json:"expert_id"`
+}
+
+func parsePostChatTurnRequest(c *gin.Context) (postChatTurnRequest, []chat.UploadedAttachment, int, error) {
+	var req postChatTurnRequest
+	contentType := strings.ToLower(strings.TrimSpace(c.GetHeader("Content-Type")))
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxChatTurnBodyBytes)
+		if err := c.Request.ParseMultipartForm(8 << 20); err != nil {
+			status := http.StatusBadRequest
+			if strings.Contains(strings.ToLower(err.Error()), "request body too large") {
+				status = http.StatusRequestEntityTooLarge
+			}
+			return req, nil, status, err
+		}
+		if c.Request.MultipartForm != nil {
+			defer c.Request.MultipartForm.RemoveAll()
+		}
+		req.Input = c.Request.FormValue("input")
+		req.ExpertID = c.Request.FormValue("expert_id")
+		uploads := make([]chat.UploadedAttachment, 0)
+		if c.Request.MultipartForm != nil {
+			for _, header := range c.Request.MultipartForm.File["files"] {
+				file, err := header.Open()
+				if err != nil {
+					return req, nil, http.StatusBadRequest, err
+				}
+				data, err := io.ReadAll(file)
+				_ = file.Close()
+				if err != nil {
+					return req, nil, http.StatusBadRequest, err
+				}
+				uploads = append(uploads, chat.UploadedAttachment{
+					FileName: header.Filename,
+					MIMEType: header.Header.Get("Content-Type"),
+					Bytes:    data,
+				})
+			}
+		}
+		return req, uploads, 0, nil
+	}
+	if b, _ := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20)); len(b) > 0 {
+		if err := json.Unmarshal(b, &req); err != nil {
+			return req, nil, http.StatusBadRequest, err
+		}
+	}
+	return req, nil, 0, nil
 }
 
 func postChatTurnHandler(deps Deps) gin.HandlerFunc {
@@ -190,15 +238,14 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "expert registry not configured"})
 			return
 		}
-		var req postChatTurnRequest
-		if b, _ := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20)); len(b) > 0 {
-			if err := json.Unmarshal(b, &req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
+		req, uploads, status, err := parsePostChatTurnRequest(c)
+		if err != nil {
+			c.JSON(status, gin.H{"error": err.Error()})
+			return
 		}
-		if strings.TrimSpace(req.Input) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "input is required"})
+		userText, providerInput := chat.PrepareTurnInputs(req.Input, len(uploads))
+		if strings.TrimSpace(providerInput) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "input or files is required"})
 			return
 		}
 		sessionID := c.Param("id")
@@ -215,7 +262,7 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 		if expertID == "" {
 			expertID = sess.ExpertID
 		}
-		resolved, err := deps.Experts.Resolve(expertID, req.Input, sess.WorkspacePath)
+		resolved, err := deps.Experts.Resolve(expertID, providerInput, sess.WorkspacePath)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -226,12 +273,13 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 		}
 		sdk := *resolved.Spec.SDK
 		result, err := deps.Chat.RunTurn(c.Request.Context(), chat.TurnParams{
-			Session:    sess,
-			ExpertID:   expertID,
-			UserInput:  req.Input,
-			ModelInput: sdk.Prompt,
-			SDK:        sdk,
-			Env:        resolved.Spec.Env,
+			Session:     sess,
+			ExpertID:    expertID,
+			UserInput:   userText,
+			ModelInput:  sdk.Prompt,
+			Attachments: uploads,
+			SDK:         sdk,
+			Env:         resolved.Spec.Env,
 		})
 		if err != nil {
 			if errors.Is(err, store.ErrValidation) {

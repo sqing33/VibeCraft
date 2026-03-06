@@ -133,3 +133,79 @@ func TestRunTurn_CompactionFallbackDoesNotFailTurn(t *testing.T) {
 
 func pointer(s string) *string { return &s }
 
+func TestRunTurn_AttachmentsSkipAutomaticCompaction(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate store: %v", err)
+	}
+
+	sess, err := st.CreateChatSession(context.Background(), store.CreateChatSessionParams{
+		Title:         "demo",
+		ExpertID:      "demo",
+		Provider:      "demo",
+		Model:         "demo",
+		WorkspacePath: ".",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		_, err := st.AppendChatMessage(context.Background(), store.AppendChatMessageParams{
+			SessionID:   sess.ID,
+			Role:        "assistant",
+			ContentText: "seed",
+			ExpertID:    pointer("demo"),
+			Provider:    pointer("demo"),
+			Model:       pointer("demo"),
+		})
+		if err != nil {
+			t.Fatalf("append seed message: %v", err)
+		}
+	}
+
+	mgr := chat.NewManager(st, nil, chat.Options{
+		KeepRecent:    2,
+		SoftRatio:     0.01,
+		ForceRatio:    0.02,
+		HardRatio:     0.99,
+		ContextWindow: 64,
+	})
+
+	result, err := mgr.RunTurn(context.Background(), chat.TurnParams{
+		Session:    sess,
+		ExpertID:   "demo",
+		UserInput:  "hello with file",
+		ModelInput: "hello with file",
+		Attachments: []chat.UploadedAttachment{{
+			FileName: "note.txt",
+			MIMEType: "text/plain",
+			Bytes:    []byte("hello attachment"),
+		}},
+		SDK: runner.SDKSpec{
+			Provider: "demo",
+			Model:    "demo",
+		},
+		Env: nil,
+	})
+	if err != nil {
+		t.Fatalf("run turn: %v", err)
+	}
+	if len(result.UserMessage.Attachments) != 1 {
+		t.Fatalf("expected user attachment metadata, got %+v", result.UserMessage)
+	}
+
+	updated, err := st.GetChatSession(context.Background(), sess.ID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if updated.Summary != nil && *updated.Summary != "" {
+		t.Fatalf("expected summary to remain empty when attachments are present, got %q", *updated.Summary)
+	}
+}

@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 // Migrate 功能：执行 state DB schema 迁移（MVP：使用 PRAGMA user_version 管理版本）。
 // 参数/返回：ctx 控制超时；成功返回 nil。
@@ -57,6 +57,14 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		}
 		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 3;"); err != nil {
 			return fmt.Errorf("set user_version=3: %w", err)
+		}
+	}
+	if userVersion < 4 {
+		if err := migrateV4(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 4;"); err != nil {
+			return fmt.Errorf("set user_version=4: %w", err)
 		}
 	}
 
@@ -220,6 +228,33 @@ func migrateV3(ctx context.Context, tx *sql.Tx) error {
 			if strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 				continue
 			}
+			return fmt.Errorf("exec migration stmt: %w", err)
+		}
+	}
+	return nil
+}
+
+func migrateV4(ctx context.Context, tx *sql.Tx) error {
+	stmts := []string{
+		`
+CREATE TABLE IF NOT EXISTS chat_attachments (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  storage_rel_path TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES chat_sessions(id),
+  FOREIGN KEY(message_id) REFERENCES chat_messages(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_attachments_message_id ON chat_attachments(message_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_attachments_session_created ON chat_attachments(session_id, created_at);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("exec migration stmt: %w", err)
 		}
 	}

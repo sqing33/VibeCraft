@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Chip, Input, Select, SelectItem, Textarea } from '@heroui/react'
-import { Trash2 } from 'lucide-react'
+import { Paperclip, Trash2, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -32,6 +32,38 @@ function formatTokenUsage(opts: {
   if (typeof opts.tokenOut === 'number') parts.push(`输出 ${opts.tokenOut}`)
   if (typeof opts.cachedInputTokens === 'number') parts.push(`缓存 ${opts.cachedInputTokens}`)
   return parts.join(' · ')
+}
+
+function formatAttachmentSize(sizeBytes?: number): string {
+  if (typeof sizeBytes !== 'number' || sizeBytes <= 0) return ''
+  if (sizeBytes < 1024) return `${sizeBytes} B`
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function formatAttachmentKind(kind?: string): string {
+  switch ((kind ?? '').trim()) {
+    case 'image':
+      return '图片'
+    case 'pdf':
+      return 'PDF'
+    case 'text':
+      return '文本'
+    default:
+      return '附件'
+  }
+}
+
+function guessPendingFileKind(file: File): string {
+  const type = file.type.toLowerCase()
+  const name = file.name.toLowerCase()
+  if (type.startsWith('image/')) return '图片'
+  if (type === 'application/pdf' || name.endsWith('.pdf')) return 'PDF'
+  return '文本'
+}
+
+function fileIdentity(file: File): string {
+  return `${file.name}:${file.size}:${file.lastModified}`
 }
 
 export function ChatSessionsPage() {
@@ -68,12 +100,14 @@ export function ChatSessionsPage() {
   const archiveSession = useChatStore((s) => s.archiveSession)
 
   const [newTitle, setNewTitle] = useState('')
-  const [newExpertId, setNewExpertId] = useState('codex')
+  const [newExpertId, setNewExpertId] = useState('')
   const [input, setInput] = useState('')
-  const [turnExpertId, setTurnExpertId] = useState('codex')
+  const [turnExpertId, setTurnExpertId] = useState('')
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [allowedModelExpertIds, setAllowedModelExpertIds] = useState<Set<string>>(new Set())
   const messageScrollRef = useRef<HTMLDivElement | null>(null)
   const shouldAutoScrollRef = useRef(true)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.session_id === activeSessionId) ?? null,
@@ -91,6 +125,17 @@ export function ChatSessionsPage() {
     for (const e of selectableExperts) map.set(e.id, e)
     return map
   }, [selectableExperts])
+  const defaultSelectableExpertId = selectableExperts[0]?.id ?? ''
+  const effectiveNewExpertId =
+    newExpertId && selectableExperts.some((e) => e.id === newExpertId)
+      ? newExpertId
+      : defaultSelectableExpertId
+  const effectiveTurnExpertId =
+    turnExpertId && selectableExperts.some((e) => e.id === turnExpertId)
+      ? turnExpertId
+      : activeSession?.expert_id && selectableExperts.some((e) => e.id === activeSession.expert_id)
+        ? activeSession.expert_id
+        : defaultSelectableExpertId
 
   const formatModelIdentity = useCallback(
     (meta?: { expert_id?: string; provider?: string; model?: string } | null): string => {
@@ -108,9 +153,28 @@ export function ChatSessionsPage() {
     [expertsById],
   )
 
-  useEffect(() => {
-    if (activeSession?.expert_id) setTurnExpertId(activeSession.expert_id)
-  }, [activeSession?.expert_id])
+  const appendSelectedFiles = useCallback((files: FileList | null) => {
+    if (!files || files.length === 0) return
+    setSelectedFiles((prev) => {
+      const seen = new Set(prev.map((file) => fileIdentity(file)))
+      const next = [...prev]
+      for (const file of Array.from(files)) {
+        const identity = fileIdentity(file)
+        if (seen.has(identity)) continue
+        seen.add(identity)
+        next.push(file)
+      }
+      return next
+    })
+  }, [])
+
+  const removeSelectedFile = useCallback((targetIdentity: string) => {
+    setSelectedFiles((prev) => prev.filter((file) => fileIdentity(file) !== targetIdentity))
+  }, [])
+
+  const openFilePicker = useCallback(() => {
+    fileInputRef.current?.click()
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -133,7 +197,10 @@ export function ChatSessionsPage() {
     }
   }, [daemonUrl, experts])
 
-  const messages = activeSessionId ? messagesBySession[activeSessionId] ?? [] : []
+  const messages = useMemo(
+    () => (activeSessionId ? messagesBySession[activeSessionId] ?? [] : []),
+    [activeSessionId, messagesBySession],
+  )
   const streaming = activeSessionId ? streamingBySession[activeSessionId] ?? '' : ''
   const thinking = activeSessionId ? thinkingBySession[activeSessionId] ?? '' : ''
   const lastAssistantMessageId = useMemo(() => {
@@ -298,10 +365,12 @@ export function ChatSessionsPage() {
     try {
       const created = await createSession(daemonUrl, {
         title: newTitle.trim() || undefined,
-        expert_id: newExpertId.trim() || undefined,
+        expert_id: effectiveNewExpertId.trim() || undefined,
       })
       setNewTitle('')
       setInput('')
+      setSelectedFiles([])
+      setTurnExpertId(created.expert_id)
       toast({ title: '会话已创建', description: created.session_id })
       await loadMessages(daemonUrl, created.session_id)
     } catch (err: unknown) {
@@ -316,11 +385,16 @@ export function ChatSessionsPage() {
   const onSend = async () => {
     if (!activeSessionId) return
     const text = input.trim()
-    if (!text) return
+    if (!text && selectedFiles.length === 0) return
+    const draftInput = input
+    const draftFiles = selectedFiles
     setInput('')
+    setSelectedFiles([])
     try {
-      await sendTurn(daemonUrl, activeSessionId, text, turnExpertId.trim() || undefined)
+      await sendTurn(daemonUrl, activeSessionId, text, effectiveTurnExpertId.trim() || undefined, draftFiles)
     } catch (err: unknown) {
+      setInput(draftInput)
+      setSelectedFiles(draftFiles)
       toast({
         variant: 'destructive',
         title: '发送失败',
@@ -334,6 +408,8 @@ export function ChatSessionsPage() {
     try {
       const forked = await forkSession(daemonUrl, activeSessionId)
       setActiveSession(forked.session_id)
+      setTurnExpertId(forked.expert_id)
+      setSelectedFiles([])
       toast({ title: '已分叉会话', description: forked.session_id })
     } catch (err: unknown) {
       toast({
@@ -354,6 +430,8 @@ export function ChatSessionsPage() {
       await archiveSession(daemonUrl, sessionId)
       if (activeSessionId === sessionId) {
         setActiveSession(null)
+        setTurnExpertId('')
+        setSelectedFiles([])
       }
       toast({ title: '会话已删除（归档）', description: sessionId })
     } catch (err: unknown) {
@@ -371,22 +449,13 @@ export function ChatSessionsPage() {
   )
 
   const pendingMeta = activeSessionId ? turnMetaBySession[activeSessionId] ?? null : null
-  useEffect(() => {
-    if (selectableExperts.length === 0) return
-    if (!newExpertId || !selectableExperts.some((e) => e.id === newExpertId)) {
-      setNewExpertId(selectableExperts[0].id)
-    }
-    if (!turnExpertId || !selectableExperts.some((e) => e.id === turnExpertId)) {
-      setTurnExpertId(selectableExperts[0].id)
-    }
-  }, [newExpertId, selectableExperts, turnExpertId])
   const pendingIdentity = useMemo(() => {
     if (pendingMeta) {
       const id = formatModelIdentity(pendingMeta)
       if (id) return id
     }
-    if (turnExpertId.trim()) {
-      const id = formatModelIdentity({ expert_id: turnExpertId.trim() })
+    if (effectiveTurnExpertId.trim()) {
+      const id = formatModelIdentity({ expert_id: effectiveTurnExpertId.trim() })
       if (id) return id
     }
     if (activeSession) {
@@ -398,7 +467,7 @@ export function ChatSessionsPage() {
       if (id) return id
     }
     return ''
-  }, [activeSession, formatModelIdentity, pendingMeta, turnExpertId])
+  }, [activeSession, effectiveTurnExpertId, formatModelIdentity, pendingMeta])
 
   if (health.status === 'error') {
     return <Alert color="danger" title="无法连接守护进程" description={health.message} />
@@ -417,7 +486,7 @@ export function ChatSessionsPage() {
         />
         <Select
           label="Expert"
-          selectedKeys={new Set([newExpertId])}
+          selectedKeys={effectiveNewExpertId ? new Set([effectiveNewExpertId]) : new Set()}
           onSelectionChange={(keys) => {
             if (keys === 'all') return
             const first = keys.values().next().value
@@ -454,7 +523,11 @@ export function ChatSessionsPage() {
                 className={`w-full rounded-lg border p-2 text-left ${
                   s.session_id === activeSessionId ? 'border-primary bg-primary/5' : 'hover:bg-background/50'
                 }`}
-                onClick={() => setActiveSession(s.session_id)}
+                onClick={() => {
+                  setActiveSession(s.session_id)
+                  setTurnExpertId(s.expert_id)
+                  setSelectedFiles([])
+                }}
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="truncate text-sm font-medium">{s.title}</div>
@@ -564,6 +637,21 @@ export function ChatSessionsPage() {
                   ) : (
                     <div className="whitespace-pre-wrap text-sm">{m.content_text}</div>
                   )}
+                  {Array.isArray(m.attachments) && m.attachments.length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {m.attachments.map((attachment) => {
+                        const sizeLabel = formatAttachmentSize(attachment.size_bytes)
+                        const kindLabel = formatAttachmentKind(attachment.kind)
+                        return (
+                          <Chip key={attachment.attachment_id} size="sm" variant="flat">
+                            {attachment.file_name}
+                            {kindLabel ? ` · ${kindLabel}` : ''}
+                            {sizeLabel ? ` · ${sizeLabel}` : ''}
+                          </Chip>
+                        )
+                      })}
+                    </div>
+                  ) : null}
                   {isUser && inputMeta?.model_input ? (
                     <details className="mt-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
                       <summary className="cursor-pointer select-none text-muted-foreground">
@@ -617,18 +705,58 @@ export function ChatSessionsPage() {
         </div>
 
         <div className="flex gap-2">
-          <Textarea
-            value={input}
-            onValueChange={setInput}
-            placeholder="输入消息..."
-            minRows={2}
-            isDisabled={!activeSessionId || sending}
-            className="flex-1"
-          />
+          <div className="flex flex-1 flex-col gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                appendSelectedFiles(event.target.files)
+                event.currentTarget.value = ''
+              }}
+            />
+            {selectedFiles.length > 0 ? (
+              <div className="flex flex-wrap gap-2 rounded-lg border bg-background/40 p-2">
+                {selectedFiles.map((file) => {
+                  const identity = fileIdentity(file)
+                  return (
+                    <button
+                      key={identity}
+                      type="button"
+                      onClick={() => removeSelectedFile(identity)}
+                      className="flex max-w-full items-center gap-1 rounded-full border px-2 py-1 text-xs text-foreground transition hover:bg-muted"
+                    >
+                      <span className="max-w-[220px] truncate">{file.name}</span>
+                      <span className="text-muted-foreground">{guessPendingFileKind(file)}</span>
+                      <span className="text-muted-foreground">{formatAttachmentSize(file.size)}</span>
+                      <X className="h-3 w-3" />
+                    </button>
+                  )
+                })}
+              </div>
+            ) : null}
+            <Textarea
+              value={input}
+              onValueChange={setInput}
+              placeholder="输入消息或上传附件..."
+              minRows={2}
+              isDisabled={!activeSessionId || sending}
+              className="flex-1"
+            />
+          </div>
           <div className="flex w-[200px] flex-col gap-2">
+            <Button
+              variant="flat"
+              startContent={<Paperclip className="h-4 w-4" />}
+              isDisabled={!activeSessionId || sending}
+              onPress={openFilePicker}
+            >
+              上传附件
+            </Button>
             <Select
               label="Expert"
-              selectedKeys={new Set([turnExpertId])}
+              selectedKeys={effectiveTurnExpertId ? new Set([effectiveTurnExpertId]) : new Set()}
               onSelectionChange={(keys) => {
                 if (keys === 'all') return
                 const first = keys.values().next().value
@@ -644,7 +772,7 @@ export function ChatSessionsPage() {
             </Select>
             <Button
               color="primary"
-              isDisabled={!activeSessionId || sending || !input.trim()}
+              isDisabled={!activeSessionId || sending || (!input.trim() && selectedFiles.length === 0)}
               onPress={() => void onSend()}
             >
               {sending ? '发送中…' : '发送'}

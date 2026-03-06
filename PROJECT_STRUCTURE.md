@@ -39,7 +39,7 @@
 | `backend/cmd/vibe-tree-daemon/main.go`     | daemon 进程入口，负责加载配置、启动 HTTP Server、处理优雅退出                                                                         |
 | `backend/internal/server/server.go`        | Gin Engine 装配：恢复中间件、请求日志、dev CORS，并挂载 `internal/api` 路由；可选挂载 UI 静态资源（`ui/dist` 或 `VIBE_TREE_UI_DIST`） |
 | `backend/internal/api/api.go`              | HTTP/WS handlers：health、workflow CRUD、execution start/log/cancel、WebSocket 升级入口                                               |
-| `backend/internal/api/chat.go`             | Chat Session API：会话创建/列表/消息查询/多轮发送/手动压缩/分叉/归档（`/api/v1/chat/*`）                                              |
+| `backend/internal/api/chat.go`             | Chat Session API：会话创建/列表/消息查询/多轮发送/附件上传（JSON + multipart）/手动压缩/分叉/归档（`/api/v1/chat/*`）                |
 | `backend/internal/api/info.go`             | 排障信息 API：`GET /api/v1/info`（version + XDG paths）                                                                               |
 | `backend/internal/api/experts.go`          | Experts 列表 API：`GET /api/v1/experts`（仅安全字段，供 UI 下拉）                                                                     |
 | `backend/internal/api/settings_llm.go`     | 模型设置 API：`GET/PUT /api/v1/settings/llm`（sources/models；key masking；写盘并热更新 experts）                                     |
@@ -52,13 +52,15 @@
 | `backend/internal/expert/expert.go`        | Expert 注册表：基于 config 解析 `expert_id` -> RunSpec（`{{prompt}}`/`${ENV}` 模板替换、timeout），并提供已知 expert 集合             |
 | `backend/internal/runner/pty_runner.go`    | PTY runner：启动子进程、流式输出、Cancel（SIGTERM→grace→SIGKILL）                                                                     |
 | `backend/internal/execution/manager.go`    | Execution 管理：启动/取消、日志落盘、WS 推送 `execution.*`/`node.log`                                                                 |
-| `backend/internal/chat/manager.go`         | Chat 管理：多轮会话、provider anchor（OpenAI/Anthropic）、自动上下文压缩、WS `chat.*` 推送                                             |
+| `backend/internal/chat/manager.go`         | Chat 管理：多轮会话、provider anchor（OpenAI/Anthropic）、附件持久化接入、自动上下文压缩/跳过策略、WS `chat.*` 推送                |
+| `backend/internal/chat/attachments.go`      | Chat 附件能力：附件类型校验、大小限制、文件落盘、provider 多模态 block 构造、调试输入摘要                                               |
+| `backend/internal/chat/provider_input.go`    | Chat 多模态重建：基于本地消息 + 附件重建 OpenAI/Anthropic provider 输入                                                                |
 | `backend/internal/dag/dag.go`              | DAG 解析与校验：从 master 输出提取第一个 JSON 对象并做 MVP 约束校验（无环/引用存在/expert 校验）                                      |
 | `backend/internal/scheduler/scheduler.go`  | Workflow 调度器：依赖 + 并发上限 + fail-fast（启动 queued worker nodes 并收敛终态）                                                   |
 | `backend/internal/ws/hub.go`               | WebSocket hub：连接管理与广播（配合 log tail 断线补齐）                                                                               |
 | `backend/internal/store/sqlite.go`         | SQLite state DB 打开与 pragma 初始化（WAL/busy_timeout/foreign_keys）                                                                 |
 | `backend/internal/store/migrate.go`        | SQLite migrations（使用 `PRAGMA user_version` 管理 schema 版本）                                                                      |
-| `backend/internal/store/chat.go`           | Chat 存储：chat sessions/messages/anchors/compactions 的 SQLite CRUD                                                                   |
+| `backend/internal/store/chat.go`           | Chat 存储：chat sessions/messages/attachments/anchors/compactions 的 SQLite CRUD + hydration                                          |
 | `backend/internal/store/workflows.go`      | Workflow 存储：SQLite CRUD + events 写入                                                                                              |
 | `backend/internal/store/dag.go`            | DAG 落库：从 master DAG 创建 worker nodes/edges，并提供 edges 查询                                                                    |
 | `backend/internal/store/nodes.go`          | Node 存储：master node 创建、nodes 列表查询、GetNode、RetryNode（解开 fail-fast skipped 并重试）                                      |
@@ -68,16 +70,16 @@
 | `backend/internal/store/cancel.go`         | Workflow 取消：标记 workflow canceled，并返回需 cancel 的 running executions                                                          |
 | `backend/internal/store/failures.go`       | 失败兜底：启动/落库失败时标记 node/workflow failed                                                                                    |
 | `backend/internal/store/recovery.go`       | 重启恢复：将 DB 中遗留的 running execution 标记为 failed（daemon_restarted）                                                          |
-| `backend/internal/paths/paths.go`          | XDG data/logs/state.db 路径解析（`~/.local/share/vibe-tree/...`）                                                                     |
+| `backend/internal/paths/paths.go`          | XDG data/logs/state.db/chat-attachments 路径解析（`~/.local/share/vibe-tree/...`）                                                   |
 | `backend/internal/id/id.go`                | ID 生成：`wf_`/`nd_`/`ex_` 前缀 ID（MVP 先用短随机）                                                                                  |
 | `backend/internal/logx/logx.go`            | 后端统一日志格式封装（`level=... module=... action=... msg="..."`）                                                                   |
 | `backend/internal/version/version.go`      | 版本信息（Commit/BuiltAt，可用 ldflags 注入；用于 `/api/v1/info`）                                                                    |
 | `ui/src/App.tsx`                           | 前端入口：daemon health + WS 连接管理 + 路由（`#/` workflows、`#/chat` chat sessions、`#/workflows/:id` 详情）                       |
-| `ui/src/app/pages/ChatSessionsPage.tsx`    | Chat 会话页：会话列表、消息流式渲染、发送消息、手动压缩/分叉/归档                                                                      |
+| `ui/src/app/pages/ChatSessionsPage.tsx`    | Chat 会话页：会话列表、消息流式渲染、发送消息/上传附件、附件标签展示、手动压缩/分叉/归档                                              |
 | `ui/src/components/DAGView.tsx`            | React Flow DAG 视图：dagre 自动布局 + 节点按状态上色 + 点击节点联动终端                                                               |
 | `ui/src/components/TerminalPane.tsx`       | xterm.js 封装组件（fit + write/reset 接口）                                                                                           |
 | `ui/src/app/components/LLMSettingsTab.tsx` | 系统设置「模型」Tab：编辑 Sources（base_url+key）与 Models（model+source+SDK），保存后刷新 experts                                    |
-| `ui/src/lib/daemon.ts`                     | daemon URL/WS URL 解析与 health/workflow/execution API 封装                                                                           |
+| `ui/src/lib/daemon.ts`                     | daemon URL/WS URL 解析与 health/workflow/execution/chat attachment API 封装                                                           |
 | `ui/src/stores/chatStore.ts`               | Chat 前端状态：sessions/messages/streaming/sending 状态与 chat API actions                                                            |
 | `scripts/dev.sh`                           | 本地开发一键启动脚本（并行拉起 backend 与 UI）                                                                                        |
 | `backend/.air.toml`                        | 后端热重载配置（Air）：本地开发时监听 Go 源码变更并自动重建/重启 daemon                                                                |
@@ -105,9 +107,10 @@
 | Expert 配置/模板解析               | `backend/internal/config/config.go`, `backend/internal/expert/expert.go`                                                                                                                                                                   |
 | execution timeout 语义             | `backend/internal/execution/manager.go`, `backend/internal/scheduler/scheduler.go`                                                                                                                                                         |
 | SQLite state.db 初始化             | `backend/cmd/vibe-tree-daemon/main.go`, `backend/internal/store/sqlite.go`, `backend/internal/store/migrate.go`                                                                                                                            |
-| Chat Session API                   | `backend/internal/api/chat.go`, `backend/internal/chat/manager.go`, `backend/internal/store/chat.go`, `ui/src/lib/daemon.ts`                                                                                                                     |
+| Chat Session API                   | `backend/internal/api/chat.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/attachments.go`, `backend/internal/store/chat.go`, `ui/src/lib/daemon.ts`                                                                                |
 | Chat 自动上下文压缩               | `backend/internal/chat/manager.go`, `backend/internal/store/chat.go`                                                                                                                                                                                           |
 | Chat provider anchor 续上下文      | `backend/internal/chat/manager.go`, `backend/internal/store/chat.go`                                                                                                                                                                                           |
+| Chat 附件上传与多模态输入          | `backend/internal/api/chat.go`, `backend/internal/chat/attachments.go`, `backend/internal/chat/provider_input.go`, `backend/internal/store/chat.go`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/lib/daemon.ts`                                 |
 | Workflow CRUD API                  | `backend/internal/api/workflows.go`, `backend/internal/store/workflows.go`                                                                                                                                                                 |
 | Workflow Start（master 执行）      | `backend/internal/api/workflow_start.go`, `backend/internal/store/nodes.go`, `backend/internal/store/executions.go`                                                                                                                        |
 | Workflow Nodes API                 | `backend/internal/api/workflow_start.go`, `backend/internal/store/nodes.go`                                                                                                                                                                |

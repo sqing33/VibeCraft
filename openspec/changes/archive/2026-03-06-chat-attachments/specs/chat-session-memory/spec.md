@@ -1,20 +1,4 @@
-# chat-session-memory Specification
-
-## Purpose
-TBD - created by archiving change sdk-chat-session-memory. Update Purpose after archive.
-## Requirements
-### Requirement: Chat sessions SHALL be persistent and resumable
-The system MUST provide persistent SDK chat sessions stored in the local state database. A session MUST have a stable `session_id` and metadata including title, expert/provider/model identity, status, and timestamps. Sessions MUST remain available after daemon restart.
-
-#### Scenario: Create and list sessions
-- **WHEN** client calls `POST /api/v1/chat/sessions` and then `GET /api/v1/chat/sessions`
-- **THEN** the new session appears in the list with a stable `session_id`
-- **AND** session metadata includes creation and update timestamps
-
-#### Scenario: Resume after restart
-- **WHEN** a session has prior turns and daemon restarts
-- **THEN** `GET /api/v1/chat/sessions/:id/messages` returns previously stored messages
-- **AND** the user can continue the same session id
+## MODIFIED Requirements
 
 ### Requirement: Chat turns SHALL support streaming output events
 The system MUST provide a turn API that appends a user message, invokes SDK generation, and streams assistant deltas through WebSocket. The system MUST emit `chat.turn.started`, `chat.turn.delta`, and `chat.turn.completed` events.
@@ -35,6 +19,8 @@ The turn API MUST support both pure-text requests and attachment-bearing request
 ### Requirement: Provider anchors SHALL be reused with safe fallback
 For OpenAI sessions, the system MUST persist and reuse `previous_response_id` when available. For Anthropic sessions, the system MUST persist and reuse `container` when available. If anchor usage fails or is unavailable, the system MUST fallback to reconstructed local context and continue.
 
+For sessions that contain persisted attachments, local reconstruction MUST rebuild the multimodal message history using stored message text and attachment metadata/file contents instead of falling back to a text-only prompt.
+
 #### Scenario: OpenAI anchor reused
 - **WHEN** a session has stored `previous_response_id`
 - **THEN** subsequent OpenAI turn requests include that id
@@ -43,6 +29,11 @@ For OpenAI sessions, the system MUST persist and reuse `previous_response_id` wh
 #### Scenario: Anchor fallback path
 - **WHEN** provider anchor is invalid or expired
 - **THEN** the turn is retried using reconstructed context from local summary + recent messages
+- **AND** the session remains usable
+
+#### Scenario: Anchor fallback reconstructs attachments
+- **WHEN** a session with historical attachments loses its provider anchor
+- **THEN** the fallback path rebuilds the prior multimodal context from locally persisted attachments
 - **AND** the session remains usable
 
 ### Requirement: Context usage SHALL be guarded by automatic compaction
@@ -64,17 +55,3 @@ For sessions whose persisted history contains attachments, the system MUST NOT r
 - **WHEN** the session history already contains persisted attachments
 - **THEN** automatic compaction is skipped for that turn
 - **AND** the system preserves attachment-bearing context without generating a text-only compaction summary
-
-### Requirement: Sessions SHALL support fork and manual compaction APIs
-The system MUST provide APIs to fork a session and to trigger compaction manually for a specific session.
-
-#### Scenario: Fork session
-- **WHEN** client calls `POST /api/v1/chat/sessions/:id/fork`
-- **THEN** a new session is created with inherited summary/context baseline
-- **AND** subsequent turns do not mutate the source session history
-
-#### Scenario: Manual compact
-- **WHEN** client calls `POST /api/v1/chat/sessions/:id/compact`
-- **THEN** compaction executes using current policy
-- **AND** a `chat.session.compacted` event is emitted
-

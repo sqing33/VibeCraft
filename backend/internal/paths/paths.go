@@ -65,3 +65,27 @@ func ExecutionLogPath(executionID string) (string, error) {
 	}
 	return filepath.Join(logsDir, fmt.Sprintf("%s.log", executionID)), nil
 }
+
+// ChatAttachmentsDir 功能：返回聊天附件根目录路径。
+// 参数/返回：返回 `$XDG_DATA_HOME/vibe-tree/chat-attachments`（或 `~/.local/share/vibe-tree/chat-attachments`）。
+// 失败场景：dataDir 解析失败时返回 error。
+// 副作用：读取环境变量与 home 目录信息（间接）。
+func ChatAttachmentsDir() (string, error) {
+	dataDir, err := DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dataDir, "chat-attachments"), nil
+}
+
+// ChatAttachmentMessageDir 功能：返回某条聊天消息的附件目录。
+// 参数/返回：返回 `<chatAttachmentsDir>/<session_id>/<message_id>`。
+// 失败场景：chatAttachmentsDir 解析失败时返回 error。
+// 副作用：读取环境变量与 home 目录信息（间接）。
+func ChatAttachmentMessageDir(sessionID, messageID string) (string, error) {
+	root, err := ChatAttachmentsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, sessionID, messageID), nil
+}

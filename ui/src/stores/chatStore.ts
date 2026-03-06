@@ -8,6 +8,7 @@ import {
   postChatCompact,
   postChatFork,
   postChatTurn,
+  type ChatAttachment,
   type ChatMessage,
   type ChatSession,
 } from '@/lib/daemon'
@@ -27,6 +28,32 @@ type UsageMeta = {
   token_in?: number
   token_out?: number
   cached_input_tokens?: number
+}
+
+function guessAttachmentKind(file: File): string {
+  const name = file.name.toLowerCase()
+  const type = file.type.toLowerCase()
+  if (type.startsWith('image/')) return 'image'
+  if (type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf'
+  return 'text'
+}
+
+function buildOptimisticAttachments(
+  sessionId: string,
+  messageId: string,
+  files: File[],
+  createdAt: number,
+): ChatAttachment[] {
+  return files.map((file, index) => ({
+    attachment_id: `${messageId}_att_${index + 1}`,
+    session_id: sessionId,
+    message_id: messageId,
+    kind: guessAttachmentKind(file),
+    file_name: file.name,
+    mime_type: file.type || 'application/octet-stream',
+    size_bytes: file.size,
+    created_at: createdAt,
+  }))
 }
 
 export type ChatStore = {
@@ -65,6 +92,7 @@ export type ChatStore = {
     sessionId: string,
     input: string,
     expertId?: string,
+    files?: File[],
   ) => Promise<void>
   compactSession: (daemonUrl: string, sessionId: string) => Promise<void>
   forkSession: (daemonUrl: string, sessionId: string) => Promise<ChatSession>
@@ -202,24 +230,26 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set({ activeSessionId: session.session_id })
     return session
   },
-  sendTurn: async (daemonUrl, sessionId, input, expertId) => {
+  sendTurn: async (daemonUrl, sessionId, input, expertId, files = []) => {
     set({ sending: true, error: null })
     get().clearStreaming(sessionId)
     get().clearThinking(sessionId)
     get().setTurnMeta(sessionId, expertId ? { expert_id: expertId } : null)
     const now = Date.now()
     const lastTurn = (get().messagesBySession[sessionId] ?? []).at(-1)?.turn ?? 0
+    const messageId = `local_user_${sessionId}_${now}`
     get().appendMessage(sessionId, {
-      message_id: `local_user_${sessionId}_${now}`,
+      message_id: messageId,
       session_id: sessionId,
       turn: lastTurn + 1,
       role: 'user',
-      content_text: input,
+      content_text: input.trim() || '（仅附件）',
+      attachments: buildOptimisticAttachments(sessionId, messageId, files, now),
       expert_id: expertId,
       created_at: now,
     })
     try {
-      await postChatTurn(daemonUrl, sessionId, { input, expert_id: expertId })
+      await postChatTurn(daemonUrl, sessionId, { input, expert_id: expertId, files })
       await get().loadMessages(daemonUrl, sessionId)
       await get().refreshSessions(daemonUrl)
       set((state) => ({

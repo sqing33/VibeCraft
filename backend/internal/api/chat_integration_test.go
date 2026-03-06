@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"testing"
 
@@ -118,11 +119,11 @@ func TestChatSession_PerTurnExpertOverride_UpdatesSessionDefaults(t *testing.T) 
 		}
 	}
 	cfg.Experts = append(cfg.Experts, config.ExpertConfig{
-		ID:       "demo_b",
-		Label:    "Demo B",
-		Provider: "demo",
-		Model:    "demo-b",
-		Env:      map[string]string{},
+		ID:        "demo_b",
+		Label:     "Demo B",
+		Provider:  "demo",
+		Model:     "demo-b",
+		Env:       map[string]string{},
 		TimeoutMs: 30 * 1000,
 	})
 
@@ -215,5 +216,81 @@ func TestChatSession_PerTurnExpertOverride_UpdatesSessionDefaults(t *testing.T) 
 		if msg.Model == nil || *msg.Model != "demo-b" {
 			t.Fatalf("unexpected message model: %+v", msg)
 		}
+	}
+}
+
+func TestChatSession_MultipartTurnPersistsAttachments(t *testing.T) {
+	env := newTestEnv(t, config.Default(), 2)
+	baseURL := env.httpSrv.URL
+
+	createBody, _ := json.Marshal(map[string]any{
+		"title":          "chat-attachments",
+		"expert_id":      "demo",
+		"workspace_path": ".",
+	})
+	createRes, err := http.Post(baseURL+"/api/v1/chat/sessions", "application/json", bytes.NewReader(createBody))
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer createRes.Body.Close()
+	if createRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected create status: %s", createRes.Status)
+	}
+
+	var sess store.ChatSession
+	if err := json.NewDecoder(createRes.Body).Decode(&sess); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("input", ""); err != nil {
+		t.Fatalf("write input field: %v", err)
+	}
+	part, err := writer.CreateFormFile("files", "hello.txt")
+	if err != nil {
+		t.Fatalf("create file part: %v", err)
+	}
+	if _, err := part.Write([]byte("hello attachment")); err != nil {
+		t.Fatalf("write file part: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/chat/sessions/"+sess.ID+"/turns", &body)
+	if err != nil {
+		t.Fatalf("new multipart turn request: %v", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	turnRes, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post multipart turn: %v", err)
+	}
+	defer turnRes.Body.Close()
+	if turnRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected multipart turn status: %s", turnRes.Status)
+	}
+
+	msgsRes, err := http.Get(baseURL + "/api/v1/chat/sessions/" + sess.ID + "/messages")
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	defer msgsRes.Body.Close()
+	if msgsRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected messages status: %s", msgsRes.Status)
+	}
+	var messages []store.ChatMessage
+	if err := json.NewDecoder(msgsRes.Body).Decode(&messages); err != nil {
+		t.Fatalf("decode messages response: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages after multipart turn, got %d", len(messages))
+	}
+	if len(messages[0].Attachments) != 1 {
+		t.Fatalf("expected attachment metadata on user message, got %+v", messages[0])
+	}
+	if messages[0].ContentText != "（仅附件）" {
+		t.Fatalf("expected attachment-only display text, got %q", messages[0].ContentText)
 	}
 }
