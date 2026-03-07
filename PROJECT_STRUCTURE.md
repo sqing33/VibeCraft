@@ -1,6 +1,6 @@
 # vibe-tree 项目结构与功能定位索引
 
-> 更新时间：2026-03-06
+> 更新时间：2026-03-07
 > 说明：本文档用于开发期快速定位功能文件。修改前先读本文件，再做定向检索。
 
 ## 1. 项目概览
@@ -14,6 +14,7 @@
 | `backend/`       | Go daemon：配置加载、HTTP API、后端服务启动与运行时能力                                |
 | `ui/`            | React 前端：健康检查展示、工作流页面与后续交互                                         |
 | `desktop/`       | 桌面壳（Wails）：启动/复用 daemon，并在 WebView 内打开 UI                              |
+| `services/`      | Python 能力引擎：Repo Library analyzer / 知识卡片抽取 / 向量检索封装                    |
 | `scripts/`       | 仓库级脚本：本地开发启动与辅助命令                                                     |
 | `.github-feature-analyzer/` | GitHub feature analyzer skill 运行产物目录：按 `{owner-repo}` 隔离源码缓存、分析工件与累计 `report.md` |
 | `.codex/skills/` | 项目级 Codex skills：流程规范、分析/实施工作流与协作约束                               |
@@ -37,6 +38,16 @@
 | `.codex/skills/github-feature-analyzer/scripts/setup_reference_venv.sh` | UV 环境初始化：强制 uv-managed Python 3.12，创建并同步固定 `.venv-reference` |
 | `.codex/skills/github-feature-analyzer/scripts/reference_retrieval_uv.sh` | UV 检索入口：先确保环境，再执行 `reference_retrieval.py` 的 `build/query` |
 | `docs/cli-pivot-and-repo-library-plan.md` | 规划文档：CLI-first 转型路线、SDK/CLI 职责重构，以及 GitHub analyzer 作为 Repo Library 功能集成方案 |
+| `backend/internal/api/repo_library.go` | Repo Library HTTP API：analysis 创建、repositories/detail/snapshots、cards/evidence、search、report 内容读取 |
+| `backend/internal/repolib/service.go` | Repo Library 服务层：GitHub URL 校验、分析运行创建、Python engine 调用、搜索结果增强与报告读取 |
+| `backend/internal/store/repo_library.go` | Repo Library 持久化模型与查询：repo source/snapshot/run/card/evidence/search history |
+| `services/repo-analyzer/app/cli.py` | Repo Analyzer 统一 CLI：`pipeline` / `ingest` / `extract-cards` / `search` |
+| `services/repo-analyzer/app/ingest.py` | Repo Analyzer ingest 流程：准备 snapshot 目录、抓仓库、建索引、渲染报告 |
+| `services/repo-analyzer/app/extract_cards.py` | 知识卡片抽取：从 `report.md + subagent_results.json` 提取 cards/evidence JSON |
+| `services/repo-analyzer/app/search.py` | Repo Library 搜索包装层：同步语料、刷新向量索引、查询并归一化结果 |
+| `ui/src/app/pages/RepoLibraryRepositoriesPage.tsx` | Repo Library 仓库列表与 Analyze Repo 表单 |
+| `ui/src/app/pages/RepoLibraryRepositoryDetailPage.tsx` | Repo Library 仓库详情：snapshots、analysis runs、report、cards、evidence、execution log |
+| `ui/src/app/pages/RepoLibraryPatternSearchPage.tsx` | Repo Library Pattern Search：自然语言搜索与结果跳转 |
 | `backend/cmd/vibe-tree-daemon/main.go`     | daemon 进程入口，负责加载配置、启动 HTTP Server、处理优雅退出                                                                         |
 | `backend/internal/server/server.go`        | Gin Engine 装配：恢复中间件、请求日志、dev CORS，并挂载 `internal/api` 路由；可选挂载 UI 静态资源（`ui/dist` 或 `VIBE_TREE_UI_DIST`） |
 | `backend/internal/api/api.go`              | HTTP/WS handlers：health、workflow CRUD、execution start/log/cancel、WebSocket 升级入口                                               |

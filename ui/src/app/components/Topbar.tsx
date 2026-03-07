@@ -1,7 +1,12 @@
 import { Moon, Sun } from 'lucide-react'
 import { Button, Chip } from '@heroui/react'
 
-import { goHome, goToChat, useHashRoute } from '@/app/routes'
+import {
+  goHome,
+  goToChat,
+  goToRepoLibraryRepositories,
+  useHashRoute,
+} from '@/app/routes'
 import { type HealthState, useDaemonStore } from '@/stores/daemonStore'
 import { useThemeStore } from '@/stores/themeStore'
 
@@ -26,6 +31,10 @@ export function Topbar() {
   const wsState = useDaemonStore((s) => s.wsState)
   const theme = useThemeStore((s) => s.theme)
   const toggleTheme = useThemeStore((s) => s.toggleTheme)
+  const isRepoLibraryRoute =
+    route.name === 'repo_library_repositories' ||
+    route.name === 'repo_library_repository_detail' ||
+    route.name === 'repo_library_pattern_search'
 
   const healthBadge =
     health.status === 'ok' ? (
@@ -63,6 +72,13 @@ export function Topbar() {
             onPress={goHome}
           >
             Orchestrations
+          </Button>
+          <Button
+            variant={isRepoLibraryRoute ? 'flat' : 'light'}
+            size="sm"
+            onPress={goToRepoLibraryRepositories}
+          >
+            Repo Library
           </Button>
         </div>
 

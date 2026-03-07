@@ -90,6 +90,18 @@ func ChatAttachmentMessageDir(sessionID, messageID string) (string, error) {
 	return filepath.Join(root, sessionID, messageID), nil
 }
 
+// RepoLibraryDir 功能：返回 Repo Library 根目录路径。
+// 参数/返回：返回 `$XDG_DATA_HOME/vibe-tree/repo-library`（或 `~/.local/share/vibe-tree/repo-library`）。
+// 失败场景：dataDir 解析失败时返回 error。
+// 副作用：读取环境变量与 home 目录信息（间接）。
+func RepoLibraryDir() (string, error) {
+	dataDir, err := DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dataDir, "repo-library"), nil
+}
+
 // CLIRuntimeArtifactsDir 功能：返回 CLI runtime artifact 根目录。
 // 参数/返回：返回 `$XDG_DATA_HOME/vibe-tree/cli-artifacts`。
 // 失败场景：dataDir 解析失败时返回 error。

@@ -3,3 +3,6 @@
 /backend/tmp/
 downloads
 .github-feature-analyzer
+
+__pycache__/
+*.pyc

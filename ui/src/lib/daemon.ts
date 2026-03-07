@@ -1294,3 +1294,612 @@ export async function cancelWorkflow(
     throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
   }
 }
+
+export type RepoLibraryDepth = 'standard' | 'deep'
+
+export type RepoLibraryAnalysisRequest = {
+  repo_url: string
+  ref: string
+  features: string[]
+  depth?: RepoLibraryDepth
+  language?: string
+  analyzer_mode?: string
+}
+
+export type RepoLibraryAnalysisRun = {
+  analysis_id: string
+  repository_id: string
+  snapshot_id?: string
+  execution_id?: string
+  repo_url: string
+  ref?: string
+  resolved_ref?: string
+  commit_sha?: string
+  features: string[]
+  depth?: RepoLibraryDepth
+  language?: string
+  analyzer_mode?: string
+  status: string
+  failure_message?: string
+  storage_path?: string
+  report_path?: string
+  report_url?: string
+  created_at: number
+  updated_at: number
+  finished_at?: number
+}
+
+export type RepoLibrarySnapshot = {
+  snapshot_id: string
+  repository_id: string
+  ref?: string
+  resolved_ref?: string
+  commit_sha?: string
+  storage_path?: string
+  report_path?: string
+  report_url?: string
+  report_excerpt?: string
+  report_markdown?: string
+  created_at: number
+  updated_at?: number
+}
+
+export type RepoLibraryRepository = {
+  repository_id: string
+  host?: string
+  owner?: string
+  name?: string
+  full_name?: string
+  repo_url: string
+  description?: string
+  default_branch?: string
+  latest_ref?: string
+  latest_commit_sha?: string
+  snapshot_count?: number
+  card_count?: number
+  created_at?: number
+  updated_at: number
+}
+
+export type RepoLibraryRepositorySummary = RepoLibraryRepository & {
+  latest_snapshot?: RepoLibrarySnapshot | null
+  latest_analysis?: RepoLibraryAnalysisRun | null
+}
+
+export type RepoLibraryRepositoryDetail = {
+  repository: RepoLibraryRepository
+  latest_snapshot?: RepoLibrarySnapshot | null
+  latest_analysis?: RepoLibraryAnalysisRun | null
+  analysis_runs?: RepoLibraryAnalysisRun[]
+  report_excerpt?: string
+  report_markdown?: string
+}
+
+export type RepoLibraryCard = {
+  card_id: string
+  repository_id: string
+  snapshot_id?: string
+  analysis_id?: string
+  card_type: string
+  title: string
+  summary?: string
+  detail?: string
+  confidence?: number
+  tags?: string[]
+  created_at?: number
+  updated_at?: number
+}
+
+export type RepoLibraryCardEvidence = {
+  evidence_id: string
+  card_id?: string
+  repository_id?: string
+  snapshot_id?: string
+  source_path: string
+  start_line?: number
+  end_line?: number
+  label?: string
+  excerpt?: string
+}
+
+export type RepoLibraryCreateAnalysisResponse = {
+  analysis: RepoLibraryAnalysisRun
+  repository?: RepoLibraryRepository
+  snapshot?: RepoLibrarySnapshot
+}
+
+export type RepoLibrarySearchRequest = {
+  query: string
+  repository_ids?: string[]
+  limit?: number
+}
+
+export type RepoLibrarySearchResult = {
+  result_id?: string
+  repository_id: string
+  snapshot_id?: string
+  card_id?: string
+  score?: number
+  title?: string
+  summary?: string
+  rationale?: string
+  repository?: RepoLibraryRepositorySummary
+  snapshot?: RepoLibrarySnapshot
+  card?: RepoLibraryCard
+  evidence_preview?: RepoLibraryCardEvidence[]
+}
+
+export type RepoLibrarySearchResponse = {
+  query_id?: string
+  results: RepoLibrarySearchResult[]
+}
+
+function normalizeRepoLibraryRepository(body: unknown): RepoLibraryRepository {
+  const record = (body ?? {}) as Record<string, unknown>
+  const repositoryId = String(record.repository_id ?? record.id ?? '')
+  const owner = typeof record.owner === 'string' ? record.owner : undefined
+  const name = typeof record.name === 'string' ? record.name : typeof record.repo === 'string' ? record.repo : undefined
+  const fullName =
+    typeof record.full_name === 'string'
+      ? record.full_name
+      : owner && name
+        ? `${owner}/${name}`
+        : undefined
+  return {
+    repository_id: repositoryId,
+    owner,
+    name,
+    full_name: fullName,
+    repo_url: String(record.repo_url ?? ''),
+    description: typeof record.description === 'string' ? record.description : undefined,
+    default_branch:
+      typeof record.default_branch === 'string' ? record.default_branch : undefined,
+    latest_ref:
+      typeof record.latest_resolved_ref === 'string'
+        ? record.latest_resolved_ref
+        : typeof record.latest_ref === 'string'
+          ? record.latest_ref
+          : undefined,
+    latest_commit_sha:
+      typeof record.latest_commit_sha === 'string' ? record.latest_commit_sha : undefined,
+    snapshot_count:
+      typeof record.snapshot_count === 'number' ? record.snapshot_count : undefined,
+    card_count:
+      typeof record.cards_count === 'number'
+        ? record.cards_count
+        : typeof record.card_count === 'number'
+          ? record.card_count
+          : undefined,
+    created_at: typeof record.created_at === 'number' ? record.created_at : undefined,
+    updated_at: typeof record.updated_at === 'number' ? record.updated_at : 0,
+  }
+}
+
+function normalizeRepoLibrarySnapshot(body: unknown): RepoLibrarySnapshot {
+  const record = (body ?? {}) as Record<string, unknown>
+  return {
+    snapshot_id: String(record.snapshot_id ?? record.id ?? ''),
+    repository_id: String(record.repository_id ?? record.repo_source_id ?? ''),
+    ref:
+      typeof record.ref === 'string'
+        ? record.ref
+        : typeof record.requested_ref === 'string'
+          ? record.requested_ref
+          : undefined,
+    resolved_ref: typeof record.resolved_ref === 'string' ? record.resolved_ref : undefined,
+    commit_sha: typeof record.commit_sha === 'string' ? record.commit_sha : undefined,
+    storage_path: typeof record.storage_path === 'string' ? record.storage_path : undefined,
+    report_path: typeof record.report_path === 'string' ? record.report_path : undefined,
+    report_url: typeof record.report_url === 'string' ? record.report_url : undefined,
+    report_excerpt:
+      typeof record.report_excerpt === 'string' ? record.report_excerpt : undefined,
+    report_markdown:
+      typeof record.report_markdown === 'string' ? record.report_markdown : undefined,
+    created_at: typeof record.created_at === 'number' ? record.created_at : 0,
+    updated_at: typeof record.updated_at === 'number' ? record.updated_at : undefined,
+  }
+}
+
+function normalizeRepoLibraryAnalysisRun(body: unknown): RepoLibraryAnalysisRun {
+  const record = (body ?? {}) as Record<string, unknown>
+  return {
+    analysis_id: String(record.analysis_id ?? record.analysis_run_id ?? record.id ?? ''),
+    repository_id: String(record.repository_id ?? record.repo_source_id ?? ''),
+    snapshot_id: typeof record.snapshot_id === 'string' ? record.snapshot_id : typeof record.repo_snapshot_id === 'string' ? record.repo_snapshot_id : undefined,
+    execution_id: typeof record.execution_id === 'string' ? record.execution_id : undefined,
+    repo_url: typeof record.repo_url === 'string' ? record.repo_url : '',
+    ref: typeof record.ref === 'string' ? record.ref : typeof record.requested_ref === 'string' ? record.requested_ref : undefined,
+    resolved_ref: typeof record.resolved_ref === 'string' ? record.resolved_ref : undefined,
+    commit_sha: typeof record.commit_sha === 'string' ? record.commit_sha : undefined,
+    features: Array.isArray(record.features) ? record.features.filter((item): item is string => typeof item === 'string') : [],
+    depth:
+      record.depth === 'deep' || record.depth === 'standard'
+        ? record.depth
+        : undefined,
+    language: typeof record.language === 'string' ? record.language : undefined,
+    analyzer_mode: typeof record.analyzer_mode === 'string' ? record.analyzer_mode : typeof record.agent_mode === 'string' ? record.agent_mode : undefined,
+    status: typeof record.status === 'string' ? record.status : 'unknown',
+    failure_message: typeof record.failure_message === 'string' ? record.failure_message : typeof record.error_message === 'string' ? record.error_message : undefined,
+    storage_path: typeof record.storage_path === 'string' ? record.storage_path : undefined,
+    report_path: typeof record.report_path === 'string' ? record.report_path : undefined,
+    report_url: typeof record.report_url === 'string' ? record.report_url : undefined,
+    created_at: typeof record.created_at === 'number' ? record.created_at : 0,
+    updated_at: typeof record.updated_at === 'number' ? record.updated_at : 0,
+    finished_at: typeof record.finished_at === 'number' ? record.finished_at : typeof record.ended_at === 'number' ? record.ended_at : undefined,
+  }
+}
+
+function normalizeRepoLibraryCard(body: unknown): RepoLibraryCard {
+  const record = (body ?? {}) as Record<string, unknown>
+  let confidence: number | undefined
+  if (typeof record.confidence === 'number') {
+    confidence = record.confidence
+  } else if (typeof record.confidence === 'string') {
+    if (record.confidence === 'high') confidence = 0.9
+    if (record.confidence === 'medium') confidence = 0.6
+    if (record.confidence === 'low') confidence = 0.3
+  }
+  return {
+    card_id: String(record.card_id ?? record.id ?? ''),
+    repository_id: String(record.repository_id ?? record.repo_source_id ?? ''),
+    snapshot_id: typeof record.snapshot_id === 'string' ? record.snapshot_id : typeof record.repo_snapshot_id === 'string' ? record.repo_snapshot_id : undefined,
+    analysis_id: typeof record.analysis_id === 'string' ? record.analysis_id : typeof record.analysis_run_id === 'string' ? record.analysis_run_id : undefined,
+    card_type: String(record.card_type ?? ''),
+    title: String(record.title ?? ''),
+    summary: typeof record.summary === 'string' ? record.summary : undefined,
+    detail: typeof record.detail === 'string' ? record.detail : typeof record.mechanism === 'string' ? record.mechanism : undefined,
+    confidence,
+    tags: Array.isArray(record.tags) ? record.tags.filter((item): item is string => typeof item === 'string') : undefined,
+    created_at: typeof record.created_at === 'number' ? record.created_at : undefined,
+    updated_at: typeof record.updated_at === 'number' ? record.updated_at : undefined,
+  }
+}
+
+function normalizeRepoLibraryCardEvidence(body: unknown): RepoLibraryCardEvidence {
+  const record = (body ?? {}) as Record<string, unknown>
+  return {
+    evidence_id: String(record.evidence_id ?? record.id ?? ''),
+    card_id: typeof record.card_id === 'string' ? record.card_id : undefined,
+    repository_id: typeof record.repository_id === 'string' ? record.repository_id : typeof record.repo_source_id === 'string' ? record.repo_source_id : undefined,
+    snapshot_id: typeof record.snapshot_id === 'string' ? record.snapshot_id : typeof record.repo_snapshot_id === 'string' ? record.repo_snapshot_id : undefined,
+    source_path: String(record.source_path ?? record.path ?? ''),
+    start_line: typeof record.start_line === 'number' ? record.start_line : typeof record.line === 'number' ? record.line : undefined,
+    end_line: typeof record.end_line === 'number' ? record.end_line : typeof record.line === 'number' ? record.line : undefined,
+    label: typeof record.label === 'string' ? record.label : typeof record.dimension === 'string' ? record.dimension : undefined,
+    excerpt: typeof record.excerpt === 'string' ? record.excerpt : typeof record.snippet === 'string' ? record.snippet : undefined,
+  }
+}
+
+function normalizeRepoLibraryRepositorySummary(body: unknown): RepoLibraryRepositorySummary {
+  const record = (body ?? {}) as Record<string, unknown>
+  const repository = normalizeRepoLibraryRepository(body)
+  return {
+    ...repository,
+    latest_snapshot:
+      record.latest_snapshot && typeof record.latest_snapshot === 'object'
+        ? normalizeRepoLibrarySnapshot(record.latest_snapshot)
+        : record.latest_snapshot_id || record.latest_commit_sha || record.latest_resolved_ref
+          ? normalizeRepoLibrarySnapshot({
+              snapshot_id: record.latest_snapshot_id,
+              repository_id: repository.repository_id,
+              commit_sha: record.latest_commit_sha,
+              resolved_ref: record.latest_resolved_ref,
+            })
+          : null,
+    latest_analysis:
+      record.latest_analysis && typeof record.latest_analysis === 'object'
+        ? normalizeRepoLibraryAnalysisRun(record.latest_analysis)
+        : record.latest_analysis_run_id || record.latest_analysis_status
+          ? normalizeRepoLibraryAnalysisRun({
+              analysis_run_id: record.latest_analysis_run_id,
+              repository_id: repository.repository_id,
+              status: record.latest_analysis_status,
+              updated_at: record.latest_analysis_updated_at,
+            })
+          : null,
+  }
+}
+
+function normalizeRepoLibraryRepositoryDetail(body: unknown): RepoLibraryRepositoryDetail {
+  const record = (body ?? {}) as Record<string, unknown>
+  const repository = normalizeRepoLibraryRepository(record.repository ?? body)
+  const snapshots = Array.isArray(record.snapshots)
+    ? record.snapshots.map((item) => normalizeRepoLibrarySnapshot(item))
+    : []
+  const analysisRuns = Array.isArray(record.analysis_runs)
+    ? record.analysis_runs.map((item) => normalizeRepoLibraryAnalysisRun(item))
+    : Array.isArray(record.runs)
+      ? record.runs.map((item) => normalizeRepoLibraryAnalysisRun(item))
+      : []
+  return {
+    repository,
+    latest_snapshot: snapshots[0] ?? null,
+    latest_analysis: analysisRuns[0] ?? null,
+    analysis_runs: analysisRuns,
+    report_excerpt: typeof record.report_excerpt === 'string' ? record.report_excerpt : undefined,
+    report_markdown: typeof record.report_markdown === 'string' ? record.report_markdown : undefined,
+  }
+}
+
+function normalizeRepoLibrarySearchResult(body: unknown): RepoLibrarySearchResult {
+  const record = (body ?? {}) as Record<string, unknown>
+  const repositoryPayload = record.repository && typeof record.repository === 'object' ? record.repository : null
+  const snapshotPayload = record.snapshot && typeof record.snapshot === 'object' ? record.snapshot : null
+  return {
+    result_id: typeof record.result_id === 'string' ? record.result_id : typeof record.chunk_id === 'string' ? record.chunk_id : undefined,
+    repository_id: String((repositoryPayload as Record<string, unknown> | null)?.repo_key ?? (repositoryPayload as Record<string, unknown> | null)?.repository_id ?? record.repository_id ?? ''),
+    snapshot_id: typeof record.snapshot_id === 'string' ? record.snapshot_id : typeof (snapshotPayload as Record<string, unknown> | null)?.snapshot_id === 'string' ? String((snapshotPayload as Record<string, unknown>).snapshot_id) : undefined,
+    card_id: typeof record.card_id === 'string' ? record.card_id : undefined,
+    score: typeof record.score === 'number' ? record.score : undefined,
+    title: typeof record.title === 'string' ? record.title : typeof (record.chunk as Record<string, unknown> | undefined)?.section_title === 'string' ? String((record.chunk as Record<string, unknown>).section_title) : undefined,
+    summary: typeof record.summary === 'string' ? record.summary : typeof record.text_excerpt === 'string' ? record.text_excerpt : undefined,
+    rationale: typeof record.rationale === 'string' ? record.rationale : undefined,
+    repository: repositoryPayload ? normalizeRepoLibraryRepositorySummary(repositoryPayload) : undefined,
+    snapshot: snapshotPayload ? normalizeRepoLibrarySnapshot(snapshotPayload) : undefined,
+    evidence_preview: Array.isArray(record.evidence_preview)
+      ? record.evidence_preview.map((item) => normalizeRepoLibraryCardEvidence(item))
+      : Array.isArray(record.evidence_refs)
+        ? (record.evidence_refs as unknown[]).map((item, index) => normalizeRepoLibraryCardEvidence({ evidence_id: `ref-${index}`, source_path: String(item) }))
+        : undefined,
+  }
+}
+
+function readRepoLibraryList<T>(body: unknown, keys: string[]): T[] {
+  if (Array.isArray(body)) return body as T[]
+  if (!body || typeof body !== 'object') {
+    throw new Error('unexpected response shape')
+  }
+  for (const key of keys) {
+    const value = (body as Record<string, unknown>)[key]
+    if (Array.isArray(value)) return value as T[]
+  }
+  throw new Error('unexpected response shape')
+}
+
+function normalizeRepoLibraryCreateAnalysisResponse(
+  body: unknown,
+): RepoLibraryCreateAnalysisResponse {
+  if (!body || typeof body !== 'object') {
+    throw new Error('unexpected response shape')
+  }
+  const record = body as Record<string, unknown>
+  if (record.analysis && typeof record.analysis === 'object') {
+    return {
+      analysis: normalizeRepoLibraryAnalysisRun(record.analysis),
+      repository:
+        record.repository && typeof record.repository === 'object'
+          ? normalizeRepoLibraryRepository(record.repository)
+          : undefined,
+      snapshot:
+        record.snapshot && typeof record.snapshot === 'object'
+          ? normalizeRepoLibrarySnapshot(record.snapshot)
+          : undefined,
+    }
+  }
+  if (record.run && typeof record.run === 'object') {
+    return {
+      analysis: normalizeRepoLibraryAnalysisRun(record.run),
+      repository:
+        record.repository && typeof record.repository === 'object'
+          ? normalizeRepoLibraryRepository(record.repository)
+          : undefined,
+      snapshot:
+        record.snapshot && typeof record.snapshot === 'object'
+          ? normalizeRepoLibrarySnapshot(record.snapshot)
+          : undefined,
+    }
+  }
+  return { analysis: normalizeRepoLibraryAnalysisRun(body) }
+}
+
+/**
+ * 功能：提交 Repo Library 仓库分析任务（`POST /api/v1/repo-library/analyses`）。
+ * 参数/返回：接收 daemonUrl 与分析请求体；返回创建后的 analysis 元数据，以及可能附带的 repository/snapshot。
+ * 失败场景：HTTP 非 2xx、校验失败或返回体缺少基本结构时抛出 Error。
+ * 副作用：发起 HTTP 请求并触发后端创建异步分析运行。
+ */
+export async function createRepoLibraryAnalysis(
+  daemonUrl: string,
+  req: RepoLibraryAnalysisRequest,
+): Promise<RepoLibraryCreateAnalysisResponse> {
+  const payload = {
+    repo_url: req.repo_url,
+    ref: req.ref,
+    features: req.features,
+    depth: req.depth ?? 'standard',
+    language: req.language === 'en' ? 'en' : 'zh',
+    agent_mode: req.analyzer_mode === 'compact' ? 'single' : 'single',
+  }
+  const res = await fetch(`${daemonUrl}/api/v1/repo-library/analyses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return normalizeRepoLibraryCreateAnalysisResponse(await res.json())
+}
+
+/**
+ * 功能：读取 Repo Library 仓库摘要列表（`GET /api/v1/repo-library/repositories`）。
+ * 参数/返回：接收 daemonUrl；返回按最近活动排序的仓库摘要数组。
+ * 失败场景：HTTP 非 2xx 或返回体不是数组/已知列表包装时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchRepoLibraryRepositories(
+  daemonUrl: string,
+): Promise<RepoLibraryRepositorySummary[]> {
+  const res = await fetch(`${daemonUrl}/api/v1/repo-library/repositories`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return readRepoLibraryList<unknown>(await res.json(), [
+    'items',
+    'repositories',
+  ]).map((item) => normalizeRepoLibraryRepositorySummary(item))
+}
+
+/**
+ * 功能：读取单个 Repo Library 仓库详情（`GET /api/v1/repo-library/repositories/{id}`）。
+ * 参数/返回：接收 daemonUrl 与 repositoryId；返回仓库详情、最近快照与分析运行概览。
+ * 失败场景：HTTP 非 2xx 或返回体缺少仓库详情结构时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchRepoLibraryRepository(
+  daemonUrl: string,
+  repositoryId: string,
+): Promise<RepoLibraryRepositoryDetail> {
+  const res = await fetch(`${daemonUrl}/api/v1/repo-library/repositories/${repositoryId}`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  const body = (await res.json()) as unknown
+  if (!body || typeof body !== 'object') {
+    throw new Error('unexpected response shape')
+  }
+  const record = body as Record<string, unknown>
+  if (record.repository && typeof record.repository === 'object') {
+    return normalizeRepoLibraryRepositoryDetail(body)
+  }
+  return { repository: normalizeRepoLibraryRepository(body) }
+}
+
+/**
+ * 功能：读取指定仓库下的快照列表（`GET /api/v1/repo-library/repositories/{id}/snapshots`）。
+ * 参数/返回：接收 daemonUrl 与 repositoryId；返回快照数组。
+ * 失败场景：HTTP 非 2xx 或返回体不是数组/已知列表包装时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchRepoLibrarySnapshots(
+  daemonUrl: string,
+  repositoryId: string,
+): Promise<RepoLibrarySnapshot[]> {
+  const res = await fetch(`${daemonUrl}/api/v1/repo-library/repositories/${repositoryId}/snapshots`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return readRepoLibraryList<unknown>(await res.json(), ['items', 'snapshots']).map((item) => normalizeRepoLibrarySnapshot(item))
+}
+
+/**
+ * 功能：按仓库或快照读取 Repo Library 卡片列表（`GET /api/v1/repo-library/cards`）。
+ * 参数/返回：接收 daemonUrl 与可选过滤参数；返回知识卡片数组。
+ * 失败场景：HTTP 非 2xx 或返回体不是数组/已知列表包装时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchRepoLibraryCards(
+  daemonUrl: string,
+  opts?: { repository_id?: string; snapshot_id?: string; limit?: number },
+): Promise<RepoLibraryCard[]> {
+  const url = new URL(`${daemonUrl}/api/v1/repo-library/cards`)
+  if (opts?.repository_id) url.searchParams.set('repository_id', opts.repository_id)
+  if (opts?.snapshot_id) url.searchParams.set('snapshot_id', opts.snapshot_id)
+  if (typeof opts?.limit === 'number') url.searchParams.set('limit', String(opts.limit))
+  const res = await fetch(url)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return readRepoLibraryList<unknown>(await res.json(), ['items', 'cards']).map((item) => normalizeRepoLibraryCard(item))
+}
+
+/**
+ * 功能：读取单张 Repo Library 卡片详情（`GET /api/v1/repo-library/cards/{id}`）。
+ * 参数/返回：接收 daemonUrl 与 cardId；返回卡片完整结构。
+ * 失败场景：HTTP 非 2xx 或返回体缺少卡片结构时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchRepoLibraryCard(
+  daemonUrl: string,
+  cardId: string,
+): Promise<RepoLibraryCard> {
+  const res = await fetch(`${daemonUrl}/api/v1/repo-library/cards/${cardId}`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return normalizeRepoLibraryCard(await res.json())
+}
+
+/**
+ * 功能：读取单张卡片的 evidence 列表（`GET /api/v1/repo-library/cards/{id}/evidence`）。
+ * 参数/返回：接收 daemonUrl 与 cardId；返回 evidence 数组。
+ * 失败场景：HTTP 非 2xx 或返回体不是数组/已知列表包装时抛出 Error。
+ * 副作用：发起 HTTP 请求。
+ */
+export async function fetchRepoLibraryCardEvidence(
+  daemonUrl: string,
+  cardId: string,
+): Promise<RepoLibraryCardEvidence[]> {
+  const res = await fetch(`${daemonUrl}/api/v1/repo-library/cards/${cardId}/evidence`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return readRepoLibraryList<unknown>(await res.json(), [
+    'items',
+    'evidence',
+  ]).map((item) => normalizeRepoLibraryCardEvidence(item))
+}
+
+export async function fetchRepoLibrarySnapshotReport(
+  daemonUrl: string,
+  snapshotId: string,
+): Promise<{ snapshot_id: string; report_markdown: string }> {
+  const res = await fetch(`${daemonUrl}/api/v1/repo-library/snapshots/${snapshotId}/report`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as { snapshot_id: string; report_markdown: string }
+}
+
+/**
+ * 功能：执行 Repo Library 语义模式搜索（`POST /api/v1/repo-library/search`）。
+ * 参数/返回：接收 daemonUrl 与搜索请求体；返回结果数组及可选 query_id。
+ * 失败场景：HTTP 非 2xx 或返回体缺少结果结构时抛出 Error。
+ * 副作用：发起 HTTP 请求，并触发后端向量/结构化检索。
+ */
+export async function searchRepoLibrary(
+  daemonUrl: string,
+  req: RepoLibrarySearchRequest,
+): Promise<RepoLibrarySearchResponse> {
+  const payload = {
+    query: req.query,
+    repo_filters: req.repository_ids,
+    mode: 'semi',
+    top_k: typeof req.limit === 'number' ? req.limit : 20,
+  }
+  const res = await fetch(`${daemonUrl}/api/v1/repo-library/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  const body = (await res.json()) as unknown
+  if (Array.isArray(body)) {
+    return { results: body as RepoLibrarySearchResult[] }
+  }
+  if (!body || typeof body !== 'object') {
+    throw new Error('unexpected response shape')
+  }
+  const record = body as Record<string, unknown>
+  if (Array.isArray(record.results)) {
+    return {
+      query_id: typeof record.query_id === 'string' ? record.query_id : undefined,
+      results: (record.results as unknown[]).map((item) => normalizeRepoLibrarySearchResult(item)),
+    }
+  }
+  return {
+    query_id: typeof record.query_id === 'string' ? record.query_id : undefined,
+    results: readRepoLibraryList<unknown>(body, ['items']).map((item) => normalizeRepoLibrarySearchResult(item)),
+  }
+}

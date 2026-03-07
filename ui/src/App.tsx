@@ -5,6 +5,9 @@ import { Topbar } from '@/app/components/Topbar'
 import { ChatSessionsPage } from '@/app/pages/ChatSessionsPage'
 import { OrchestrationDetailPage } from '@/app/pages/OrchestrationDetailPage'
 import { OrchestrationsPage } from '@/app/pages/OrchestrationsPage'
+import { RepoLibraryPatternSearchPage } from '@/app/pages/RepoLibraryPatternSearchPage'
+import { RepoLibraryRepositoriesPage } from '@/app/pages/RepoLibraryRepositoriesPage'
+import { RepoLibraryRepositoryDetailPage } from '@/app/pages/RepoLibraryRepositoryDetailPage'
 import { WorkflowsPage } from '@/app/pages/WorkflowsPage'
 import { WorkflowDetailPage } from '@/app/pages/WorkflowDetailPage'
 import { fetchExperts, fetchHealth, fetchInfo } from '@/lib/daemon'
@@ -144,6 +147,12 @@ export default function App() {
       >
         {route.name === 'orchestrations' ? (
           <OrchestrationsPage />
+        ) : route.name === 'repo_library_repositories' ? (
+          <RepoLibraryRepositoriesPage />
+        ) : route.name === 'repo_library_pattern_search' ? (
+          <RepoLibraryPatternSearchPage />
+        ) : route.name === 'repo_library_repository_detail' ? (
+          <RepoLibraryRepositoryDetailPage repositoryId={route.repositoryId} />
         ) : route.name === 'workflows' ? (
           <WorkflowsPage />
         ) : route.name === 'chat' ? (

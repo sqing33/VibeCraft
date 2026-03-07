@@ -16,6 +16,7 @@ import (
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/expert"
 	"vibe-tree/backend/internal/orchestration"
+	"vibe-tree/backend/internal/repolib"
 	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/store"
 	"vibe-tree/backend/internal/ws"
@@ -28,6 +29,7 @@ type Deps struct {
 	Experts       *expert.Registry
 	Chat          *chat.Manager
 	Orchestration *orchestration.Manager
+	RepoLibrary   *repolib.Service
 }
 
 // Register 功能：注册 HTTP/WS 路由到 `/api/v1` 路由组。
@@ -69,6 +71,16 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.POST("/orchestrations/:id/cancel", cancelOrchestrationHandler(deps))
 	v1.POST("/orchestrations/:id/continue", continueOrchestrationHandler(deps))
 	v1.POST("/agent-runs/:id/retry", retryAgentRunHandler(deps))
+
+	v1.POST("/repo-library/analyses", createRepoAnalysisHandler(deps))
+	v1.GET("/repo-library/repositories", listRepoRepositoriesHandler(deps))
+	v1.GET("/repo-library/repositories/:id", getRepoRepositoryHandler(deps))
+	v1.GET("/repo-library/repositories/:id/snapshots", listRepoSnapshotsHandler(deps))
+	v1.GET("/repo-library/snapshots/:id/report", getRepoSnapshotReportHandler(deps))
+	v1.GET("/repo-library/cards", listRepoCardsHandler(deps))
+	v1.GET("/repo-library/cards/:id", getRepoCardHandler(deps))
+	v1.GET("/repo-library/cards/:id/evidence", listRepoCardEvidenceHandler(deps))
+	v1.POST("/repo-library/search", searchRepoLibraryHandler(deps))
 
 	v1.GET("/workflows", listWorkflowsHandler(deps))
 	v1.POST("/workflows", createWorkflowHandler(deps))

@@ -18,6 +18,7 @@ import (
 	"vibe-tree/backend/internal/logx"
 	"vibe-tree/backend/internal/orchestration"
 	"vibe-tree/backend/internal/paths"
+	"vibe-tree/backend/internal/repolib"
 	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/scheduler"
 	"vibe-tree/backend/internal/server"
@@ -86,6 +87,11 @@ func main() {
 	execMgr := execution.NewManager(execRunner, grace, hub)
 	experts := expert.NewRegistry(cfg)
 	chatMgr := chat.NewManager(stateStore, hub, chat.Options{Runner: execRunner})
+	repoLibSvc, err := repolib.NewService(stateStore, execMgr)
+	if err != nil {
+		logx.Error("daemon", "repo-library", "初始化 Repo Library service 失败", "err", err)
+		os.Exit(1)
+	}
 	orchMgr := orchestration.NewManager(orchestration.Options{
 		Store:          stateStore,
 		Executions:     execMgr,
@@ -127,7 +133,7 @@ func main() {
 
 	engine := server.New(
 		server.Options{DevCORS: server.DevCORSFromEnv()},
-		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore, Experts: experts, Chat: chatMgr, Orchestration: orchMgr},
+		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore, Experts: experts, Chat: chatMgr, Orchestration: orchMgr, RepoLibrary: repoLibSvc},
 	)
 	srv := &http.Server{
 		Addr:              cfg.Addr(),

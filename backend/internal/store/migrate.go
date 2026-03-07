@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const schemaVersion = 6
+const schemaVersion = 7
 
 // Migrate 功能：执行 state DB schema 迁移（MVP：使用 PRAGMA user_version 管理版本）。
 // 参数/返回：ctx 控制超时；成功返回 nil。
@@ -78,6 +78,14 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		}
 		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 6;"); err != nil {
 			return fmt.Errorf("set user_version=6: %w", err)
+		}
+	}
+	if userVersion < 7 {
+		if err := migrateV7(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 7;"); err != nil {
+			return fmt.Errorf("set user_version=7: %w", err)
 		}
 	}
 
@@ -461,6 +469,115 @@ CREATE TABLE IF NOT EXISTS agent_run_executions (
 		`CREATE INDEX IF NOT EXISTS idx_agent_run_executions_agent_run ON agent_run_executions(agent_run_id, attempt);`,
 	}
 	for _, stmt := range createStmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("exec migration stmt: %w", err)
+		}
+	}
+	return nil
+}
+
+func migrateV7(ctx context.Context, tx *sql.Tx) error {
+	stmts := []string{
+		`
+CREATE TABLE IF NOT EXISTS repo_sources (
+  id TEXT PRIMARY KEY,
+  repo_url TEXT NOT NULL UNIQUE,
+  owner TEXT NOT NULL,
+  repo TEXT NOT NULL,
+  repo_key TEXT NOT NULL UNIQUE,
+  default_branch TEXT,
+  visibility TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_sources_updated_at ON repo_sources(updated_at DESC);`,
+		`
+CREATE TABLE IF NOT EXISTS repo_snapshots (
+  id TEXT PRIMARY KEY,
+  repo_source_id TEXT NOT NULL,
+  requested_ref TEXT NOT NULL,
+  resolved_ref TEXT,
+  commit_sha TEXT,
+  storage_path TEXT NOT NULL,
+  report_path TEXT,
+  subagent_results_path TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(repo_source_id) REFERENCES repo_sources(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_snapshots_source_created ON repo_snapshots(repo_source_id, created_at DESC);`,
+		`
+CREATE TABLE IF NOT EXISTS repo_analysis_runs (
+  id TEXT PRIMARY KEY,
+  repo_source_id TEXT NOT NULL,
+  repo_snapshot_id TEXT NOT NULL,
+  execution_id TEXT,
+  status TEXT NOT NULL,
+  language TEXT,
+  depth TEXT,
+  agent_mode TEXT,
+  features_json TEXT NOT NULL,
+  summary TEXT,
+  error_message TEXT,
+  result_json TEXT,
+  report_path TEXT,
+  started_at INTEGER,
+  ended_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(repo_source_id) REFERENCES repo_sources(id),
+  FOREIGN KEY(repo_snapshot_id) REFERENCES repo_snapshots(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_analysis_runs_source_created ON repo_analysis_runs(repo_source_id, created_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_analysis_runs_snapshot_created ON repo_analysis_runs(repo_snapshot_id, created_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_analysis_runs_status ON repo_analysis_runs(status, created_at DESC);`,
+		`
+CREATE TABLE IF NOT EXISTS repo_knowledge_cards (
+  id TEXT PRIMARY KEY,
+  repo_source_id TEXT NOT NULL,
+  repo_snapshot_id TEXT NOT NULL,
+  analysis_run_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  card_type TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  mechanism TEXT,
+  confidence TEXT,
+  tags_json TEXT,
+  section_title TEXT,
+  sort_index INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(repo_source_id) REFERENCES repo_sources(id),
+  FOREIGN KEY(repo_snapshot_id) REFERENCES repo_snapshots(id),
+  FOREIGN KEY(analysis_run_id) REFERENCES repo_analysis_runs(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_knowledge_cards_snapshot ON repo_knowledge_cards(repo_snapshot_id, sort_index, created_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_knowledge_cards_analysis ON repo_knowledge_cards(analysis_run_id, sort_index, created_at);`,
+		`
+CREATE TABLE IF NOT EXISTS repo_knowledge_evidence (
+  id TEXT PRIMARY KEY,
+  card_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  line INTEGER,
+  snippet TEXT,
+  dimension TEXT,
+  sort_index INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(card_id) REFERENCES repo_knowledge_cards(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_knowledge_evidence_card ON repo_knowledge_evidence(card_id, sort_index, created_at);`,
+		`
+CREATE TABLE IF NOT EXISTS repo_similarity_queries (
+  id TEXT PRIMARY KEY,
+  query_text TEXT NOT NULL,
+  repo_filters_json TEXT,
+  mode TEXT NOT NULL,
+  top_k INTEGER NOT NULL,
+  result_json TEXT,
+  created_at INTEGER NOT NULL
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_similarity_queries_created ON repo_similarity_queries(created_at DESC);`,
+	}
+	for _, stmt := range stmts {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("exec migration stmt: %w", err)
 		}
