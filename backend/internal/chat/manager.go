@@ -244,7 +244,7 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 	})
 
 	if spec.SDK == nil {
-		return m.runCLITurn(ctx, params.Session, userMsg, modelInput, spec, expertID, provider, model)
+		return m.runCLITurn(ctx, params.Session, userMsg, modelInput, spec, expertID, provider, model, params.ThinkingTranslation)
 	}
 	if err := m.ensureCompaction(ctx, params.Session, modelInput, *spec.SDK, spec.Env); err != nil {
 		return TurnResult{}, err
@@ -356,7 +356,7 @@ func (m *Manager) callProviderWithAnchorRetry(ctx context.Context, sess store.Ch
 	return "", "", store.ChatAnchor{}, providerCallMeta{}, err
 }
 
-func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string) (TurnResult, error) {
+func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string) (TurnResult, error) {
 	if m.runtimeRunner == nil {
 		return TurnResult{}, fmt.Errorf("chat runtime runner not configured")
 	}

@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: CLI chat MUST stream assistant output incrementally
 When a chat turn is executed through a CLI tool, the system MUST emit assistant output incrementally instead of waiting for the entire CLI process to finish before sending the first delta.
@@ -6,11 +6,6 @@ When a chat turn is executed through a CLI tool, the system MUST emit assistant 
 For Codex-backed chat turns, the system MUST prefer a fine-grained transport that exposes message delta notifications when available.
 
 If the fine-grained Codex transport cannot be started or initialized, the system MUST fall back to the legacy parseable wrapper stream instead of failing the turn before any model output is produced.
-
-#### Scenario: CLI assistant output streams during execution
-- **WHEN** a CLI-backed chat turn starts producing assistant text
-- **THEN** the daemon emits one or more `chat.turn.delta` events before the turn completes
-- **AND** the final assistant message still matches the completed turn result
 
 #### Scenario: Codex emits message delta through app-server
 - **WHEN** a Codex-backed chat turn is started successfully through app-server

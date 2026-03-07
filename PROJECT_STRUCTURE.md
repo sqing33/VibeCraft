@@ -75,6 +75,7 @@
 | `backend/internal/execution/manager.go`    | Execution 管理：启动/取消、日志落盘、WS 推送 `execution.*`/`node.log`                                                                 |
 | `backend/internal/orchestration/manager.go` | Orchestration 管理：goal 拆分首轮 agent runs、并发调度 queued agent run、cancel/retry/synthesis 收敛                                 |
 | `backend/internal/chat/manager.go`         | Chat 管理：多轮会话、provider anchor（OpenAI/Anthropic）、附件持久化接入、自动上下文压缩/跳过策略、WS `chat.*` 推送                |
+| `backend/internal/chat/codex_appserver.go` | Codex Chat app-server 客户端：JSON-RPC 握手、`thread/start|resume`、细粒度 delta 映射、token usage 与 artifact 写入             |
 | `backend/internal/chat/attachments.go`      | Chat 附件能力：附件类型校验、大小限制、文件落盘、provider 多模态 block 构造、调试输入摘要                                               |
 | `backend/internal/chat/provider_input.go`    | Chat 多模态重建：基于本地消息 + 附件重建 OpenAI/Anthropic provider 输入                                                                |
 | `backend/internal/chat/thinking_translation.go` | Chat 思考过程翻译：按分段阈值缓冲 reasoning、调用翻译模型并广播中文 delta / 失败事件                                             |
