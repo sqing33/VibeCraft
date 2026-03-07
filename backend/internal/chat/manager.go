@@ -1,11 +1,11 @@
 package chat
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
@@ -364,13 +364,13 @@ func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, userMs
 		return TurnResult{}, fmt.Errorf("%w: chat expert is not executable", store.ErrValidation)
 	}
 
-	attemptResume := strings.TrimSpace(pointerStringValue(sess.CLISessionID))
 	artifactDir, err := cliruntime.ChatTurnArtifactDir(sess.ID, userMsg.ID)
 	if err != nil {
 		artifactDir = ""
 	}
+	attemptResume := strings.TrimSpace(pointerStringValue(sess.CLISessionID))
 
-	runOnce := func(prompt string, contextMode string, resumeSessionID string) (string, string, error) {
+	runOnce := func(prompt string, contextMode string, resumeSessionID string) (finalText string, reasoningText string, nextSessionID string, err error) {
 		runSpec := spec
 		if runSpec.Env == nil {
 			runSpec.Env = map[string]string{}
@@ -389,10 +389,13 @@ func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, userMs
 		}
 		handle, err := m.runtimeRunner.StartOneshot(ctx, runSpec)
 		if err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
 		output := handle.Output()
-		var stdout strings.Builder
+		toolID := strings.TrimSpace(runSpec.Env["VIBE_TREE_CLI_FAMILY"])
+		assistantBuf := strings.Builder{}
+		thinkingBuf := strings.Builder{}
+		translationRuntime := newThinkingTranslationRuntime(m, sess.ID, nil)
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
@@ -400,16 +403,67 @@ func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, userMs
 				return
 			}
 			defer output.Close()
-			if data, err := io.ReadAll(output); err == nil {
-				stdout.Write(data)
+			scanner := bufio.NewScanner(output)
+			buf := make([]byte, 0, 64*1024)
+			scanner.Buffer(buf, 4*1024*1024)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if line == "" {
+					continue
+				}
+				events := parseCLIStreamEvents(toolID, line)
+				for _, event := range events {
+					switch event.Type {
+					case "session":
+						if strings.TrimSpace(event.SessionID) != "" {
+							nextSessionID = strings.TrimSpace(event.SessionID)
+						}
+					case "assistant_delta":
+						if event.Delta == "" {
+							continue
+						}
+						assistantBuf.WriteString(event.Delta)
+						m.broadcast("chat.turn.delta", map[string]any{"session_id": sess.ID, "delta": event.Delta})
+					case "thinking_delta":
+						if event.Delta == "" {
+							continue
+						}
+						thinkingBuf.WriteString(event.Delta)
+						m.broadcast("chat.turn.thinking.delta", map[string]any{"session_id": sess.ID, "delta": event.Delta})
+						if translationRuntime != nil {
+							translationRuntime.add(ctx, event.Delta)
+						}
+					case "progress_delta":
+						if event.Delta == "" {
+							continue
+						}
+						m.broadcast("chat.turn.thinking.delta", map[string]any{"session_id": sess.ID, "delta": event.Delta})
+					case "final":
+						if strings.TrimSpace(event.Text) != "" {
+							finalText = strings.TrimSpace(event.Text)
+						}
+						if strings.TrimSpace(event.Thinking) != "" && thinkingBuf.Len() == 0 {
+							thinkingBuf.WriteString(strings.TrimSpace(event.Thinking))
+						}
+					}
+				}
 			}
 		}()
 		exitRes, waitErr := handle.Wait()
 		<-done
-		finalText := strings.TrimSpace(stdout.String())
+		if translationRuntime != nil {
+			translationRuntime.complete(ctx)
+		}
+		if strings.TrimSpace(finalText) == "" && assistantBuf.Len() > 0 {
+			finalText = strings.TrimSpace(assistantBuf.String())
+		}
+		reasoningText = strings.TrimSpace(thinkingBuf.String())
 		if artifactDir != "" {
 			if artifactText, err := cliruntime.ReadFinalMessage(artifactDir); err == nil && strings.TrimSpace(artifactText) != "" {
-				finalText = artifactText
+				finalText = strings.TrimSpace(artifactText)
+			}
+			if cliSession, err := cliruntime.ReadSession(artifactDir); err == nil && strings.TrimSpace(cliSession.SessionID) != "" {
+				nextSessionID = strings.TrimSpace(cliSession.SessionID)
 			}
 		}
 		if strings.TrimSpace(finalText) == "" {
@@ -420,31 +474,26 @@ func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, userMs
 		if waitErr != nil || exitRes.ExitCode != 0 {
 			if strings.TrimSpace(finalText) == "" {
 				if waitErr != nil {
-					return "", "", waitErr
+					return "", reasoningText, nextSessionID, waitErr
 				}
-				return "", "", fmt.Errorf("cli runtime exited with code %d", exitRes.ExitCode)
-			}
-		}
-		newSessionID := ""
-		if artifactDir != "" {
-			if cliSession, err := cliruntime.ReadSession(artifactDir); err == nil {
-				newSessionID = strings.TrimSpace(cliSession.SessionID)
+				return "", reasoningText, nextSessionID, fmt.Errorf("cli runtime exited with code %d", exitRes.ExitCode)
 			}
 		}
 		if strings.TrimSpace(finalText) == "" {
 			finalText = "(empty response)"
 		}
-		return finalText, firstNonEmptyTrimmed(newSessionID, resumeSessionID), nil
+		return finalText, reasoningText, firstNonEmptyTrimmed(nextSessionID, resumeSessionID), nil
 	}
 
 	var (
-		finalText    string
-		cliSessionID string
-		contextMode  string
+		finalText     string
+		reasoningText string
+		cliSessionID  string
+		contextMode   string
 	)
 	if attemptResume != "" {
 		prompt := buildCLIIncrementalPrompt(userMsg, modelInput)
-		finalText, cliSessionID, err = runOnce(prompt, "cli_resume", attemptResume)
+		finalText, reasoningText, cliSessionID, err = runOnce(prompt, "cli_resume", attemptResume)
 		if err == nil {
 			contextMode = "cli_resume"
 		}
@@ -458,14 +507,16 @@ func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, userMs
 			return TurnResult{}, msgErr
 		}
 		prompt, _ := buildCLITurnPrompt(sess, messages, userMsg, modelInput, m.keepRecent)
-		finalText, cliSessionID, err = runOnce(prompt, "cli_reconstructed", "")
+		finalText, reasoningText, cliSessionID, err = runOnce(prompt, "cli_reconstructed", "")
 		if err != nil {
 			return TurnResult{}, err
 		}
 		contextMode = "cli_reconstructed"
 	}
 
-	m.broadcast("chat.turn.delta", map[string]any{"session_id": sess.ID, "delta": finalText})
+	translatedReasoningText := ""
+	thinkingTranslationApplied := false
+	thinkingTranslationFailed := false
 	assistantMsg, err := m.store.AppendChatMessage(ctx, store.AppendChatMessageParams{
 		SessionID:   sess.ID,
 		Role:        "assistant",
@@ -490,47 +541,155 @@ func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, userMs
 		"session_id":                   sess.ID,
 		"user_message_id":              userMsg.ID,
 		"message":                      assistantMsg,
-		"reasoning_text":               "",
-		"translated_reasoning_text":    "",
-		"thinking_translation_applied": false,
-		"thinking_translation_failed":  false,
+		"reasoning_text":               reasoningText,
+		"translated_reasoning_text":    translatedReasoningText,
+		"thinking_translation_applied": thinkingTranslationApplied,
+		"thinking_translation_failed":  thinkingTranslationFailed,
 		"model_input":                  modelInput,
 		"context_mode":                 contextMode,
 		"token_in":                     nil,
 		"token_out":                    nil,
 		"cached_input_tokens":          nil,
 	})
-	return TurnResult{
-		UserMessage:                userMsg,
-		AssistantMessage:           assistantMsg,
-		ReasoningText:              nil,
-		TranslatedReasoningText:    nil,
-		ModelInput:                 pointerString(modelInput),
-		ContextMode:                pointerString(contextMode),
-		CachedInputTokens:          nil,
-		ThinkingTranslationApplied: false,
-		ThinkingTranslationFailed:  false,
-	}, nil
+	return TurnResult{UserMessage: userMsg, AssistantMessage: assistantMsg, ReasoningText: pointerOrNilString(reasoningText), TranslatedReasoningText: pointerOrNilString(translatedReasoningText), ModelInput: pointerString(modelInput), ContextMode: pointerString(contextMode), CachedInputTokens: nil, ThinkingTranslationApplied: thinkingTranslationApplied, ThinkingTranslationFailed: thinkingTranslationFailed}, nil
 }
 
-func buildCLIIncrementalPrompt(currentUser store.ChatMessage, modelInput string) string {
-	parts := make([]string, 0, 2)
-	if current := buildCurrentInputDebug(modelInput, currentUser.Attachments); strings.TrimSpace(current) != "" {
-		parts = append(parts, current)
-	}
-	if lines := cliAttachmentPathLines(currentUser.Attachments); len(lines) > 0 {
-		parts = append(parts, "Attachment file paths:\n"+strings.Join(lines, "\n"))
-	}
-	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+type cliStreamEvent struct {
+	Type      string
+	Delta     string
+	SessionID string
+	Text      string
+	Thinking  string
 }
 
-func pointerOrNilString(v string) *string {
-	v = strings.TrimSpace(v)
-	if v == "" {
+func parseCLIStreamEvents(toolID, line string) []cliStreamEvent {
+	toolID = strings.TrimSpace(toolID)
+	if toolID == "claude" {
+		return parseClaudeCLIStreamEvents(line)
+	}
+	return parseCodexCLIStreamEvents(line)
+}
+
+func parseCodexCLIStreamEvents(line string) []cliStreamEvent {
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(line), &raw); err != nil {
 		return nil
 	}
-	return &v
+	out := make([]cliStreamEvent, 0, 2)
+	if sid := firstNonEmptyTrimmed(stringValue(raw["session_id"]), stringValue(raw["thread_id"])); sid != "" {
+		out = append(out, cliStreamEvent{Type: "session", SessionID: sid})
+	}
+	typeName := strings.TrimSpace(stringValue(raw["type"]))
+	if typeName == "thread.started" || typeName == "sessionConfigured" {
+		if sid := firstNonEmptyTrimmed(stringValue(raw["thread_id"]), nestedString(raw, "thread", "id"), nestedString(raw, "params", "sessionId")); sid != "" {
+			out = append(out, cliStreamEvent{Type: "session", SessionID: sid})
+		}
+	}
+	if typeName == "item.completed" {
+		item, _ := raw["item"].(map[string]any)
+		itemType := strings.TrimSpace(stringValue(item["type"]))
+		textVal := stringifyEventText(item["text"])
+		switch itemType {
+		case "agent_message":
+			if textVal != "" {
+				out = append(out, cliStreamEvent{Type: "assistant_delta", Delta: textVal})
+			}
+		case "reasoning":
+			if textVal != "" {
+				out = append(out, cliStreamEvent{Type: "thinking_delta", Delta: textVal})
+			}
+		case "command_execution":
+			msg := firstNonEmptyTrimmed(stringValue(item["command"]), textVal, "[tool] command execution")
+			out = append(out, cliStreamEvent{Type: "progress_delta", Delta: msg})
+		}
+	}
+	return out
 }
+
+func parseClaudeCLIStreamEvents(line string) []cliStreamEvent {
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(line), &raw); err != nil {
+		return nil
+	}
+	out := make([]cliStreamEvent, 0, 3)
+	if sid := firstNonEmptyTrimmed(stringValue(raw["session_id"]), stringValue(raw["sessionId"])); sid != "" {
+		out = append(out, cliStreamEvent{Type: "session", SessionID: sid})
+	}
+	typeName := strings.TrimSpace(stringValue(raw["type"]))
+	switch typeName {
+	case "stream_event":
+		event, _ := raw["event"].(map[string]any)
+		if strings.TrimSpace(stringValue(event["type"])) == "content_block_delta" {
+			delta, _ := event["delta"].(map[string]any)
+			deltaType := strings.TrimSpace(stringValue(delta["type"]))
+			if deltaType == "text_delta" {
+				if text := strings.TrimSpace(stringValue(delta["text"])); text != "" {
+					out = append(out, cliStreamEvent{Type: "assistant_delta", Delta: text})
+				}
+			}
+			if deltaType == "thinking_delta" {
+				if thinking := strings.TrimSpace(stringValue(delta["thinking"])); thinking != "" {
+					out = append(out, cliStreamEvent{Type: "thinking_delta", Delta: thinking})
+				}
+			}
+		}
+	case "tool_use":
+		name := firstNonEmptyTrimmed(stringValue(raw["tool_name"]), stringValue(raw["name"]), "tool")
+		out = append(out, cliStreamEvent{Type: "progress_delta", Delta: "[tool] " + name})
+	case "tool_result":
+		out = append(out, cliStreamEvent{Type: "progress_delta", Delta: "[tool] result"})
+	case "result":
+		if result := strings.TrimSpace(stringValue(raw["result"])); result != "" {
+			out = append(out, cliStreamEvent{Type: "final", Text: result})
+		}
+	}
+	return out
+}
+
+func nestedString(root map[string]any, path ...string) string {
+	cur := any(root)
+	for _, key := range path {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return ""
+		}
+		cur = m[key]
+	}
+	return stringValue(cur)
+}
+
+func stringValue(v any) string {
+	switch vv := v.(type) {
+	case string:
+		return vv
+	case float64:
+		return fmt.Sprintf("%v", vv)
+	default:
+		return ""
+	}
+}
+
+func stringifyEventText(v any) string {
+	switch vv := v.(type) {
+	case string:
+		return strings.TrimSpace(vv)
+	case []any:
+		parts := make([]string, 0, len(vv))
+		for _, item := range vv {
+			parts = append(parts, stringifyEventText(item))
+		}
+		return strings.TrimSpace(strings.Join(parts, "\n"))
+	case map[string]any:
+		if text := firstNonEmptyTrimmed(stringValue(vv["text"]), stringValue(vv["content"])); text != "" {
+			return text
+		}
+		b, _ := json.Marshal(vv)
+		return strings.TrimSpace(string(b))
+	default:
+		return ""
+	}
+}
+
 func buildCLITurnPrompt(sess store.ChatSession, messages []store.ChatMessage, currentUser store.ChatMessage, modelInput string, keepRecent int) (string, string) {
 	messages = applyCurrentModelInput(messages, currentUser, modelInput)
 	prompt := renderConversation(sess.Summary, messages, "", keepRecent)
@@ -1510,4 +1669,23 @@ func pointerStringValue(v *string) string {
 		return ""
 	}
 	return strings.TrimSpace(*v)
+}
+
+func pointerOrNilString(v string) *string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
+func buildCLIIncrementalPrompt(currentUser store.ChatMessage, modelInput string) string {
+	parts := make([]string, 0, 2)
+	if current := buildCurrentInputDebug(modelInput, currentUser.Attachments); strings.TrimSpace(current) != "" {
+		parts = append(parts, current)
+	}
+	if lines := cliAttachmentPathLines(currentUser.Attachments); len(lines) > 0 {
+		parts = append(parts, "Attachment file paths:\n"+strings.Join(lines, "\n"))
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }

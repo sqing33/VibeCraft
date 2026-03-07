@@ -46,13 +46,13 @@ else
   if [[ -n "$resume_session_id" ]]; then
     (
       cd "$workspace"
-      printf '%s' "$combined_prompt" | "$cli_cmd" exec resume --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox ${model:+--model "$model"} -o "$final_file" "$resume_session_id" -
-    ) >"$raw_log" 2>&1
+      printf '%s' "$combined_prompt" | "$cli_cmd" exec resume --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox ${model:+--model "$model"} -o "$final_file" "$resume_session_id" - 2>>"$raw_log"
+    ) | tee -a "$raw_log"
   else
     (
       cd "$workspace"
-      printf '%s' "$combined_prompt" | "$cli_cmd" exec --json --color never --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox ${model:+--model "$model"} -o "$final_file" -
-    ) >"$raw_log" 2>&1
+      printf '%s' "$combined_prompt" | "$cli_cmd" exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox ${model:+--model "$model"} -o "$final_file" - 2>>"$raw_log"
+    ) | tee -a "$raw_log"
   fi
   exit_code=$?
   set -e
@@ -169,5 +169,4 @@ print(json.dumps({
 }, ensure_ascii=False))
 JSON
 fi
-cat "$final_file"
 exit $exit_code

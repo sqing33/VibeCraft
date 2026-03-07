@@ -100,3 +100,10 @@ Chat sessions MUST persist the selected CLI tool, selected model id, and the las
 - **WHEN** the daemon opens a database created before `cli_tool_id` existed
 - **THEN** migration or repair logic adds the missing columns before `ListChatSessions` queries them
 
+### Requirement: Chat turn completion MUST remain stable when stream events degrade
+Even when CLI streaming/thinking event parsing is partial or degraded, the final assistant message and session persistence MUST still succeed through final artifact fallback.
+
+#### Scenario: Stream parse partially fails but final response succeeds
+- **WHEN** some CLI mid-turn events cannot be parsed
+- **THEN** the system still stores the final assistant message from the completed turn
+

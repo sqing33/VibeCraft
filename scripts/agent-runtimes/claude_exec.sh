@@ -33,7 +33,7 @@ if [[ -z "$raw_log" ]]; then
 fi
 trap 'for f in "${cleanup_files[@]:-}"; do [[ -n "$f" ]] && rm -f "$f"; done' EXIT
 
-args=(-p --output-format stream-json --dangerously-skip-permissions)
+args=(-p --output-format stream-json --dangerously-skip-permissions --include-partial-messages)
 if [[ -n "$model" ]]; then
   args+=(--model "$model")
 fi
@@ -51,8 +51,8 @@ else
   set +e
   (
     cd "$workspace"
-    "$cli_cmd" "${args[@]}" "$prompt"
-  ) >"$raw_log" 2>&1
+    "$cli_cmd" "${args[@]}" "$prompt" 2>>"$raw_log"
+  ) | tee -a "$raw_log"
   exit_code=$?
   set -e
 fi
@@ -172,5 +172,4 @@ print(json.dumps({
 }, ensure_ascii=False))
 JSON
 fi
-cat "$final_file"
 exit $exit_code

@@ -496,3 +496,10 @@ The Chat page's model selectors MUST render the selected model label in the coll
 - **WHEN** the current tool/model combination is valid
 - **THEN** the composer model select shows the selected model label instead of an empty field
 
+### Requirement: Chat UI MUST render CLI mid-turn feedback
+The Chat UI MUST render CLI-generated mid-turn assistant deltas as they arrive, and it MUST render available thinking or progress events without waiting for turn completion.
+
+#### Scenario: Assistant bubble grows during CLI turn
+- **WHEN** CLI assistant deltas are received through WebSocket
+- **THEN** the pending assistant bubble updates incrementally before completion
+

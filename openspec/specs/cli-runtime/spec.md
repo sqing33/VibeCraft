@@ -72,3 +72,10 @@ When a chat session already has a CLI-native session/thread id, wrappers MUST pr
 - **WHEN** a chat turn provides `VIBE_TREE_RESUME_SESSION_ID` to the Codex wrapper
 - **THEN** the wrapper invokes `codex exec resume` for that turn
 
+### Requirement: Chat wrappers MUST emit normalized or parseable streaming events
+CLI wrappers used for chat MUST expose a stream that the daemon can parse incrementally for assistant deltas, session updates, and final completion.
+
+#### Scenario: Wrapper emits assistant delta events
+- **WHEN** the underlying CLI emits incremental assistant text
+- **THEN** the daemon can relay assistant deltas before turn completion
+
