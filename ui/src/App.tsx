@@ -141,7 +141,7 @@ export default function App() {
       <main
         className={
           isChatRoute
-            ? 'h-[calc(100vh-3.5rem)] w-full overflow-hidden p-4'
+            ? 'h-[calc(100vh-3.5rem)] w-full overflow-hidden px-3 py-3 md:px-4 md:py-4'
             : 'mx-auto max-w-6xl p-4'
         }
       >

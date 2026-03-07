@@ -156,16 +156,18 @@ export function SettingsDialog() {
                   defaultSelectedKey="basic"
                   aria-label="系统设置"
                   classNames={{
-                    base: "flex h-full min-h-0 flex-1 flex-col",
+                    base: "w-full shrink-0",
                     panel: "h-full min-h-0 flex-1 overflow-y-auto pr-1",
                     tabList: "grid w-full shrink-0 grid-cols-4",
                   }}
                 >
                   <Tab key="basic" title="基本设置">
-                    <BasicSettingsTab />
+                    <div className="flex min-h-full flex-col">
+                      <BasicSettingsTab />
+                    </div>
                   </Tab>
                   <Tab key="diagnostics" title="连接与诊断">
-                    <div className="space-y-6">
+                    <div className="flex min-h-full flex-col space-y-6">
                       <section className="space-y-3">
                         <div className="flex flex-wrap items-center gap-2">
                           {healthBadge(health)}

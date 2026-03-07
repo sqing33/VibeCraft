@@ -160,8 +160,8 @@ export function BasicSettingsTab() {
   }
 
   return (
-    <div className="space-y-6">
-      <section className="space-y-3 rounded-xl border bg-background/40 p-4">
+    <div className="flex min-h-full flex-col">
+      <section className="flex min-h-full flex-1 flex-col space-y-3 rounded-xl border bg-background/40 p-4">
         <div>
           <div className="text-sm font-semibold">思考过程翻译</div>
           <div className="text-xs text-muted-foreground">
@@ -255,7 +255,7 @@ export function BasicSettingsTab() {
               )}
             </div>
 
-            <div className="flex justify-end gap-2">
+            <div className="mt-auto flex justify-end gap-2 pt-2">
               <Button variant="flat" onPress={() => void load()}>
                 重新加载
               </Button>

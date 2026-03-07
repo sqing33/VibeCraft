@@ -670,341 +670,53 @@ export function ChatSessionsPage() {
     return ''
   }, [activeSession, effectiveTurnExpertId, formatModelIdentity, pendingMeta])
 
+  const activeSessionIdentity = useMemo(() => {
+    if (!activeSession) return ''
+    return formatModelIdentity({
+      expert_id: activeSession.expert_id,
+      provider: activeSession.provider,
+      model: activeSession.model,
+    })
+  }, [activeSession, formatModelIdentity])
+
   if (health.status === 'error') {
     return <Alert color="danger" title="无法连接守护进程" description={health.message} />
   }
 
   return (
-    <div className="mx-auto grid h-full min-h-0 w-full max-w-[1536px] gap-4 overflow-hidden md:grid-cols-[320px_minmax(0,1200px)]">
-      <section className="flex min-h-0 flex-col gap-3 rounded-xl border bg-card p-3">
-        <div className="text-sm font-semibold">会话</div>
-        <Input
-          label="标题"
-          value={newTitle}
-          onValueChange={setNewTitle}
-          placeholder="新会话"
-          size="sm"
-        />
-        <Select
-          label="Expert"
-          selectedKeys={effectiveNewExpertId ? new Set([effectiveNewExpertId]) : new Set()}
-          onSelectionChange={(keys) => {
-            if (keys === 'all') return
-            const first = keys.values().next().value
-            if (typeof first === 'string') setNewExpertId(first)
-          }}
-          size="sm"
-          disallowEmptySelection
-          isDisabled={selectableExperts.length === 0}
-        >
-          {selectableExperts.map((e) => (
-            <SelectItem key={e.id}>{e.label || e.id}</SelectItem>
-          ))}
-        </Select>
-        <Button
-          color="primary"
-          size="sm"
-          isDisabled={selectableExperts.length === 0}
-          onPress={() => void onCreate()}
-        >
-          新建会话
-        </Button>
-
-        {error ? <Alert color="danger" title="加载失败" description={error} /> : null}
-
-        <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
-          {loading ? (
-            <div className="text-xs text-muted-foreground">加载中…</div>
-          ) : visibleSessions.length === 0 ? (
-            <div className="text-xs text-muted-foreground">暂无会话</div>
-          ) : (
-            visibleSessions.map((s) => (
-              <button
-                key={s.session_id}
-                className={`w-full rounded-lg border p-2 text-left ${
-                  s.session_id === activeSessionId ? 'border-primary bg-primary/5' : 'hover:bg-background/50'
-                }`}
-                onClick={() => {
-                  setActiveSession(s.session_id)
-                  setTurnExpertId(s.expert_id)
-                  setSelectedFiles([])
-                }}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="truncate text-sm font-medium">{s.title}</div>
-                  <span
-                    className="shrink-0 cursor-pointer text-red-500 transition-colors hover:text-red-600"
-                    title="删除会话"
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      void onDeleteSession(s.session_id)
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" focusable="false" />
-                  </span>
-                </div>
-                <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span className="truncate">{s.provider}/{s.model}</span>
-                  <span>{formatRelativeTime(s.updated_at)}</span>
-                </div>
-                <div className="mt-1">
-                  <Chip size="sm" variant="flat">
-                    {s.status}
-                  </Chip>
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-      </section>
-
-      <section className="flex min-h-0 flex-col rounded-xl border bg-card p-3">
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <div>
-            <div className="text-sm font-semibold">对话</div>
-            <div className="text-xs text-muted-foreground">
-              {activeSession ? `${activeSession.title} · ${activeSession.session_id}` : '请选择或创建会话'}
+    <>
+      <div className="grid h-full min-h-0 w-full grid-cols-1 gap-3 lg:grid-cols-[272px_minmax(0,1fr)]">
+        <section className="flex min-h-0 flex-col overflow-hidden rounded-[28px] border bg-card/70 p-3 shadow-sm">
+          <div className="mb-3 flex items-start justify-between gap-3 px-1">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold">会话</div>
+              <div className="mt-1 text-xs text-muted-foreground">选择或创建一个对话工作区</div>
             </div>
+            <Chip size="sm" variant="flat">
+              {visibleSessions.length}
+            </Chip>
           </div>
-          <div className="flex gap-2">
-            <Button size="sm" variant="flat" isDisabled={!activeSessionId} onPress={() => void onFork()}>
-              分叉
-            </Button>
-          </div>
-        </div>
 
-        <div
-          ref={messageScrollRef}
-          className="mb-3 min-h-0 flex-1 space-y-2 overflow-auto rounded-lg border bg-background/30 p-3"
-        >
-          {messages.length === 0 && !pendingAssistant ? (
-            <div className="text-xs text-muted-foreground">暂无消息</div>
-          ) : null}
-          {messages.map((m) => {
-            const isUser = m.role === 'user'
-            const isAssistant = m.role === 'assistant'
-            const fullWidth = shouldUseFullWidth(m.content_text)
-            const identity = formatModelIdentity({
-              expert_id: m.expert_id,
-              provider: m.provider,
-              model: m.model,
-            })
-            const inputMeta = isUser ? turnInputByUserMessageId[m.message_id] : undefined
-            const tokenUsage = isAssistant
-              ? formatTokenUsage({
-                  tokenIn: m.token_in ?? usageByMessageId[m.message_id]?.token_in,
-                  tokenOut: m.token_out ?? usageByMessageId[m.message_id]?.token_out,
-                  cachedInputTokens: usageByMessageId[m.message_id]?.cached_input_tokens,
-                })
-              : ''
-            const contextModeLabel =
-              inputMeta?.context_mode === 'anchor'
-                ? '上下文模式：Anchor 续写'
-                : inputMeta?.context_mode === 'reconstructed'
-                  ? '上下文模式：重建上下文'
-                  : inputMeta?.context_mode === 'demo'
-                    ? '上下文模式：Demo'
-                    : ''
-            const showThinkingDrawer =
-              isAssistant &&
-              m.message_id === lastAssistantMessageId &&
-              Boolean(displayedThinking.trim()) &&
-              !pendingAssistant
-            return (
-              <div key={m.message_id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-                <div
-                  className={`rounded-2xl border px-3 py-2 shadow-sm ${
-                    isUser ? 'border-primary/40 bg-primary/10' : 'bg-background'
-                  } ${fullWidth ? 'w-full' : 'max-w-[82%]'}`}
-                >
-                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {isUser ? '你' : 'AI'}
-                    {identity ? ` · ${identity}` : ''}
-                  </div>
-                  {showThinkingDrawer ? (
-                    <details className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
-                      <summary className="cursor-pointer select-none text-muted-foreground">
-                        查看完整思考过程
-                      </summary>
-                      <div className="chat-markdown mt-2 text-xs text-muted-foreground">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayedThinking}</ReactMarkdown>
-                      </div>
-                    </details>
-                  ) : null}
-                  {isAssistant ? (
-                    <div className="chat-markdown text-sm">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content_text}</ReactMarkdown>
-                    </div>
-                  ) : (
-                    <div className="whitespace-pre-wrap text-sm">{m.content_text}</div>
-                  )}
-                  {Array.isArray(m.attachments) && m.attachments.length > 0 ? (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {m.attachments.map((attachment) => {
-                        const sizeLabel = formatAttachmentSize(attachment.size_bytes)
-                        const kindLabel = formatAttachmentKind(attachment.kind)
-                        return (
-                          <div
-                            key={attachment.attachment_id}
-                            className="flex items-center gap-1 rounded-full border bg-background/60 px-2 py-1 text-xs"
-                          >
-                            <span className="max-w-[200px] truncate">{attachment.file_name}</span>
-                            {kindLabel ? <span className="text-muted-foreground">{kindLabel}</span> : null}
-                            {sizeLabel ? <span className="text-muted-foreground">{sizeLabel}</span> : null}
-                            {canPreviewAttachmentTarget(attachment.file_name, attachment.mime_type, attachment.kind) ? (
-                              <button
-                                type="button"
-                                className="rounded p-0.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                                onClick={() => void openPreviewForAttachment(attachment)}
-                                title="预览附件"
-                              >
-                                <Eye className="h-3 w-3" />
-                              </button>
-                            ) : null}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  ) : null}
-                  {isUser && inputMeta?.model_input ? (
-                    <details className="mt-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
-                      <summary className="cursor-pointer select-none text-muted-foreground">
-                        查看实际携带内容
-                      </summary>
-                      {contextModeLabel ? (
-                        <div className="mt-2 text-[11px] text-muted-foreground">{contextModeLabel}</div>
-                      ) : null}
-                      <div className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
-                        {inputMeta.model_input}
-                      </div>
-                    </details>
-                  ) : null}
-                  {isAssistant && tokenUsage ? (
-                    <div className="mt-2 border-t pt-2 text-[11px] text-muted-foreground">{tokenUsage}</div>
-                  ) : null}
-                </div>
-              </div>
-            )
-          })}
-          {pendingAssistant ? (
-            <div className="flex justify-start">
-              <div
-                className={`rounded-2xl border border-dashed bg-background px-3 py-2 shadow-sm ${
-                  shouldUseFullWidth(streaming) ? 'w-full' : 'max-w-[82%]'
-                }`}
-              >
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  AI{pendingIdentity ? ` · ${pendingIdentity}` : ''} {streaming ? '回复中' : '思考中'}
-                </div>
-                {displayedThinking.trim() ? (
-                  <details className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
-                    <summary className="cursor-pointer select-none text-muted-foreground">
-                      查看完整思考过程
-                    </summary>
-                    <div className="chat-markdown mt-2 text-xs text-muted-foreground">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayedThinking}</ReactMarkdown>
-                    </div>
-                  </details>
-                ) : pendingThinkingTranslation ? (
-                  <div className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
-                    正在翻译思考过程…
-                  </div>
-                ) : null}
-                {streaming ? (
-                  <div className="chat-markdown text-sm">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{streaming}</ReactMarkdown>
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">正在思考…</div>
-                )}
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        <div
-          className={`flex gap-2 rounded-xl border border-dashed p-2 transition ${dragActive ? 'border-primary bg-primary/5 shadow-sm' : 'border-transparent'}` }
-          onDragEnter={handleComposerDragEnter}
-          onDragOver={handleComposerDragOver}
-          onDragLeave={handleComposerDragLeave}
-          onDrop={handleComposerDrop}
-        >
-          <div className="flex flex-1 flex-col gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(event) => {
-                appendSelectedFiles(event.target.files)
-                event.currentTarget.value = ''
-              }}
+          <div className="space-y-2 rounded-[22px] border bg-background/60 p-2">
+            <Input
+              aria-label="新会话标题"
+              value={newTitle}
+              onValueChange={setNewTitle}
+              placeholder="新会话标题"
+              size="sm"
             />
-            {selectedFiles.length > 0 ? (
-              <div className="flex flex-wrap gap-2 rounded-lg border bg-background/40 p-2">
-                {selectedFiles.map((file) => {
-                  const identity = fileIdentity(file)
-                  return (
-                    <div
-                      key={identity}
-                      className="flex max-w-full items-center gap-1 rounded-full border px-2 py-1 text-xs text-foreground"
-                    >
-                      <span className="max-w-[180px] truncate">{file.name}</span>
-                      <span className="text-muted-foreground">{guessPendingFileKind(file)}</span>
-                      <span className="text-muted-foreground">{formatAttachmentSize(file.size)}</span>
-                      {canPreviewAttachmentTarget(file.name, file.type) ? (
-                        <button
-                          type="button"
-                          className="rounded p-0.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                          onClick={() => void openPreviewForFile(file)}
-                          title="预览附件"
-                        >
-                          <Eye className="h-3 w-3" />
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="rounded p-0.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                        onClick={() => removeSelectedFile(identity)}
-                        title="移除附件"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            ) : null}
-            <Textarea
-              value={input}
-              onValueChange={setInput}
-              placeholder="输入消息或上传附件..."
-              minRows={2}
-              isDisabled={!activeSessionId || sending}
-              className="flex-1"
-            />
-            {dragActive ? <div className="text-xs text-primary">释放鼠标即可添加附件</div> : null}
-          </div>
-          <div className="flex w-[200px] flex-col gap-2">
-            <Button
-              variant="flat"
-              startContent={<Paperclip className="h-4 w-4" />}
-              isDisabled={!activeSessionId || sending}
-              onPress={openFilePicker}
-            >
-              上传附件
-            </Button>
             <Select
-              label="Expert"
-              selectedKeys={effectiveTurnExpertId ? new Set([effectiveTurnExpertId]) : new Set()}
+              aria-label="新会话 Expert"
+              placeholder="选择新会话 Expert"
+              selectedKeys={effectiveNewExpertId ? new Set([effectiveNewExpertId]) : new Set()}
               onSelectionChange={(keys) => {
                 if (keys === 'all') return
                 const first = keys.values().next().value
-                if (typeof first === 'string') setTurnExpertId(first)
+                if (typeof first === 'string') setNewExpertId(first)
               }}
               size="sm"
               disallowEmptySelection
-              isDisabled={!activeSessionId || sending || selectableExperts.length === 0}
+              isDisabled={selectableExperts.length === 0}
             >
               {selectableExperts.map((e) => (
                 <SelectItem key={e.id}>{e.label || e.id}</SelectItem>
@@ -1012,16 +724,365 @@ export function ChatSessionsPage() {
             </Select>
             <Button
               color="primary"
-              isDisabled={!activeSessionId || sending || (!input.trim() && selectedFiles.length === 0)}
-              onPress={() => void onSend()}
+              size="sm"
+              className="w-full"
+              isDisabled={selectableExperts.length === 0}
+              onPress={() => void onCreate()}
             >
-              {sending ? '发送中…' : '发送'}
+              新建会话
             </Button>
           </div>
-        </div>
-      </section>
-            <AttachmentPreviewModal preview={preview} onClose={closePreview} />
 
-    </div>
+          {error ? <Alert color="danger" title="加载失败" description={error} className="mt-3" /> : null}
+
+          <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-auto pr-1">
+            {loading ? (
+              <div className="rounded-2xl border border-dashed px-3 py-4 text-xs text-muted-foreground">加载中…</div>
+            ) : visibleSessions.length === 0 ? (
+              <div className="rounded-2xl border border-dashed px-3 py-4 text-xs text-muted-foreground">暂无会话</div>
+            ) : (
+              visibleSessions.map((s) => (
+                <button
+                  key={s.session_id}
+                  className={`w-full rounded-[22px] border px-3 py-3 text-left transition ${
+                    s.session_id === activeSessionId
+                      ? 'border-primary/50 bg-primary/5 shadow-sm'
+                      : 'border-transparent bg-background/40 hover:border-default-200 hover:bg-background/80'
+                  }`}
+                  onClick={() => {
+                    setActiveSession(s.session_id)
+                    setTurnExpertId(s.expert_id)
+                    setSelectedFiles([])
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{s.title}</div>
+                      <div className="mt-1 truncate text-[11px] text-muted-foreground">{s.session_id}</div>
+                    </div>
+                    <span
+                      className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-danger/10 hover:text-danger"
+                      title="删除会话"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        void onDeleteSession(s.session_id)
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" focusable="false" />
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span className="truncate">{s.provider}/{s.model}</span>
+                    <span className="shrink-0">{formatRelativeTime(s.updated_at)}</span>
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </section>
+
+        <section className="flex min-h-0 flex-col overflow-hidden rounded-[30px] border bg-card/70 shadow-sm">
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b bg-background/60 px-5 py-4 md:px-6">
+            <div className="min-w-0">
+              <div className="truncate text-base font-semibold">
+                {activeSession ? activeSession.title : '请选择或创建会话'}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                {activeSession ? (
+                  <>
+                    <span className="truncate">{activeSession.session_id}</span>
+                    {activeSessionIdentity ? <span>· {activeSessionIdentity}</span> : null}
+                  </>
+                ) : (
+                  <span>左侧创建会话后即可开始对话</span>
+                )}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {activeSession ? (
+                <Chip size="sm" variant="flat">
+                  {activeSession.status}
+                </Chip>
+              ) : null}
+              <Button size="sm" variant="light" isDisabled={!activeSessionId} onPress={() => void onFork()}>
+                分叉
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background/30">
+            <div ref={messageScrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8">
+              <div className="mx-auto flex w-full max-w-[880px] flex-col gap-5">
+                {messages.length === 0 && !pendingAssistant ? (
+                  <div className="flex min-h-full flex-1 items-center justify-center py-16">
+                    <div className="max-w-md rounded-[24px] border border-dashed bg-background/70 px-6 py-8 text-center">
+                      <div className="text-base font-medium">开始新的对话</div>
+                      <div className="mt-2 text-sm text-muted-foreground">
+                        从左侧选择会话，或先创建一个新会话。
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {messages.map((m) => {
+                  const isUser = m.role === 'user'
+                  const isAssistant = m.role === 'assistant'
+                  const fullWidth = shouldUseFullWidth(m.content_text)
+                  const identity = formatModelIdentity({
+                    expert_id: m.expert_id,
+                    provider: m.provider,
+                    model: m.model,
+                  })
+                  const inputMeta = isUser ? turnInputByUserMessageId[m.message_id] : undefined
+                  const tokenUsage = isAssistant
+                    ? formatTokenUsage({
+                        tokenIn: m.token_in ?? usageByMessageId[m.message_id]?.token_in,
+                        tokenOut: m.token_out ?? usageByMessageId[m.message_id]?.token_out,
+                        cachedInputTokens: usageByMessageId[m.message_id]?.cached_input_tokens,
+                      })
+                    : ''
+                  const contextModeLabel =
+                    inputMeta?.context_mode === 'anchor'
+                      ? '上下文模式：Anchor 续写'
+                      : inputMeta?.context_mode === 'reconstructed'
+                        ? '上下文模式：重建上下文'
+                        : inputMeta?.context_mode === 'demo'
+                          ? '上下文模式：Demo'
+                          : ''
+                  const showThinkingDrawer =
+                    isAssistant &&
+                    m.message_id === lastAssistantMessageId &&
+                    Boolean(displayedThinking.trim()) &&
+                    !pendingAssistant
+                  return (
+                    <div key={m.message_id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+                      <div
+                        className={`rounded-[24px] px-4 py-3 ${
+                          isUser
+                            ? 'border border-default-200 bg-default-100/90 shadow-sm'
+                            : 'border border-default-200/70 bg-background/80 shadow-sm'
+                        } ${fullWidth ? 'w-full' : isUser ? 'max-w-[78%]' : 'max-w-[90%]'}`}
+                      >
+                        <div className="mb-1 text-[11px] font-medium text-muted-foreground">
+                          {isUser ? '你' : 'AI'}
+                          {identity ? ` · ${identity}` : ''}
+                        </div>
+                        {showThinkingDrawer ? (
+                          <details className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
+                            <summary className="cursor-pointer select-none text-muted-foreground">
+                              查看完整思考过程
+                            </summary>
+                            <div className="chat-markdown mt-2 text-xs text-muted-foreground">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayedThinking}</ReactMarkdown>
+                            </div>
+                          </details>
+                        ) : null}
+                        {isAssistant ? (
+                          <div className="chat-markdown text-sm">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content_text}</ReactMarkdown>
+                          </div>
+                        ) : (
+                          <div className="whitespace-pre-wrap text-sm">{m.content_text}</div>
+                        )}
+                        {Array.isArray(m.attachments) && m.attachments.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {m.attachments.map((attachment) => {
+                              const sizeLabel = formatAttachmentSize(attachment.size_bytes)
+                              const kindLabel = formatAttachmentKind(attachment.kind)
+                              return (
+                                <div
+                                  key={attachment.attachment_id}
+                                  className="flex items-center gap-1 rounded-full border bg-background/60 px-2 py-1 text-xs"
+                                >
+                                  <span className="max-w-[200px] truncate">{attachment.file_name}</span>
+                                  {kindLabel ? <span className="text-muted-foreground">{kindLabel}</span> : null}
+                                  {sizeLabel ? <span className="text-muted-foreground">{sizeLabel}</span> : null}
+                                  {canPreviewAttachmentTarget(attachment.file_name, attachment.mime_type, attachment.kind) ? (
+                                    <button
+                                      type="button"
+                                      className="rounded p-0.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                                      onClick={() => void openPreviewForAttachment(attachment)}
+                                      title="预览附件"
+                                    >
+                                      <Eye className="h-3 w-3" />
+                                    </button>
+                                  ) : null}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        ) : null}
+                        {isUser && inputMeta?.model_input ? (
+                          <details className="mt-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
+                            <summary className="cursor-pointer select-none text-muted-foreground">
+                              查看实际携带内容
+                            </summary>
+                            {contextModeLabel ? (
+                              <div className="mt-2 text-[11px] text-muted-foreground">{contextModeLabel}</div>
+                            ) : null}
+                            <div className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
+                              {inputMeta.model_input}
+                            </div>
+                          </details>
+                        ) : null}
+                        {isAssistant && tokenUsage ? (
+                          <div className="mt-2 border-t pt-2 text-[11px] text-muted-foreground">{tokenUsage}</div>
+                        ) : null}
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {pendingAssistant ? (
+                  <div className="flex justify-start">
+                    <div
+                      className={`rounded-[24px] border border-dashed bg-background/80 px-4 py-3 shadow-sm ${
+                        shouldUseFullWidth(streaming) ? 'w-full' : 'max-w-[90%]'
+                      }`}
+                    >
+                      <div className="mb-1 text-[11px] font-medium text-muted-foreground">
+                        AI{pendingIdentity ? ` · ${pendingIdentity}` : ''} {streaming ? '回复中' : '思考中'}
+                      </div>
+                      {displayedThinking.trim() ? (
+                        <details className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
+                          <summary className="cursor-pointer select-none text-muted-foreground">
+                            查看完整思考过程
+                          </summary>
+                          <div className="chat-markdown mt-2 text-xs text-muted-foreground">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayedThinking}</ReactMarkdown>
+                          </div>
+                        </details>
+                      ) : pendingThinkingTranslation ? (
+                        <div className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+                          正在翻译思考过程…
+                        </div>
+                      ) : null}
+                      {streaming ? (
+                        <div className="chat-markdown text-sm">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{streaming}</ReactMarkdown>
+                        </div>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">正在思考…</div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="shrink-0 border-t bg-background/80 px-4 py-4 backdrop-blur md:px-8">
+              <div className="mx-auto w-full max-w-[880px]">
+                <div
+                  className={`rounded-[28px] border bg-background p-3 shadow-sm transition ${dragActive ? 'border-primary bg-primary/5' : 'border-default-200/80'}`}
+                  onDragEnter={handleComposerDragEnter}
+                  onDragOver={handleComposerDragOver}
+                  onDragLeave={handleComposerDragLeave}
+                  onDrop={handleComposerDrop}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => {
+                      appendSelectedFiles(event.target.files)
+                      event.currentTarget.value = ''
+                    }}
+                  />
+                  {selectedFiles.length > 0 ? (
+                    <div className="mb-3 flex flex-wrap gap-2 rounded-2xl border bg-background/40 p-2">
+                      {selectedFiles.map((file) => {
+                        const identity = fileIdentity(file)
+                        return (
+                          <div
+                            key={identity}
+                            className="flex max-w-full items-center gap-1 rounded-full border px-2 py-1 text-xs text-foreground"
+                          >
+                            <span className="max-w-[180px] truncate">{file.name}</span>
+                            <span className="text-muted-foreground">{guessPendingFileKind(file)}</span>
+                            <span className="text-muted-foreground">{formatAttachmentSize(file.size)}</span>
+                            {canPreviewAttachmentTarget(file.name, file.type) ? (
+                              <button
+                                type="button"
+                                className="rounded p-0.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                                onClick={() => void openPreviewForFile(file)}
+                                title="预览附件"
+                              >
+                                <Eye className="h-3 w-3" />
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              className="rounded p-0.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                              onClick={() => removeSelectedFile(identity)}
+                              title="移除附件"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : null}
+
+                  <Textarea
+                    value={input}
+                    onValueChange={setInput}
+                    placeholder="输入消息或上传附件..."
+                    minRows={3}
+                    isDisabled={!activeSessionId || sending}
+                    className="w-full"
+                  />
+
+                  <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-end">
+                      <Button
+                        variant="flat"
+                        startContent={<Paperclip className="h-4 w-4" />}
+                        isDisabled={!activeSessionId || sending}
+                        onPress={openFilePicker}
+                      >
+                        上传附件
+                      </Button>
+                      <Select
+                        aria-label="本条 Expert"
+                        placeholder="选择本条 Expert"
+                        selectedKeys={effectiveTurnExpertId ? new Set([effectiveTurnExpertId]) : new Set()}
+                        onSelectionChange={(keys) => {
+                          if (keys === 'all') return
+                          const first = keys.values().next().value
+                          if (typeof first === 'string') setTurnExpertId(first)
+                        }}
+                        size="sm"
+                        disallowEmptySelection
+                        isDisabled={!activeSessionId || sending || selectableExperts.length === 0}
+                        className="md:min-w-[260px]"
+                      >
+                        {selectableExperts.map((e) => (
+                          <SelectItem key={e.id}>{e.label || e.id}</SelectItem>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                      {dragActive ? <div className="text-xs text-primary">释放鼠标即可添加附件</div> : null}
+                      <Button
+                        color="primary"
+                        className="min-w-[112px]"
+                        isDisabled={!activeSessionId || sending || (!input.trim() && selectedFiles.length === 0)}
+                        onPress={() => void onSend()}
+                      >
+                        {sending ? '发送中…' : '发送'}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+      <AttachmentPreviewModal preview={preview} onClose={closePreview} />
+    </>
   )
+
 }
