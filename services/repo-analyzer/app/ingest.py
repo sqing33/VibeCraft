@@ -37,28 +37,32 @@ def _copy_optional(src: Path | None, dst: Path) -> str | None:
     return str(dst)
 
 
-def run_ingest(
+def _run_prepare_flow(
     *,
+    command: str,
     repo_url: str,
     ref: str,
-    features: list[str],
     storage_root: str,
     run_id: str | None,
     snapshot_dir: str | None = None,
     subagent_results: str | None = None,
+    features: list[str] | None = None,
+    render_report: bool,
     language: str = "zh",
     depth: str = "standard",
     fetch_mode: str = "mcp-first",
     timeout: int = 60,
 ) -> dict[str, Any]:
-    """功能：执行 Repo Library ingest，生成源码快照、代码索引与报告。
-    参数/返回：接收仓库地址、ref、feature 列表、存储根目录和运行 ID，返回稳定 JSON 元数据。
+    """功能：执行 Repo Library prepare/ingest 共享链路，准备 snapshot、代码索引与可选报告。
+    参数/返回：接收仓库地址、存储根目录、运行 ID 与报告开关，返回稳定 JSON 元数据。
     失败场景：抓仓、建索引、渲染报告或路径落盘失败时抛出 EngineError。
-    副作用：创建存储目录、下载仓库源码、写入索引与报告文件、更新 repo/snapshot/run 元数据。
+    副作用：创建存储目录、下载仓库源码、写入索引与可选报告、更新 repo/snapshot/run 元数据。
     """
 
-    if not features:
+    if render_report and not features:
         raise EngineError("at least one --feature is required for ingest")
+
+    feature_list = [item for item in (features or []) if item]
 
     started_at = now_iso()
     repo_ref = parse_repo_url(repo_url)
@@ -90,7 +94,9 @@ def run_ingest(
     if subagent_src and (not subagent_src.exists() or not subagent_src.is_file()):
         raise EngineError(f"subagent_results does not exist: {subagent_src}")
 
-    log_event("INFO", "ingest-start", "开始执行仓库入库", repo_url=repo_url, ref=ref, run_id=run_key)
+    start_action = f"{command}-start"
+    start_message = "开始执行仓库入库" if render_report else "开始准备仓库快照"
+    log_event("INFO", start_action, start_message, repo_url=repo_url, ref=ref, run_id=run_key)
     fetch_summary = run_json_command(
         [
             sys.executable,
@@ -138,35 +144,41 @@ def run_ingest(
         ]
     )
 
-    render_cmd = [
-        sys.executable,
-        str(analyzer_script("render_report.py")),
-        "--repo-url",
-        repo_url,
-        "--ref",
-        ref,
-        "--source-dir",
-        str(snapshot_source_dir),
-        "--index-json",
-        str(snapshot_code_index_path),
-        "--output",
-        str(snapshot_report_path),
-        "--resolved-ref",
-        resolved_ref,
-        "--language",
-        language,
-        "--depth",
-        depth,
-    ]
-    if commit_sha:
-        render_cmd.extend(["--commit-sha", str(commit_sha)])
-    if copied_subagent_path:
-        render_cmd.extend(["--subagent-results", copied_subagent_path])
-    for feature in features:
-        render_cmd.extend(["--feature", feature])
+    report_summary: dict[str, Any] | None = None
+    report_ready = False
+    if render_report:
+        render_cmd = [
+            sys.executable,
+            str(analyzer_script("render_report.py")),
+            "--repo-url",
+            repo_url,
+            "--ref",
+            ref,
+            "--source-dir",
+            str(snapshot_source_dir),
+            "--index-json",
+            str(snapshot_code_index_path),
+            "--output",
+            str(snapshot_report_path),
+            "--resolved-ref",
+            resolved_ref,
+            "--language",
+            language,
+            "--depth",
+            depth,
+        ]
+        if commit_sha:
+            render_cmd.extend(["--commit-sha", str(commit_sha)])
+        if copied_subagent_path:
+            render_cmd.extend(["--subagent-results", copied_subagent_path])
+        for feature in feature_list:
+            render_cmd.extend(["--feature", feature])
 
-    report_summary = run_json_command(render_cmd)
-    copy_file(snapshot_report_path, paths["run_report"])
+        report_summary = run_json_command(render_cmd)
+        copy_file(snapshot_report_path, paths["run_report"])
+        report_ready = True
+    elif paths["run_report"].exists():
+        paths["run_report"].unlink()
 
     finished_at = now_iso()
     repo_meta = {
@@ -189,6 +201,7 @@ def run_ingest(
         "source_dir": str(snapshot_source_dir),
         "artifacts_dir": str(snapshot_artifacts_dir),
         "report_path": str(snapshot_report_path),
+        "report_ready": report_ready,
         "code_index_path": str(snapshot_code_index_path),
         "subagent_results_path": copied_subagent_path,
         "updated_at": finished_at,
@@ -205,20 +218,39 @@ def run_ingest(
         "resolved_ref": resolved_ref,
         "commit_sha": commit_sha,
         "report_path": str(snapshot_report_path),
+        "report_ready": report_ready,
         "started_at": started_at,
         "finished_at": finished_at,
     }
+    run_meta["status"] = "succeeded" if render_report else "prepared"
     write_json(paths["repo_meta"], repo_meta)
     write_json(snapshot_meta_path, snapshot_meta)
     write_json(paths["run_meta"], run_meta)
 
+    flow_summary: dict[str, Any] = {
+        "fetch": fetch_summary,
+        "code_index": code_index_summary,
+        "report": report_summary
+        if report_summary is not None
+        else {
+            "status": "pending",
+            "message": "report rendering deferred",
+            "path": str(snapshot_report_path),
+        },
+        "card_count": 0,
+        "evidence_count": 0,
+    }
+    if render_report:
+        flow_summary["features"] = feature_list
+
     payload: dict[str, Any] = {
         "status": "ok",
-        "command": "ingest",
+        "command": command,
         "engine_version": ENGINE_VERSION,
         "generated_at": finished_at,
         "resolved_ref": resolved_ref,
         "commit_sha": commit_sha,
+        "report_ready": report_ready,
         **summarize_paths(paths["repo_dir"], snapshot_dir, paths["run_dir"], snapshot_report_path),
         "repo": {
             **repo_meta,
@@ -232,23 +264,85 @@ def run_ingest(
             **run_meta,
             "metadata_path": str(paths["run_meta"]),
         },
-        "ingest": {
-            "features": features,
-            "fetch": fetch_summary,
-            "code_index": code_index_summary,
-            "report": report_summary,
-            "card_count": 0,
-            "evidence_count": 0,
-        },
+        command: flow_summary,
     }
 
     log_event(
         "INFO",
-        "ingest-finish",
-        "仓库入库完成",
+        f"{command}-finish",
+        "仓库入库完成" if render_report else "仓库快照准备完成",
         repo_key=repo_ref.repo_key,
         snapshot_id=snapshot_id,
         run_id=run_key,
         resolved_ref=resolved_ref,
     )
     return payload
+
+
+def run_prepare(
+    *,
+    repo_url: str,
+    ref: str,
+    storage_root: str,
+    run_id: str | None,
+    snapshot_dir: str | None = None,
+    subagent_results: str | None = None,
+    fetch_mode: str = "mcp-first",
+    timeout: int = 60,
+) -> dict[str, Any]:
+    """功能：执行 Repo Library prepare，只准备 snapshot 源码与代码索引。
+    参数/返回：接收仓库地址、ref、存储根目录和运行 ID，返回可供后续 AI 生成报告的稳定 JSON。
+    失败场景：抓仓、建索引或路径落盘失败时抛出 EngineError。
+    副作用：创建存储目录、写入 snapshot/source、artifacts/code_index.json 与 repo/snapshot/run 元数据。
+    """
+
+    return _run_prepare_flow(
+        command="prepare",
+        repo_url=repo_url,
+        ref=ref,
+        storage_root=storage_root,
+        run_id=run_id,
+        snapshot_dir=snapshot_dir,
+        subagent_results=subagent_results,
+        features=None,
+        render_report=False,
+        fetch_mode=fetch_mode,
+        timeout=timeout,
+    )
+
+
+def run_ingest(
+    *,
+    repo_url: str,
+    ref: str,
+    features: list[str],
+    storage_root: str,
+    run_id: str | None,
+    snapshot_dir: str | None = None,
+    subagent_results: str | None = None,
+    language: str = "zh",
+    depth: str = "standard",
+    fetch_mode: str = "mcp-first",
+    timeout: int = 60,
+) -> dict[str, Any]:
+    """功能：执行 Repo Library ingest，生成源码快照、代码索引与报告。
+    参数/返回：接收仓库地址、ref、feature 列表、存储根目录和运行 ID，返回稳定 JSON 元数据。
+    失败场景：抓仓、建索引、渲染报告或路径落盘失败时抛出 EngineError。
+    副作用：创建存储目录、下载仓库源码、写入索引与报告文件、更新 repo/snapshot/run 元数据。
+    """
+
+    return _run_prepare_flow(
+        command="ingest",
+        repo_url=repo_url,
+        ref=ref,
+        storage_root=storage_root,
+        run_id=run_id,
+        snapshot_dir=snapshot_dir,
+        subagent_results=subagent_results,
+        features=features,
+        render_report=True,
+        language=language,
+        depth=depth,
+        fetch_mode=fetch_mode,
+        timeout=timeout,
+    )

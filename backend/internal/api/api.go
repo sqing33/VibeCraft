@@ -75,6 +75,7 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.POST("/agent-runs/:id/retry", retryAgentRunHandler(deps))
 
 	v1.POST("/repo-library/analyses", createRepoAnalysisHandler(deps))
+	v1.POST("/repo-library/analyses/:id/sync-chat", syncRepoAnalysisChatHandler(deps))
 	v1.GET("/repo-library/repositories", listRepoRepositoriesHandler(deps))
 	v1.GET("/repo-library/repositories/:id", getRepoRepositoryHandler(deps))
 	v1.GET("/repo-library/repositories/:id/snapshots", listRepoSnapshotsHandler(deps))

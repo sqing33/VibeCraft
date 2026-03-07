@@ -78,6 +78,11 @@ func main() {
 	} else if fixed > 0 {
 		logx.Warn("daemon", "recover-orchestrations", "检测到未收敛的 running agent run，已标记为 failed", "count", fixed)
 	}
+	if fixed, err := stateStore.RecoverRepoAnalysisRunsAfterRestart(context.Background()); err != nil {
+		logx.Warn("daemon", "recover-repo-analysis", "Repo analysis 启动恢复失败（将由后续状态机兜底）", "err", err)
+	} else if fixed > 0 {
+		logx.Warn("daemon", "recover-repo-analysis", "检测到未收敛的 repo analysis run，已标记为 failed", "count", fixed)
+	}
 
 	hub := ws.NewHub()
 	execRunner := runner.MultiRunner{
@@ -87,7 +92,7 @@ func main() {
 	execMgr := execution.NewManager(execRunner, grace, hub)
 	experts := expert.NewRegistry(cfg)
 	chatMgr := chat.NewManager(stateStore, hub, chat.Options{Runner: execRunner})
-	repoLibSvc, err := repolib.NewService(stateStore, execMgr)
+	repoLibSvc, err := repolib.NewService(stateStore, execMgr, chatMgr, experts)
 	if err != nil {
 		logx.Error("daemon", "repo-library", "初始化 Repo Library service 失败", "err", err)
 		os.Exit(1)

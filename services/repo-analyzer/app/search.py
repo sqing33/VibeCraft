@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from extract_cards import render_search_compatible_report
 from helpers import (
     ENGINE_VERSION,
     EngineError,
@@ -60,7 +61,8 @@ def sync_snapshot_to_corpus(
         shutil.rmtree(corpus_dir)
     ensure_dir(corpus_dir / "artifacts")
 
-    copy_file(report_path, corpus_dir / "report.md")
+    normalized_report = render_search_compatible_report(report_path.read_text(encoding="utf-8", errors="ignore"))
+    (corpus_dir / "report.md").write_text(normalized_report, encoding="utf-8")
     synced_subagent_path = None
     if subagent_results_path and subagent_results_path.exists():
         synced_subagent_path = str(copy_file(subagent_results_path, corpus_dir / "artifacts" / "subagent_results.json"))

@@ -4,7 +4,7 @@ export type Route =
   | { name: 'orchestrations' }
   | { name: 'orchestration_detail'; orchestrationId: string }
   | { name: 'workflows' }
-  | { name: 'chat' }
+  | { name: 'chat'; sessionId?: string }
   | { name: 'repo_library_repositories' }
   | { name: 'repo_library_repository_detail'; repositoryId: string }
   | { name: 'repo_library_pattern_search' }
@@ -13,7 +13,13 @@ export type Route =
 export function parseRouteFromHash(hash: string): Route {
   const raw = hash ?? ''
   if (raw === '' || raw === '#' || raw === '#/') return { name: 'orchestrations' }
-  if (/^#\/chat$/.test(raw)) return { name: 'chat' }
+  const chatMatch = raw.match(/^#\/chat(?:\/([^/]+))?$/)
+  if (chatMatch) {
+    return {
+      name: 'chat',
+      sessionId: chatMatch[1] ? decodeURIComponent(chatMatch[1]) : undefined,
+    }
+  }
   if (/^#\/repo-library(?:\/repositories)?$/.test(raw)) {
     return { name: 'repo_library_repositories' }
   }
@@ -68,8 +74,10 @@ export function goToLegacyWorkflows() {
   window.location.hash = '#/legacy-workflows'
 }
 
-export function goToChat() {
-  window.location.hash = '#/chat'
+export function goToChat(sessionId?: string) {
+  window.location.hash = sessionId?.trim()
+    ? `#/chat/${encodeURIComponent(sessionId)}`
+    : '#/chat'
 }
 
 export function goToRepoLibraryRepositories() {

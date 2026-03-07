@@ -502,4 +502,3 @@ The Chat UI MUST render CLI-generated mid-turn assistant deltas as they arrive, 
 #### Scenario: Assistant bubble grows during CLI turn
 - **WHEN** CLI assistant deltas are received through WebSocket
 - **THEN** the pending assistant bubble updates incrementally before completion
-

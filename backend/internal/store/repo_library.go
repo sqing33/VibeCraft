@@ -48,23 +48,29 @@ type RepoSnapshot struct {
 }
 
 type RepoAnalysisRun struct {
-	ID            string   `json:"analysis_run_id"`
-	RepoSourceID  string   `json:"repository_id"`
-	RepoSnapshotID string  `json:"snapshot_id"`
-	ExecutionID   *string  `json:"execution_id,omitempty"`
-	Status        string   `json:"status"`
-	Language      string   `json:"language"`
-	Depth         string   `json:"depth"`
-	AgentMode     string   `json:"agent_mode"`
-	Features      []string `json:"features"`
-	Summary       *string  `json:"summary,omitempty"`
-	ErrorMessage  *string  `json:"error_message,omitempty"`
-	ResultJSON    *string  `json:"result_json,omitempty"`
-	ReportPath    *string  `json:"report_path,omitempty"`
-	StartedAt     *int64   `json:"started_at,omitempty"`
-	EndedAt       *int64   `json:"ended_at,omitempty"`
-	CreatedAt     int64    `json:"created_at"`
-	UpdatedAt     int64    `json:"updated_at"`
+	ID                  string   `json:"analysis_run_id"`
+	RepoSourceID        string   `json:"repository_id"`
+	RepoSnapshotID      string   `json:"snapshot_id"`
+	ExecutionID         *string  `json:"execution_id,omitempty"`
+	ChatSessionID       *string  `json:"chat_session_id,omitempty"`
+	ChatUserMessageID   *string  `json:"chat_user_message_id,omitempty"`
+	ChatAssistantMessageID *string `json:"chat_assistant_message_id,omitempty"`
+	RuntimeKind         *string  `json:"runtime_kind,omitempty"`
+	CLIToolID           *string  `json:"cli_tool_id,omitempty"`
+	ModelID             *string  `json:"model_id,omitempty"`
+	Status              string   `json:"status"`
+	Language            string   `json:"language"`
+	Depth               string   `json:"depth"`
+	AgentMode           string   `json:"agent_mode"`
+	Features            []string `json:"features"`
+	Summary             *string  `json:"summary,omitempty"`
+	ErrorMessage        *string  `json:"error_message,omitempty"`
+	ResultJSON          *string  `json:"result_json,omitempty"`
+	ReportPath          *string  `json:"report_path,omitempty"`
+	StartedAt           *int64   `json:"started_at,omitempty"`
+	EndedAt             *int64   `json:"ended_at,omitempty"`
+	CreatedAt           int64    `json:"created_at"`
+	UpdatedAt           int64    `json:"updated_at"`
 }
 
 type RepoKnowledgeCard struct {
@@ -154,6 +160,9 @@ type CreateRepoAnalysisRunParams struct {
 	Depth          string
 	AgentMode      string
 	Features       []string
+	RuntimeKind    *string
+	CLIToolID      *string
+	ModelID        *string
 }
 
 type StartRepoAnalysisRunParams struct {
@@ -347,6 +356,9 @@ func (s *Store) CreateRepoAnalysisRun(ctx context.Context, params CreateRepoAnal
 		ID:             id.New("rr_"),
 		RepoSourceID:   strings.TrimSpace(params.RepoSourceID),
 		RepoSnapshotID: strings.TrimSpace(params.RepoSnapshotID),
+		RuntimeKind:    trimOrNil(params.RuntimeKind),
+		CLIToolID:      trimOrNil(params.CLIToolID),
+		ModelID:        trimOrNil(params.ModelID),
 		Status:         string(RepoAnalysisStatusQueued),
 		Language:       firstNonEmptyString(params.Language, "zh"),
 		Depth:          firstNonEmptyString(params.Depth, "standard"),
@@ -355,7 +367,7 @@ func (s *Store) CreateRepoAnalysisRun(ctx context.Context, params CreateRepoAnal
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO repo_analysis_runs (id, repo_source_id, repo_snapshot_id, execution_id, status, language, depth, agent_mode, features_json, summary, error_message, result_json, report_path, started_at, ended_at, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?);`, run.ID, run.RepoSourceID, run.RepoSnapshotID, run.Status, run.Language, run.Depth, run.AgentMode, string(featuresJSON), run.CreatedAt, run.UpdatedAt); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO repo_analysis_runs (id, repo_source_id, repo_snapshot_id, execution_id, chat_session_id, chat_user_message_id, chat_assistant_message_id, runtime_kind, cli_tool_id, model_id, status, language, depth, agent_mode, features_json, summary, error_message, result_json, report_path, started_at, ended_at, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?);`, run.ID, run.RepoSourceID, run.RepoSnapshotID, run.RuntimeKind, run.CLIToolID, run.ModelID, run.Status, run.Language, run.Depth, run.AgentMode, string(featuresJSON), run.CreatedAt, run.UpdatedAt); err != nil {
 		return RepoAnalysisRun{}, fmt.Errorf("insert repo analysis run: %w", err)
 	}
 	return run, nil
@@ -683,7 +695,7 @@ func (s *Store) GetRepoAnalysisRun(ctx context.Context, runID string) (RepoAnaly
 	if runID == "" {
 		return RepoAnalysisRun{}, fmt.Errorf("%w: analysis_run_id is required", ErrValidation)
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT id, repo_source_id, repo_snapshot_id, execution_id, status, language, depth, agent_mode, features_json, summary, error_message, result_json, report_path, started_at, ended_at, created_at, updated_at FROM repo_analysis_runs WHERE id = ? LIMIT 1;`, runID)
+	row := s.db.QueryRowContext(ctx, `SELECT id, repo_source_id, repo_snapshot_id, execution_id, chat_session_id, chat_user_message_id, chat_assistant_message_id, runtime_kind, cli_tool_id, model_id, status, language, depth, agent_mode, features_json, summary, error_message, result_json, report_path, started_at, ended_at, created_at, updated_at FROM repo_analysis_runs WHERE id = ? LIMIT 1;`, runID)
 	run, err := scanRepoAnalysisRun(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -735,7 +747,7 @@ func (s *Store) ListRepoAnalysisRunsBySource(ctx context.Context, repoSourceID s
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, repo_source_id, repo_snapshot_id, execution_id, status, language, depth, agent_mode, features_json, summary, error_message, result_json, report_path, started_at, ended_at, created_at, updated_at FROM repo_analysis_runs WHERE repo_source_id = ? ORDER BY updated_at DESC, created_at DESC LIMIT ?;`, strings.TrimSpace(repoSourceID), limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, repo_source_id, repo_snapshot_id, execution_id, chat_session_id, chat_user_message_id, chat_assistant_message_id, runtime_kind, cli_tool_id, model_id, status, language, depth, agent_mode, features_json, summary, error_message, result_json, report_path, started_at, ended_at, created_at, updated_at FROM repo_analysis_runs WHERE repo_source_id = ? ORDER BY updated_at DESC, created_at DESC LIMIT ?;`, strings.TrimSpace(repoSourceID), limit)
 	if err != nil {
 		return nil, fmt.Errorf("query repo analysis runs: %w", err)
 	}
@@ -910,6 +922,12 @@ func scanRepoSnapshot(scanner repoLibraryScanner) (RepoSnapshot, error) {
 func scanRepoAnalysisRun(scanner repoLibraryScanner) (RepoAnalysisRun, error) {
 	var run RepoAnalysisRun
 	var executionID sql.NullString
+	var chatSessionID sql.NullString
+	var chatUserMessageID sql.NullString
+	var chatAssistantMessageID sql.NullString
+	var runtimeKind sql.NullString
+	var cliToolID sql.NullString
+	var modelID sql.NullString
 	var featuresJSON string
 	var summary sql.NullString
 	var errorMessage sql.NullString
@@ -917,10 +935,16 @@ func scanRepoAnalysisRun(scanner repoLibraryScanner) (RepoAnalysisRun, error) {
 	var reportPath sql.NullString
 	var startedAt sql.NullInt64
 	var endedAt sql.NullInt64
-	if err := scanner.Scan(&run.ID, &run.RepoSourceID, &run.RepoSnapshotID, &executionID, &run.Status, &run.Language, &run.Depth, &run.AgentMode, &featuresJSON, &summary, &errorMessage, &resultJSON, &reportPath, &startedAt, &endedAt, &run.CreatedAt, &run.UpdatedAt); err != nil {
+	if err := scanner.Scan(&run.ID, &run.RepoSourceID, &run.RepoSnapshotID, &executionID, &chatSessionID, &chatUserMessageID, &chatAssistantMessageID, &runtimeKind, &cliToolID, &modelID, &run.Status, &run.Language, &run.Depth, &run.AgentMode, &featuresJSON, &summary, &errorMessage, &resultJSON, &reportPath, &startedAt, &endedAt, &run.CreatedAt, &run.UpdatedAt); err != nil {
 		return RepoAnalysisRun{}, err
 	}
 	run.ExecutionID = nullStringPtr(executionID)
+	run.ChatSessionID = nullStringPtr(chatSessionID)
+	run.ChatUserMessageID = nullStringPtr(chatUserMessageID)
+	run.ChatAssistantMessageID = nullStringPtr(chatAssistantMessageID)
+	run.RuntimeKind = nullStringPtr(runtimeKind)
+	run.CLIToolID = nullStringPtr(cliToolID)
+	run.ModelID = nullStringPtr(modelID)
 	run.Summary = nullStringPtr(summary)
 	run.ErrorMessage = nullStringPtr(errorMessage)
 	run.ResultJSON = nullStringPtr(resultJSON)

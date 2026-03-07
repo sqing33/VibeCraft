@@ -15,8 +15,8 @@ H2_PATTERN = re.compile(r"^##\s+(?!#)(.+?)\s*$")
 H3_PATTERN = re.compile(r"^###\s+(?!#)(.+?)\s*$")
 H4_PATTERN = re.compile(r"^####\s+(?!#)(.+?)\s*$")
 H5_PATTERN = re.compile(r"^#####\s+(?!#)(.+?)\s*$")
-FEATURE_TITLE_PATTERN = re.compile(r"^(?:功能|Feature)\s+\d+\s*:\s*(.+?)\s*$")
-CHARACTERISTIC_TITLE_PATTERN = re.compile(r"^(?:项目特点|Characteristic)\s+\d+\s*:\s*(.+?)\s*$")
+FEATURE_TITLE_PATTERN = re.compile(r"^(?:(?:功能|feature)(?:\s+\d+)?)\s*:\s*(.+?)\s*$", flags=re.IGNORECASE)
+CHARACTERISTIC_TITLE_PATTERN = re.compile(r"^(?:(?:项目特点|characteristic)(?:\s+\d+)?)\s*:\s*(.+?)\s*$", flags=re.IGNORECASE)
 EVIDENCE_PATTERN = re.compile(
     r"`?([A-Za-z0-9_./-]+\.[A-Za-z0-9_+.-]+):(\d+)`?(?:\s+\[([^\]]+)\])?(?:\s+-\s+`?(.+?)`?)?$"
 )
@@ -27,21 +27,60 @@ TITLE_KEYS = {
     "part_three": {"第三部分：面向 AI 的实现细节与证据链", "Part 3: AI-facing Mechanism Details and Evidence"},
     "overview": {"仓库结构心智模型", "Repository Mental Model"},
     "project_characteristics": {"项目特点与标志实现", "Project Characteristics and Signature Implementations"},
+    "executive_summary": {"面向人的功能说明", "Executive Principle Summary", "Features", "功能说明"},
     "feature_details": {"面向 AI 的实现细节", "Feature Principle Analysis"},
     "global_risks": {"跨功能耦合与系统风险", "Cross-feature Coupling and System Risks"},
 }
 
 LABEL_KEYS = {
     "confidence": {"置信度", "Confidence"},
-    "evidence_refs": {"关键证据引用", "Key Evidence References"},
+    "evidence_refs": {"关键证据引用", "Key Evidence References", "Evidence References"},
     "characteristic_source": {"来源", "Source"},
     "characteristic_signal": {"README 线索", "README Signal"},
     "characteristic_mechanism": {"实现机制", "Implementation Mechanism"},
-    "function_role": {"功能作用", "Function Role"},
-    "special_capability": {"特殊功能", "Special Capability"},
-    "implementation_idea": {"实现想法", "Implementation Idea"},
-    "key_evidence": {"关键证据", "Key Evidence"},
-    "unknowns": {"推断与未知点", "Inference and Unknowns"},
+    "function_role": {"功能作用", "Function Role", "Role"},
+    "special_capability": {"特殊功能", "Special Capability", "Capability", "Capabilities"},
+    "implementation_idea": {"实现想法", "Implementation Idea", "Implementation", "Approach", "实现思路"},
+    "key_evidence": {"关键证据", "Key Evidence", "Evidence"},
+    "unknowns": {"推断与未知点", "Inference and Unknowns", "Unknowns", "Notes and Unknowns"},
+}
+
+SEARCH_SECTION_TITLES = {
+    "project_characteristics": "Project Characteristics and Signature Implementations",
+    "executive_summary": "Executive Principle Summary",
+    "feature_details": "Feature Principle Analysis",
+    "global_risks": "Cross-feature Coupling and System Risks",
+    "overview": "Repository Mental Model",
+}
+
+DETAIL_SECTION_TITLES = {
+    "runtime_control_flow": {"运行时控制流", "Runtime Control Flow", "Runtime"},
+    "data_flow": {"数据流", "Data Flow"},
+    "state_lifecycle": {"状态与生命周期", "State and Lifecycle", "Lifecycle"},
+    "failure_recovery": {"失败与恢复", "Failure and Recovery", "Recovery"},
+    "concurrency_timing": {"并发与时序", "Concurrency and Timing", "Concurrency"},
+    "key_evidence": {"关键证据", "Key Evidence", "Evidence"},
+    "unknowns": {"推断与未知点", "Inference and Unknowns", "Unknowns"},
+}
+
+
+def _normalize_key(text: str) -> str:
+    return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", text.casefold()).strip()
+
+
+NORMALIZED_TITLE_KEYS = {
+    key: {_normalize_key(alias) for alias in aliases}
+    for key, aliases in TITLE_KEYS.items()
+}
+
+NORMALIZED_LABEL_KEYS = {
+    key: {_normalize_key(alias) for alias in aliases}
+    for key, aliases in LABEL_KEYS.items()
+}
+
+NORMALIZED_DETAIL_SECTION_TITLES = {
+    key: {_normalize_key(alias) for alias in aliases}
+    for key, aliases in DETAIL_SECTION_TITLES.items()
 }
 
 
@@ -69,21 +108,73 @@ def split_by_heading(lines: list[str], pattern: re.Pattern[str]) -> list[tuple[s
 def section_key(title: str) -> str | None:
     """Map localized markdown titles to stable internal keys."""
 
-    clean = title.strip()
-    for key, aliases in TITLE_KEYS.items():
+    clean = _normalize_key(title)
+    for key, aliases in NORMALIZED_TITLE_KEYS.items():
         if clean in aliases:
             return key
+    if clean.startswith("part 1") or "第一部分" in clean:
+        return "part_one"
+    if clean.startswith("part 2") or "第二部分" in clean:
+        return "part_two"
+    if clean.startswith("part 3") or "第三部分" in clean:
+        return "part_three"
+    if clean in {"overview", "repository overview", "project overview"} or any(
+        token in clean
+        for token in ["mental model", "仓库结构心智模型", "仓库概览", "项目概览", "architecture overview"]
+    ):
+        return "overview"
+    if clean == "features":
+        return "executive_summary"
+    if any(token in clean for token in ["project characteristics", "signature implementations", "key characteristics", "项目特点", "标志实现"]):
+        return "project_characteristics"
+    if any(token in clean for token in ["executive principle summary", "human readable feature", "功能说明", "feature summary"]):
+        return "executive_summary"
+    if any(token in clean for token in ["feature principle analysis", "ai details", "implementation details", "实现细节", "证据链"]):
+        return "feature_details"
+    if any(token in clean for token in ["cross feature", "system risks", "risk notes", "风险", "risks"]):
+        return "global_risks"
     return None
 
 
 def label_key(label: str) -> str | None:
     """Map localized bullet labels to stable internal keys."""
 
-    clean = label.strip()
-    for key, aliases in LABEL_KEYS.items():
+    clean = _normalize_key(label)
+    for key, aliases in NORMALIZED_LABEL_KEYS.items():
         if clean in aliases:
             return key
+    if "confidence" in clean or "置信度" in clean:
+        return "confidence"
+    if "evidence references" in clean or "关键证据引用" in clean:
+        return "evidence_refs"
+    if clean in {"evidence", "key evidence"} or "关键证据" in clean:
+        return "key_evidence"
+    if clean in {"role", "function role"} or "功能作用" in clean:
+        return "function_role"
+    if "capability" in clean or "特殊功能" in clean:
+        return "special_capability"
+    if "implementation" in clean or "实现" in clean or "approach" in clean:
+        return "implementation_idea"
+    if "unknown" in clean or "未知" in clean:
+        return "unknowns"
     return None
+
+
+def detail_section_title(title: str) -> str:
+    clean = _normalize_key(title)
+    for key, aliases in NORMALIZED_DETAIL_SECTION_TITLES.items():
+        if clean in aliases:
+            mapping = {
+                "runtime_control_flow": "Runtime Control Flow",
+                "data_flow": "Data Flow",
+                "state_lifecycle": "State and Lifecycle",
+                "failure_recovery": "Failure and Recovery",
+                "concurrency_timing": "Concurrency and Timing",
+                "key_evidence": "Key Evidence",
+                "unknowns": "Inference and Unknowns",
+            }
+            return mapping[key]
+    return title.strip()
 
 
 def latest_run_text(raw: str) -> str:
@@ -115,22 +206,50 @@ def parse_bullets(lines: list[str]) -> tuple[dict[str, Any], list[str]]:
                 key = label_key(label)
                 if key:
                     value_text = value.strip().strip("`")
-                    if key == "evidence_refs":
+                    if key in {"evidence_refs", "key_evidence"}:
                         fields[key] = []
                         current_list_key = key
                     else:
                         fields[key] = value_text
                         current_list_key = None
                     continue
-            if current_list_key == "evidence_refs":
+            if current_list_key in {"evidence_refs", "key_evidence"}:
+                list_key = "evidence_refs" if current_list_key == "key_evidence" else current_list_key
                 refs = fields.setdefault(current_list_key, [])
                 refs.append(body.strip().strip("`") )
+                if current_list_key != list_key:
+                    fields[list_key] = refs
                 continue
             free_lines.append(body)
             current_list_key = None
             continue
         free_lines.append(stripped)
     return fields, free_lines
+
+
+def _split_first_matching(lines: list[str], patterns: tuple[re.Pattern[str], ...]) -> list[tuple[str, list[str]]]:
+    for pattern in patterns:
+        blocks = split_by_heading(lines, pattern)
+        if blocks:
+            return blocks
+    return []
+
+
+def _feature_name(title: str) -> str | None:
+    match = FEATURE_TITLE_PATTERN.match(title.strip())
+    if match:
+        return match.group(1).strip()
+    clean = title.strip()
+    if not clean or section_key(clean) is not None:
+        return None
+    return clean
+
+
+def _characteristic_title(title: str) -> str:
+    match = CHARACTERISTIC_TITLE_PATTERN.match(title.strip())
+    if match:
+        return match.group(1).strip()
+    return title.strip()
 
 
 def parse_evidence_lines(lines: list[str], *, default_label: str, origin: str) -> list[dict[str, Any]]:
@@ -206,21 +325,41 @@ def _normalize_report(report_text: str) -> dict[str, Any]:
     run_text = latest_run_text(report_text)
     h2_blocks = split_by_heading(run_text.splitlines(), H2_PATTERN)
     parts: dict[str, list[str]] = {"part_one": [], "part_two": [], "part_three": []}
+    sections: dict[str, list[str]] = {
+        "overview": [],
+        "project_characteristics": [],
+        "executive_summary": [],
+        "feature_details": [],
+        "global_risks": [],
+    }
     for title, body in h2_blocks:
         key = section_key(title)
         if key in parts:
             parts[key] = body
+            continue
+        if key in sections:
+            sections[key] = body
 
-    part_one = dict(split_by_heading(parts["part_one"], H3_PATTERN))
-    part_two = split_by_heading(parts["part_two"], H3_PATTERN)
-    part_three = dict(split_by_heading(parts["part_three"], H3_PATTERN))
+    part_one = split_by_heading(parts["part_one"], H3_PATTERN)
+    part_three = split_by_heading(parts["part_three"], H3_PATTERN)
+    if parts["part_two"] and not sections["executive_summary"]:
+        sections["executive_summary"] = parts["part_two"]
+
+    for title, body in part_one:
+        key = section_key(title)
+        if key in {"overview", "project_characteristics"} and not sections[key]:
+            sections[key] = body
+
+    for title, body in part_three:
+        key = section_key(title)
+        if key in {"feature_details", "global_risks"} and not sections[key]:
+            sections[key] = body
 
     feature_summaries: dict[str, dict[str, Any]] = {}
-    for title, body in part_two:
-        match = FEATURE_TITLE_PATTERN.match(title)
-        if not match:
+    for title, body in split_by_heading(sections["executive_summary"], H3_PATTERN):
+        feature_name = _feature_name(title)
+        if not feature_name:
             continue
-        feature_name = match.group(1).strip()
         fields, free_lines = parse_bullets(body)
         evidence = parse_evidence_lines(body, default_label="feature_summary", origin="report")
         feature_summaries[feature_name] = {
@@ -231,15 +370,9 @@ def _normalize_report(report_text: str) -> dict[str, Any]:
         }
 
     characteristics: list[dict[str, Any]] = []
-    raw_characteristics = part_one.get(next(iter(TITLE_KEYS["project_characteristics"]), ""), [])
-    if not raw_characteristics:
-        for title in TITLE_KEYS["project_characteristics"]:
-            if title in part_one:
-                raw_characteristics = part_one[title]
-                break
-    for title, body in split_by_heading(raw_characteristics, H4_PATTERN):
-        match = CHARACTERISTIC_TITLE_PATTERN.match(title)
-        item_title = match.group(1).strip() if match else title.strip()
+    characteristic_blocks = _split_first_matching(sections["project_characteristics"], (H4_PATTERN, H3_PATTERN))
+    for title, body in characteristic_blocks:
+        item_title = _characteristic_title(title)
         fields, free_lines = parse_bullets(body)
         characteristics.append(
             {
@@ -250,65 +383,169 @@ def _normalize_report(report_text: str) -> dict[str, Any]:
             }
         )
 
-    overview_body: list[str] = []
-    for title in TITLE_KEYS["overview"]:
-        if title in part_one:
-            overview_body = part_one[title]
-            break
-
-    feature_details_body: list[str] = []
-    for title in TITLE_KEYS["feature_details"]:
-        if title in part_three:
-            feature_details_body = part_three[title]
-            break
+    overview_body = sections["overview"]
+    feature_details_body = sections["feature_details"]
 
     feature_details: dict[str, dict[str, Any]] = {}
-    for title, body in split_by_heading(feature_details_body, H4_PATTERN):
-        match = FEATURE_TITLE_PATTERN.match(title)
-        feature_name = match.group(1).strip() if match else title.strip()
-        subsections = split_by_heading(body, H5_PATTERN)
+    feature_blocks = _split_first_matching(feature_details_body, (H4_PATTERN, H3_PATTERN))
+    for title, body in feature_blocks:
+        feature_name = _feature_name(title)
+        if not feature_name:
+            continue
+        subsections = _split_first_matching(body, (H5_PATTERN, H4_PATTERN))
         detail_sections: dict[str, list[str]] = {}
         confidences: list[str] = []
         evidence_items: list[dict[str, Any]] = []
         notes: list[str] = []
+        explicit_evidence = False
+        fallback_evidence = parse_evidence_lines(body, default_label="feature_detail", origin="report")
+        if not subsections and body:
+            subsections = [("Summary", body)]
         for subsection_title, subsection_lines in subsections:
             detail_sections[subsection_title] = subsection_lines
             fields, free_lines = parse_bullets(subsection_lines)
             confidence = fields.get("confidence")
             if isinstance(confidence, str):
                 confidences.append(confidence)
-            if section_key(subsection_title) is None and subsection_title in TITLE_KEYS["global_risks"]:
-                notes.extend(free_lines)
-            if subsection_title in TITLE_KEYS["global_risks"]:
-                notes.extend(free_lines)
-            if subsection_title in TITLE_KEYS["overview"]:
-                notes.extend(free_lines)
-            key_evidence = label_key(subsection_title)
-            if key_evidence == "key_evidence":
+            subsection_key = label_key(subsection_title)
+            if subsection_key == "key_evidence":
+                explicit_evidence = True
                 evidence_items.extend(parse_evidence_lines(subsection_lines, default_label="feature_detail", origin="report"))
-            elif label_key(subsection_title) == "unknowns":
+            elif subsection_key == "unknowns":
+                notes.extend(free_lines)
+            elif subsection_title == "Summary":
                 notes.extend(free_lines)
         feature_details[feature_name] = {
             "title": feature_name,
             "sections": detail_sections,
             "confidence": merge_confidence(confidences),
-            "evidence": evidence_items,
+            "evidence": evidence_items if explicit_evidence else fallback_evidence,
             "notes": notes,
         }
 
-    risks_body: list[str] = []
-    for title in TITLE_KEYS["global_risks"]:
-        if title in part_three:
-            risks_body = part_three[title]
-            break
+    risks_body = sections["global_risks"]
+    _, risk_notes = parse_bullets(risks_body)
+    risks = [line.strip()[2:].strip() for line in risks_body if line.strip().startswith("- ")]
+    if not risks:
+        risks = [line.strip() for line in risk_notes if line.strip()]
 
     return {
         "overview": overview_body,
         "characteristics": characteristics,
         "feature_summaries": feature_summaries,
         "feature_details": feature_details,
-        "risks": [line.strip()[2:].strip() for line in risks_body if line.strip().startswith("- ")],
+        "risks": risks,
     }
+
+
+def render_search_compatible_report(report_text: str) -> str:
+    """功能：将当前 report.md 规范化为 search/retrieval 可稳定分块的 markdown。
+    参数/返回：接收原始 markdown，返回包含规范 H2/H3/H4 层级的兼容版 markdown。
+    失败场景：不抛出业务异常；若无法识别结构则回退为最新 run 的原文。
+    副作用：无，仅执行内存内 markdown 解析与重组。
+    """
+
+    normalized = _normalize_report(report_text)
+    if not any(
+        [
+            normalized["overview"],
+            normalized["characteristics"],
+            normalized["feature_summaries"],
+            normalized["feature_details"],
+            normalized["risks"],
+        ]
+    ):
+        return latest_run_text(report_text)
+
+    lines = ["# Repo Library Retrieval Report", ""]
+
+    lines.extend([f"## {SEARCH_SECTION_TITLES['project_characteristics']}", ""])
+    for item in normalized["characteristics"]:
+        lines.append(f"### {item['title']}")
+        fields = item.get("fields", {})
+        if fields.get("characteristic_source"):
+            lines.append(f"- Source: `{fields['characteristic_source']}`")
+        if fields.get("characteristic_signal"):
+            lines.append(f"- README Signal: `{fields['characteristic_signal']}`")
+        if fields.get("characteristic_mechanism"):
+            lines.append(f"- Implementation Mechanism: {fields['characteristic_mechanism']}")
+        confidence = fields.get("confidence")
+        if confidence:
+            lines.append(f"- Confidence: `{confidence}`")
+        evidence_items = item.get("evidence", [])
+        if evidence_items:
+            lines.append("- Key Evidence References:")
+            for evidence_item in evidence_items:
+                lines.append(f"  - `{evidence_item['source_path']}:{evidence_item['source_line']}`")
+        for note in item.get("notes", []):
+            if note.strip():
+                lines.append(f"- {note.strip()}")
+        lines.append("")
+
+    lines.extend([f"## {SEARCH_SECTION_TITLES['executive_summary']}", ""])
+    if normalized["overview"]:
+        lines.append(f"### {SEARCH_SECTION_TITLES['overview']}")
+        for line in normalized["overview"]:
+            stripped = line.strip()
+            if stripped:
+                lines.append(stripped if stripped.startswith("-") else f"- {stripped}")
+        lines.append("")
+
+    all_features = sorted(set(normalized["feature_summaries"]) | set(normalized["feature_details"]))
+    for feature_name in all_features:
+        summary_block = normalized["feature_summaries"].get(feature_name, {})
+        lines.append(f"### {feature_name}")
+        summary_fields = summary_block.get("fields", {})
+        if summary_fields.get("function_role"):
+            lines.append(f"- Function Role: {summary_fields['function_role']}")
+        if summary_fields.get("special_capability"):
+            lines.append(f"- Special Capability: {summary_fields['special_capability']}")
+        if summary_fields.get("implementation_idea"):
+            lines.append(f"- Implementation Idea: {summary_fields['implementation_idea']}")
+        summary_confidence = summary_fields.get("confidence")
+        if summary_confidence:
+            lines.append(f"- Confidence: `{summary_confidence}`")
+        summary_evidence = summary_block.get("evidence", [])
+        if summary_evidence:
+            lines.append("- Key Evidence References:")
+            for evidence_item in summary_evidence:
+                lines.append(f"  - `{evidence_item['source_path']}:{evidence_item['source_line']}`")
+        for note in summary_block.get("notes", []):
+            if note.strip():
+                lines.append(f"- {note.strip()}")
+        lines.append("")
+
+    lines.extend([f"## {SEARCH_SECTION_TITLES['feature_details']}", ""])
+    for feature_name in all_features:
+        detail_block = normalized["feature_details"].get(feature_name, {})
+        lines.append(f"### {feature_name}")
+        detail_sections = detail_block.get("sections", {})
+        for section_title, section_lines in detail_sections.items():
+            if section_title == "Summary":
+                continue
+            lines.append(f"#### {detail_section_title(section_title)}")
+            for line in section_lines:
+                stripped = line.strip()
+                if stripped:
+                    lines.append(stripped)
+            lines.append("")
+        detail_evidence = detail_block.get("evidence", [])
+        if detail_evidence and not any(label_key(title) == "key_evidence" for title in detail_sections):
+            lines.append("#### Key Evidence")
+            for evidence_item in detail_evidence:
+                lines.append(f"- `{evidence_item['source_path']}:{evidence_item['source_line']}`")
+            lines.append("")
+        for note in detail_block.get("notes", []):
+            if note.strip():
+                lines.append(f"- {note.strip()}")
+        lines.append("")
+
+    lines.extend([f"## {SEARCH_SECTION_TITLES['global_risks']}", ""])
+    for risk in normalized["risks"]:
+        if risk.strip():
+            lines.append(f"- {risk.strip()}")
+    lines.append("")
+    return "\n".join(lines).strip() + "\n"
 
 
 def _append_card(

@@ -3,9 +3,7 @@
 ## Purpose
 
 Provide persistent and resumable chat sessions whose default turn execution path is CLI-backed, while preserving local summaries, attachments, fork/manual compact controls, and helper-only thinking translation.
-
 ## Requirements
-
 ### Requirement: Chat sessions SHALL be persistent and resumable
 The system MUST provide persistent chat sessions stored in the local state database. A session MUST have a stable `session_id` and metadata including title, selected expert/runtime identity, status, and timestamps. Sessions MUST remain available after daemon restart.
 
@@ -85,6 +83,15 @@ The chat create-session and turn APIs MUST support `cli_tool_id` and `model_id`,
 #### Scenario: Create session with codex tool and openai model
 - **WHEN** client creates a session with `cli_tool_id="codex"` and an OpenAI-compatible `model_id`
 - **THEN** the session is created successfully and uses that tool/model by default
+
+### Requirement: System-created analysis sessions SHALL behave like normal resumable chat sessions
+The system MUST allow background product flows to create chat sessions that are later visible and resumable in the normal Chat UI.
+
+#### Scenario: Repo analysis creates a system chat session
+- **WHEN** Repo Library starts an automated AI analysis
+- **THEN** the system creates a persistent chat session without manual user input
+- **AND** that session appears in normal chat session listings
+- **AND** the user can continue the session manually after automation completes
 
 ### Requirement: Chat sessions MUST store CLI tool/model/session metadata
 Chat sessions MUST persist the selected CLI tool, selected model id, and the last known CLI session reference needed to continue a CLI-native conversation.

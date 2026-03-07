@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Selection } from '@react-types/shared'
 import { Alert, Button, Chip, Input, Select, SelectItem, Skeleton, Textarea } from '@heroui/react'
 import { FolderGit2, RefreshCcw, Search, Sparkles } from 'lucide-react'
@@ -9,7 +9,10 @@ import {
 } from '@/app/routes'
 import {
   createRepoLibraryAnalysis,
+  fetchCLIToolSettings,
   fetchRepoLibraryRepositories,
+  type CLITool,
+  type LLMModelProfile,
   type RepoLibraryAnalysisRequest,
   type RepoLibraryAnalysisRun,
   type RepoLibraryDepth,
@@ -150,6 +153,10 @@ export function RepoLibraryRepositoriesPage() {
   const [analyzerMode, setAnalyzerMode] = useState<'full' | 'compact'>('full')
   const [submitting, setSubmitting] = useState(false)
   const [created, setCreated] = useState<RepoLibraryCreateAnalysisResponse | null>(null)
+  const [cliTools, setCliTools] = useState<CLITool[]>([])
+  const [toolModels, setToolModels] = useState<LLMModelProfile[]>([])
+  const [selectedCliToolId, setSelectedCliToolId] = useState('')
+  const [selectedModelId, setSelectedModelId] = useState('')
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -166,6 +173,50 @@ export function RepoLibraryRepositoriesPage() {
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  useEffect(() => {
+    let cancelled = false
+    void fetchCLIToolSettings(daemonUrl)
+      .then((settings) => {
+        if (cancelled) return
+        setCliTools(settings.tools ?? [])
+        setToolModels(settings.models ?? [])
+      })
+      .catch(() => {
+        if (cancelled) return
+        setCliTools([])
+        setToolModels([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [daemonUrl])
+
+  const selectableTools = useMemo(() => cliTools.filter((tool) => tool.enabled), [cliTools])
+  const toolsById = useMemo(() => {
+    const next = new Map<string, CLITool>()
+    for (const tool of selectableTools) next.set(tool.id, tool)
+    return next
+  }, [selectableTools])
+  const effectiveCliToolId =
+    selectedCliToolId && selectableTools.some((tool) => tool.id === selectedCliToolId)
+      ? selectedCliToolId
+      : selectableTools[0]?.id ?? ''
+  const modelsForTool = useCallback(
+    (toolId: string) => {
+      const tool = toolsById.get(toolId)
+      if (!tool) return [] as LLMModelProfile[]
+      return toolModels.filter((model) => (model.provider || '').trim() === tool.protocol_family)
+    },
+    [toolModels, toolsById],
+  )
+  const effectiveModelId = useMemo(() => {
+    const models = modelsForTool(effectiveCliToolId)
+    if (selectedModelId && models.some((model) => model.id === selectedModelId)) return selectedModelId
+    const tool = toolsById.get(effectiveCliToolId)
+    if (tool?.default_model_id && models.some((model) => model.id === tool.default_model_id)) return tool.default_model_id
+    return models[0]?.id ?? ''
+  }, [effectiveCliToolId, modelsForTool, selectedModelId, toolsById])
 
   const onSubmit = async () => {
     const features = parseFeatureList(featuresText)
@@ -185,6 +236,8 @@ export function RepoLibraryRepositoriesPage() {
       depth,
       language,
       analyzer_mode: analyzerMode,
+      cli_tool_id: effectiveCliToolId || undefined,
+      model_id: effectiveModelId || undefined,
     }
 
     setSubmitting(true)
@@ -269,7 +322,7 @@ export function RepoLibraryRepositoriesPage() {
           </Select>
         </div>
 
-        <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-xl border bg-muted/20 p-3">
             <div className="mb-2 text-sm font-medium">输出语言</div>
             <div className="flex flex-wrap gap-2">
@@ -292,6 +345,44 @@ export function RepoLibraryRepositoriesPage() {
               </Button>
             </div>
           </div>
+          <Select
+            aria-label="CLI 工具"
+            label="CLI 工具"
+            placeholder={selectableTools.length === 0 ? '暂无可用 CLI 工具' : '选择分析工具'}
+            description={effectiveCliToolId ? `当前协议：${toolsById.get(effectiveCliToolId)?.protocol_family || '未知'}` : '沿用 Settings → CLI 工具 中启用的工具'}
+            selectedKeys={effectiveCliToolId ? new Set([effectiveCliToolId]) : new Set()}
+            selectionMode="single"
+            disallowEmptySelection
+            isDisabled={submitting || selectableTools.length === 0}
+            onSelectionChange={(keys) => {
+              const value = selectionToString(keys)
+              if (!value) return
+              setSelectedCliToolId(value)
+            }}
+          >
+            {selectableTools.map((tool) => (
+              <SelectItem key={tool.id}>{tool.label}</SelectItem>
+            ))}
+          </Select>
+          <Select
+            aria-label="模型"
+            label="模型"
+            placeholder={modelsForTool(effectiveCliToolId).length === 0 ? '当前工具暂无可用模型' : '选择模型'}
+            description={effectiveModelId ? `默认回退：${effectiveModelId}` : '模型列表按 CLI 工具协议自动过滤'}
+            selectedKeys={effectiveModelId ? new Set([effectiveModelId]) : new Set()}
+            selectionMode="single"
+            disallowEmptySelection
+            isDisabled={submitting || modelsForTool(effectiveCliToolId).length === 0}
+            onSelectionChange={(keys) => {
+              const value = selectionToString(keys)
+              if (!value) return
+              setSelectedModelId(value)
+            }}
+          >
+            {modelsForTool(effectiveCliToolId).map((model) => (
+              <SelectItem key={model.id}>{model.label || model.id} · {model.model}</SelectItem>
+            ))}
+          </Select>
         </div>
 
         <div className="mt-3">

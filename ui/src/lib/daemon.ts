@@ -1350,6 +1350,8 @@ export type RepoLibraryAnalysisRequest = {
   depth?: RepoLibraryDepth
   language?: string
   analyzer_mode?: string
+  cli_tool_id?: string
+  model_id?: string
 }
 
 export type RepoLibraryAnalysisRun = {
@@ -1365,6 +1367,12 @@ export type RepoLibraryAnalysisRun = {
   depth?: RepoLibraryDepth
   language?: string
   analyzer_mode?: string
+  cli_tool_id?: string
+  model_id?: string
+  runtime_kind?: string
+  chat_session_id?: string
+  chat_user_message_id?: string
+  chat_assistant_message_id?: string
   status: string
   failure_message?: string
   storage_path?: string
@@ -1452,6 +1460,12 @@ export type RepoLibraryCreateAnalysisResponse = {
   analysis: RepoLibraryAnalysisRun
   repository?: RepoLibraryRepository
   snapshot?: RepoLibrarySnapshot
+}
+
+export type RepoLibrarySyncChatResponse = {
+  ok?: boolean
+  analysis?: RepoLibraryAnalysisRun
+  detail?: RepoLibraryRepositoryDetail
 }
 
 export type RepoLibrarySearchRequest = {
@@ -1564,6 +1578,12 @@ function normalizeRepoLibraryAnalysisRun(body: unknown): RepoLibraryAnalysisRun 
         : undefined,
     language: typeof record.language === 'string' ? record.language : undefined,
     analyzer_mode: typeof record.analyzer_mode === 'string' ? record.analyzer_mode : typeof record.agent_mode === 'string' ? record.agent_mode : undefined,
+    cli_tool_id: typeof record.cli_tool_id === 'string' ? record.cli_tool_id : typeof record.tool_id === 'string' ? record.tool_id : undefined,
+    model_id: typeof record.model_id === 'string' ? record.model_id : undefined,
+    runtime_kind: typeof record.runtime_kind === 'string' ? record.runtime_kind : undefined,
+    chat_session_id: typeof record.chat_session_id === 'string' ? record.chat_session_id : typeof record.chatSessionId === 'string' ? record.chatSessionId : undefined,
+    chat_user_message_id: typeof record.chat_user_message_id === 'string' ? record.chat_user_message_id : typeof record.chatUserMessageId === 'string' ? record.chatUserMessageId : undefined,
+    chat_assistant_message_id: typeof record.chat_assistant_message_id === 'string' ? record.chat_assistant_message_id : typeof record.chatAssistantMessageId === 'string' ? record.chatAssistantMessageId : undefined,
     status: typeof record.status === 'string' ? record.status : 'unknown',
     failure_message: typeof record.failure_message === 'string' ? record.failure_message : typeof record.error_message === 'string' ? record.error_message : undefined,
     storage_path: typeof record.storage_path === 'string' ? record.storage_path : undefined,
@@ -1738,6 +1758,34 @@ function normalizeRepoLibraryCreateAnalysisResponse(
   return { analysis: normalizeRepoLibraryAnalysisRun(body) }
 }
 
+function normalizeRepoLibrarySyncChatResponse(
+  body: unknown,
+): RepoLibrarySyncChatResponse {
+  if (!body || typeof body !== 'object') {
+    return {}
+  }
+  const record = body as Record<string, unknown>
+  const detail =
+    record.detail && typeof record.detail === 'object'
+      ? normalizeRepoLibraryRepositoryDetail(record.detail)
+      : record.repository && typeof record.repository === 'object'
+        ? normalizeRepoLibraryRepositoryDetail(body)
+        : undefined
+  const analysis =
+    record.analysis && typeof record.analysis === 'object'
+      ? normalizeRepoLibraryAnalysisRun(record.analysis)
+      : record.run && typeof record.run === 'object'
+        ? normalizeRepoLibraryAnalysisRun(record.run)
+        : undefined
+  const ok =
+    typeof record.ok === 'boolean'
+      ? record.ok
+      : typeof record.success === 'boolean'
+        ? record.success
+        : undefined
+  return { ok, analysis, detail }
+}
+
 /**
  * 功能：提交 Repo Library 仓库分析任务（`POST /api/v1/repo-library/analyses`）。
  * 参数/返回：接收 daemonUrl 与分析请求体；返回创建后的 analysis 元数据，以及可能附带的 repository/snapshot。
@@ -1755,6 +1803,8 @@ export async function createRepoLibraryAnalysis(
     depth: req.depth ?? 'standard',
     language: req.language === 'en' ? 'en' : 'zh',
     agent_mode: req.analyzer_mode === 'compact' ? 'single' : 'single',
+    cli_tool_id: req.cli_tool_id?.trim() || undefined,
+    model_id: req.model_id?.trim() || undefined,
   }
   const res = await fetch(`${daemonUrl}/api/v1/repo-library/analyses`, {
     method: 'POST',
@@ -1766,6 +1816,26 @@ export async function createRepoLibraryAnalysis(
     throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
   }
   return normalizeRepoLibraryCreateAnalysisResponse(await res.json())
+}
+
+/**
+ * 功能：同步指定分析关联 Chat 的最新回复（`POST /api/v1/repo-library/analyses/{id}/sync-chat`）。
+ * 参数/返回：接收 daemonUrl 与 analysisId；返回可选的 analysis/detail 刷新载荷或 success 标记。
+ * 失败场景：HTTP 非 2xx 时抛出 Error。
+ * 副作用：发起 HTTP 请求，并触发后端将最新 Chat 结果回写到 Repo Library。
+ */
+export async function syncRepoLibraryAnalysisChat(
+  daemonUrl: string,
+  analysisId: string,
+): Promise<RepoLibrarySyncChatResponse> {
+  const res = await fetch(`${daemonUrl}/api/v1/repo-library/analyses/${encodeURIComponent(analysisId)}/sync-chat`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return normalizeRepoLibrarySyncChatResponse(await res.json())
 }
 
 /**

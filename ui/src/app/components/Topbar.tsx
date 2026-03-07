@@ -62,7 +62,7 @@ export function Topbar() {
           <Button
             variant={route.name === 'chat' ? 'flat' : 'light'}
             size="sm"
-            onPress={goToChat}
+            onPress={() => goToChat()}
           >
             Chat
           </Button>

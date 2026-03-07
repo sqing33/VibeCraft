@@ -13,11 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"vibe-tree/backend/internal/id"
+	"vibe-tree/backend/internal/chat"
 	"vibe-tree/backend/internal/execution"
+	"vibe-tree/backend/internal/expert"
+	"vibe-tree/backend/internal/id"
 	"vibe-tree/backend/internal/logx"
 	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/store"
 )
 
@@ -28,6 +29,8 @@ type CreateAnalysisParams struct {
 	Depth     string
 	Language  string
 	AgentMode string
+	CLIToolID string
+	ModelID   string
 }
 
 type CreateAnalysisResult struct {
@@ -46,6 +49,8 @@ type SearchParams struct {
 type Service struct {
 	store       *store.Store
 	executions  *execution.Manager
+	chat        *chat.Manager
+	experts     *expert.Registry
 	projectRoot string
 	pythonBin   string
 }
@@ -65,7 +70,7 @@ type pipelineLayout struct {
 // 参数/返回：依赖 state store 与 execution manager；返回初始化后的 Service。
 // 失败场景：项目根目录或 Repo Library 根目录解析失败时返回 error。
 // 副作用：确保 Repo Library 数据目录存在。
-func NewService(stateStore *store.Store, execMgr *execution.Manager) (*Service, error) {
+func NewService(stateStore *store.Store, execMgr *execution.Manager, chatMgr *chat.Manager, experts *expert.Registry) (*Service, error) {
 	projectRoot, err := discoverProjectRoot()
 	if err != nil {
 		return nil, err
@@ -77,15 +82,15 @@ func NewService(stateStore *store.Store, execMgr *execution.Manager) (*Service, 
 	if err := paths.EnsureDir(repoLibraryDir); err != nil {
 		return nil, err
 	}
-	return &Service{store: stateStore, executions: execMgr, projectRoot: projectRoot, pythonBin: "python3"}, nil
+	return &Service{store: stateStore, executions: execMgr, chat: chatMgr, experts: experts, projectRoot: projectRoot, pythonBin: "python3"}, nil
 }
 
 // CreateAnalysis 功能：创建并启动一条 Repo Library 分析运行。
-// 参数/返回：params 提供仓库、ref 与 feature 列表；返回 repository/snapshot/run 聚合结果。
-// 失败场景：校验失败、存储初始化失败或执行器不可用时返回 error。
-// 副作用：写入 SQLite、创建 Repo Library 工件目录并启动本地 Python 引擎进程。
+// 参数/返回：params 提供仓库、ref、features 与 CLI tool/model 选择；返回 repository/snapshot/run 聚合结果。
+// 失败场景：校验失败、依赖缺失或初始化失败时返回 error。
+// 副作用：写入 SQLite、准备 Repo Library snapshot，并在后台启动真实 AI Chat 分析流程。
 func (s *Service) CreateAnalysis(ctx context.Context, params CreateAnalysisParams) (CreateAnalysisResult, error) {
-	if s == nil || s.store == nil {
+	if s == nil || s.store == nil || s.chat == nil || s.experts == nil {
 		return CreateAnalysisResult{}, fmt.Errorf("repo library service not configured")
 	}
 	parsed, err := parseGitHubRepoURL(params.RepoURL)
@@ -116,6 +121,11 @@ func (s *Service) CreateAnalysis(ctx context.Context, params CreateAnalysisParam
 	if err != nil {
 		return CreateAnalysisResult{}, err
 	}
+	for _, dir := range []string{layout.SnapshotDir, layout.SourceDir, layout.ArtifactsDir, layout.DerivedDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return CreateAnalysisResult{}, err
+		}
+	}
 	snapshot, err := s.store.CreateRepoSnapshot(ctx, store.CreateRepoSnapshotParams{
 		SnapshotID:    snapshotID,
 		RepoSourceID: source.ID,
@@ -125,19 +135,11 @@ func (s *Service) CreateAnalysis(ctx context.Context, params CreateAnalysisParam
 	if err != nil {
 		return CreateAnalysisResult{}, err
 	}
-	if err := os.MkdirAll(layout.SourceDir, 0o755); err != nil {
-		return CreateAnalysisResult{}, err
-	}
-	if err := os.MkdirAll(layout.ArtifactsDir, 0o755); err != nil {
-		return CreateAnalysisResult{}, err
-	}
-	if err := os.MkdirAll(layout.DerivedDir, 0o755); err != nil {
-		return CreateAnalysisResult{}, err
-	}
 	snapshot, err = s.store.UpdateRepoSnapshot(ctx, store.UpdateRepoSnapshotParams{SnapshotID: snapshot.ID, StoragePath: &layout.SnapshotDir, ReportPath: &layout.ReportPath})
 	if err != nil {
 		return CreateAnalysisResult{}, err
 	}
+	runtimeKind := pointer("ai_chat")
 	run, err := s.store.CreateRepoAnalysisRun(ctx, store.CreateRepoAnalysisRunParams{
 		RepoSourceID:   source.ID,
 		RepoSnapshotID: snapshot.ID,
@@ -145,31 +147,14 @@ func (s *Service) CreateAnalysis(ctx context.Context, params CreateAnalysisParam
 		Depth:          firstNonEmpty(params.Depth, "standard"),
 		AgentMode:      firstNonEmpty(params.AgentMode, "single"),
 		Features:       features,
+		RuntimeKind:    runtimeKind,
+		CLIToolID:      stringPtrIfNotEmpty(params.CLIToolID),
+		ModelID:        stringPtrIfNotEmpty(params.ModelID),
 	})
 	if err != nil {
 		return CreateAnalysisResult{}, err
 	}
-	spec := runner.RunSpec{
-		Command: s.pythonBin,
-		Args:    s.buildPipelineArgs(params, snapshot, run, layout),
-		Cwd:     s.projectRoot,
-		Env:     map[string]string{},
-	}
-	exec, err := s.executions.StartOneshotWithOptions(context.Background(), spec, execution.StartOptions{OnExit: func(final execution.Execution) {
-		s.completeAnalysisRun(run.ID, snapshot.ID, source.ID, layout, final)
-	}})
-	if err != nil {
-		msg := err.Error()
-		failedRun, finalizeErr := s.store.FinalizeRepoAnalysisRun(context.Background(), store.FinalizeRepoAnalysisRunParams{RunID: run.ID, Status: string(store.RepoAnalysisStatusFailed), ErrorMessage: &msg})
-		if finalizeErr == nil {
-			run = failedRun
-		}
-		return CreateAnalysisResult{Repository: source, Snapshot: snapshot, Run: run}, nil
-	}
-	run, err = s.store.StartRepoAnalysisRun(ctx, store.StartRepoAnalysisRunParams{RunID: run.ID, ExecutionID: exec.ID})
-	if err != nil {
-		return CreateAnalysisResult{}, err
-	}
+	go s.runAIChatAnalysis(context.Background(), source, snapshot, run, layout, params)
 	return CreateAnalysisResult{Repository: source, Snapshot: snapshot, Run: run}, nil
 }
 
@@ -606,17 +591,51 @@ func loadCardsFile(path string) ([]store.RepoKnowledgeCardInput, error) {
 	if err != nil {
 		return nil, err
 	}
-	var raw []map[string]any
-	if err := json.Unmarshal(payload, &raw); err != nil {
+	var rawBody any
+	if err := json.Unmarshal(payload, &rawBody); err != nil {
 		return nil, fmt.Errorf("parse cards JSON: %w", err)
 	}
-	cards := make([]store.RepoKnowledgeCardInput, 0, len(raw))
-	for idx, item := range raw {
+	rawCards := []map[string]any{}
+	evidenceByCard := map[string][]map[string]any{}
+	switch typed := rawBody.(type) {
+	case []any:
+		for _, item := range typed {
+			if cardMap, ok := item.(map[string]any); ok {
+				rawCards = append(rawCards, cardMap)
+			}
+		}
+	case map[string]any:
+		if cardsAny, ok := typed["cards"].([]any); ok {
+			for _, item := range cardsAny {
+				if cardMap, ok := item.(map[string]any); ok {
+					rawCards = append(rawCards, cardMap)
+				}
+			}
+		}
+		if evidenceAny, ok := typed["evidence"].([]any); ok {
+			for _, rawEvidence := range evidenceAny {
+				evidenceMap, ok := rawEvidence.(map[string]any)
+				if !ok {
+					continue
+				}
+				cardID := extractString(evidenceMap, "card_id")
+				if strings.TrimSpace(cardID) == "" {
+					continue
+				}
+				evidenceByCard[cardID] = append(evidenceByCard[cardID], evidenceMap)
+			}
+		}
+	default:
+		return nil, fmt.Errorf("parse cards JSON: unsupported payload shape")
+	}
+	cards := make([]store.RepoKnowledgeCardInput, 0, len(rawCards))
+	for idx, item := range rawCards {
+		cardID := extractString(item, "card_id")
 		card := store.RepoKnowledgeCardInput{
 			Title:        extractString(item, "title"),
-			CardType:     extractString(item, "card_type"),
+			CardType:     firstNonEmpty(extractString(item, "card_type"), extractString(item, "type")),
 			Summary:      extractString(item, "summary"),
-			Mechanism:    stringPtrIfNotEmpty(extractString(item, "mechanism")),
+			Mechanism:    stringPtrIfNotEmpty(firstNonEmpty(extractString(item, "mechanism"), extractString(item, "content"))),
 			Confidence:   stringPtrIfNotEmpty(extractString(item, "confidence")),
 			SectionTitle: stringPtrIfNotEmpty(extractString(item, "section_title")),
 			SortIndex:    idx + 1,
@@ -628,18 +647,28 @@ func loadCardsFile(path string) ([]store.RepoKnowledgeCardInput, error) {
 				}
 			}
 		}
+		for evidenceIdx, evidenceMap := range evidenceByCard[cardID] {
+			line := firstInt64(int64FromAny(evidenceMap["line"]), int64FromAny(evidenceMap["source_line"]))
+			card.Evidence = append(card.Evidence, store.RepoKnowledgeEvidenceInput{
+				Path:      firstNonEmpty(extractString(evidenceMap, "path"), extractString(evidenceMap, "source_path")),
+				Line:      line,
+				Snippet:   stringPtrIfNotEmpty(firstNonEmpty(extractString(evidenceMap, "snippet"), extractString(evidenceMap, "excerpt"))),
+				Dimension: stringPtrIfNotEmpty(firstNonEmpty(extractString(evidenceMap, "dimension"), extractString(evidenceMap, "label"))),
+				SortIndex: evidenceIdx + 1,
+			})
+		}
 		if evidence, ok := item["evidence"].([]any); ok {
 			for evidenceIdx, rawEvidence := range evidence {
 				evidenceMap, ok := rawEvidence.(map[string]any)
 				if !ok {
 					continue
 				}
-				line := int64FromAny(evidenceMap["line"])
+				line := firstInt64(int64FromAny(evidenceMap["line"]), int64FromAny(evidenceMap["source_line"]))
 				card.Evidence = append(card.Evidence, store.RepoKnowledgeEvidenceInput{
-					Path:      extractString(evidenceMap, "path"),
+					Path:      firstNonEmpty(extractString(evidenceMap, "path"), extractString(evidenceMap, "source_path")),
 					Line:      line,
-					Snippet:   stringPtrIfNotEmpty(extractString(evidenceMap, "snippet")),
-					Dimension: stringPtrIfNotEmpty(extractString(evidenceMap, "dimension")),
+					Snippet:   stringPtrIfNotEmpty(firstNonEmpty(extractString(evidenceMap, "snippet"), extractString(evidenceMap, "excerpt"))),
+					Dimension: stringPtrIfNotEmpty(firstNonEmpty(extractString(evidenceMap, "dimension"), extractString(evidenceMap, "label"))),
 					SortIndex: evidenceIdx + 1,
 				})
 			}
@@ -666,6 +695,16 @@ func int64FromAny(value any) *int64 {
 	default:
 		return nil
 	}
+}
+
+
+func firstInt64(values ...*int64) *int64 {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 func firstContext(ctx context.Context) context.Context {

@@ -99,10 +99,12 @@ The system MUST use prefixed IDs: `wf_` for workflows, `nd_` for nodes, `ex_` fo
 ### Requirement: Store MUST persist Repo Library entities
 The store SHALL persist repository sources, repository snapshots, analysis runs, knowledge cards, card evidence, and search query history for Repo Library.
 
+Repo analysis runs SHALL also persist the associated chat session identifier and the selected runtime/tool/model metadata when the analysis is AI-chat driven.
+
 #### Scenario: Store creates Repo Library records
-- **WHEN** the backend creates a repository source, snapshot, and analysis run
+- **WHEN** the backend creates a repository source, snapshot, analysis run, and associated automated chat session
 - **THEN** the store persists those records with stable identifiers
-- **AND** later queries can retrieve them by repository, snapshot, or run id
+- **AND** later queries can retrieve the analysis run together with its linked chat session metadata
 
 #### Scenario: Store lists repository summaries
 - **WHEN** the UI requests Repo Library repositories

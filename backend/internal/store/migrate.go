@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const schemaVersion = 8
+const schemaVersion = 9
 
 // Migrate 功能：执行 state DB schema 迁移（MVP：使用 PRAGMA user_version 管理版本）。
 // 参数/返回：ctx 控制超时；成功返回 nil。
@@ -86,6 +86,22 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		}
 		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 7;"); err != nil {
 			return fmt.Errorf("set user_version=7: %w", err)
+		}
+	}
+	if userVersion < 8 {
+		if err := migrateV8(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 8;"); err != nil {
+			return fmt.Errorf("set user_version=8: %w", err)
+		}
+	}
+	if userVersion < 9 {
+		if err := migrateV9(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 9;"); err != nil {
+			return fmt.Errorf("set user_version=9: %w", err)
 		}
 	}
 
@@ -856,6 +872,16 @@ func ensureOrchestrationSchema(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
+
+func tableExists(ctx context.Context, tx *sql.Tx, table string) (bool, error) {
+	row := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?;`, table)
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return false, fmt.Errorf("query sqlite_master for %s: %w", table, err)
+	}
+	return count > 0, nil
+}
+
 func tableColumns(ctx context.Context, tx *sql.Tx, table string) (map[string]bool, error) {
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s);", table))
 	if err != nil {
@@ -881,6 +907,13 @@ func tableColumns(ctx context.Context, tx *sql.Tx, table string) (map[string]boo
 }
 
 func migrateV8(ctx context.Context, tx *sql.Tx) error {
+	exists, err := tableExists(ctx, tx, "chat_sessions")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
 	cols, err := tableColumns(ctx, tx, "chat_sessions")
 	if err != nil {
 		return err
@@ -903,7 +936,50 @@ func migrateV8(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
+func migrateV9(ctx context.Context, tx *sql.Tx) error {
+	exists, err := tableExists(ctx, tx, "repo_analysis_runs")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	alterStmts := []string{
+		`ALTER TABLE repo_analysis_runs ADD COLUMN chat_session_id TEXT;`,
+		`ALTER TABLE repo_analysis_runs ADD COLUMN chat_user_message_id TEXT;`,
+		`ALTER TABLE repo_analysis_runs ADD COLUMN chat_assistant_message_id TEXT;`,
+		`ALTER TABLE repo_analysis_runs ADD COLUMN runtime_kind TEXT;`,
+		`ALTER TABLE repo_analysis_runs ADD COLUMN cli_tool_id TEXT;`,
+		`ALTER TABLE repo_analysis_runs ADD COLUMN model_id TEXT;`,
+	}
+	for _, stmt := range alterStmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				continue
+			}
+			return fmt.Errorf("exec migration stmt: %w", err)
+		}
+	}
+	indexStmts := []string{
+		`CREATE INDEX IF NOT EXISTS idx_repo_analysis_runs_chat_session ON repo_analysis_runs(chat_session_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_analysis_runs_runtime_kind ON repo_analysis_runs(runtime_kind, created_at DESC);`,
+	}
+	for _, stmt := range indexStmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("exec migration stmt: %w", err)
+		}
+	}
+	return nil
+}
+
 func ensureChatSessionCLIColumns(ctx context.Context, tx *sql.Tx) error {
+	exists, err := tableExists(ctx, tx, "chat_sessions")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
 	cols, err := tableColumns(ctx, tx, "chat_sessions")
 	if err != nil {
 		return err

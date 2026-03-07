@@ -4,8 +4,9 @@ import { Eye, Paperclip, Trash2, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
+import { goToChat } from '@/app/routes'
 import { onWsEnvelope } from '@/lib/wsBus'
-import { chatAttachmentContentUrl, fetchCLIToolSettings, type ChatAttachment, type CLITool, type LLMModelProfile } from '@/lib/daemon'
+import { chatAttachmentContentUrl, fetchCLIToolSettings, type ChatAttachment, type ChatSession, type CLITool, type LLMModelProfile } from '@/lib/daemon'
 import { AttachmentPreviewModal, type AttachmentPreviewState } from '@/app/components/AttachmentPreviewModal'
 import { canPreviewAttachmentTarget, describeAttachmentPreview } from '@/lib/chatAttachmentPreview'
 import { toast } from '@/lib/toast'
@@ -68,7 +69,12 @@ function fileIdentity(file: File): string {
   return `${file.name}:${file.size}:${file.lastModified}`
 }
 
-export function ChatSessionsPage() {
+type ChatSessionsPageProps = {
+  sessionId?: string
+}
+
+export function ChatSessionsPage(props: ChatSessionsPageProps) {
+  const requestedSessionId = props.sessionId?.trim() || ''
   const daemonUrl = useDaemonStore((s) => s.daemonUrl)
   const health = useDaemonStore((s) => s.health)
   const experts = useDaemonStore((s) => s.experts)
@@ -202,6 +208,20 @@ export function ChatSessionsPage() {
       return parts.join(' · ')
     },
     [expertsById, toolsById],
+  )
+
+  const selectSession = useCallback(
+    (session: ChatSession | null, options?: { updateHash?: boolean }) => {
+      const nextSessionId = session?.session_id ?? null
+      setActiveSession(nextSessionId)
+      setTurnExpertId(session ? inferToolId(session) : '')
+      setTurnModelId(session?.model_id || session?.model || '')
+      setSelectedFiles([])
+      if (options?.updateHash !== false) {
+        goToChat(nextSessionId ?? undefined)
+      }
+    },
+    [inferToolId, setActiveSession],
   )
 
   const appendSelectedFiles = useCallback((files: FileList | null) => {
@@ -420,6 +440,13 @@ export function ChatSessionsPage() {
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  useEffect(() => {
+    if (!requestedSessionId) return
+    const target = sessions.find((session) => session.session_id === requestedSessionId) ?? null
+    if (!target || activeSessionId === target.session_id) return
+    selectSession(target, { updateHash: false })
+  }, [activeSessionId, requestedSessionId, selectSession, sessions])
 
   useEffect(() => {
     if (!activeSessionId) return
@@ -643,10 +670,7 @@ export function ChatSessionsPage() {
     if (!activeSessionId) return
     try {
       const forked = await forkSession(daemonUrl, activeSessionId)
-      setActiveSession(forked.session_id)
-      setTurnExpertId(inferToolId(forked))
-      setTurnModelId(forked.model_id || forked.model || '')
-      setSelectedFiles([])
+      selectSession(forked)
       toast({ title: '已分叉会话', description: forked.session_id })
     } catch (err: unknown) {
       toast({
@@ -666,10 +690,8 @@ export function ChatSessionsPage() {
     try {
       await archiveSession(daemonUrl, sessionId)
       if (activeSessionId === sessionId) {
-        setActiveSession(null)
-        setTurnExpertId('')
-        setTurnModelId('')
-        setSelectedFiles([])
+        const nextActive = sessions.find((item) => item.session_id !== sessionId && item.status === 'active') ?? null
+        selectSession(nextActive)
       }
       toast({ title: '会话已删除（归档）', description: sessionId })
     } catch (err: unknown) {
@@ -706,7 +728,7 @@ export function ChatSessionsPage() {
       if (id) return id
     }
     return ''
-  }, [activeSession, effectiveTurnExpertId, formatModelIdentity, pendingMeta])
+  }, [activeSession, effectiveTurnExpertId, effectiveTurnModelId, formatModelIdentity, modelsForTool, pendingMeta, toolsById])
 
   const activeSessionIdentity = useMemo(() => {
     if (!activeSession) return ''
@@ -807,10 +829,7 @@ export function ChatSessionsPage() {
                       : 'border-transparent bg-background/40 hover:border-default-200 hover:bg-background/80'
                   }`}
                   onClick={() => {
-                    setActiveSession(s.session_id)
-                    setTurnExpertId(inferToolId(s))
-                    setTurnModelId(s.model_id || s.model || '')
-                    setSelectedFiles([])
+                    selectSession(s)
                   }}
                 >
                   <div className="flex items-start justify-between gap-2">

@@ -156,7 +156,7 @@ export default function App() {
         ) : route.name === 'workflows' ? (
           <WorkflowsPage />
         ) : route.name === 'chat' ? (
-          <ChatSessionsPage />
+          <ChatSessionsPage sessionId={route.sessionId} />
         ) : route.name === 'orchestration_detail' ? (
           <OrchestrationDetailPage orchestrationId={route.orchestrationId} />
         ) : (

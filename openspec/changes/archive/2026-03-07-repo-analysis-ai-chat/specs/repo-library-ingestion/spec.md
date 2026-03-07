@@ -1,8 +1,5 @@
-# repo-library-ingestion Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change add-repo-library. Update Purpose after archive.
-## Requirements
 ### Requirement: Repo Library MUST accept repository analysis requests
 The system MUST provide an API for submitting a GitHub repository analysis request with at least `repo_url`, `ref`, and one or more `features`.
 
@@ -19,22 +16,6 @@ The request MUST additionally support selecting a CLI analysis tool and an optio
 - **WHEN** a client sends a non-GitHub URL or omits features
 - **THEN** the system rejects the request with a validation error
 - **AND** no analysis run is created
-
-### Requirement: Repo Library MUST persist repository source, snapshot, and analysis metadata
-The system MUST persist normalized repository source records, snapshot records, and analysis run records in SQLite.
-
-Each analysis run MUST retain enough metadata to locate its storage root, report output, status, resolved ref, commit SHA, and latest execution log.
-
-#### Scenario: First analysis of a repository
-- **WHEN** a repository is analyzed for the first time
-- **THEN** the system creates a repository source record
-- **AND** creates a snapshot record for the resolved commit
-- **AND** links the new analysis run to that snapshot
-
-#### Scenario: Re-analysis of an existing repository
-- **WHEN** a repository already exists in Repo Library and a new analysis is submitted
-- **THEN** the system reuses the repository source record
-- **AND** creates a new snapshot or analysis run as needed for the resolved commit
 
 ### Requirement: Repo Library MUST execute analyzer runs asynchronously
 The system MUST execute repository analysis as an asynchronous background run instead of blocking the request lifecycle.
@@ -53,12 +34,3 @@ The asynchronous execution chain MUST include repository preparation, automated 
 - **THEN** the analysis run transitions to failed
 - **AND** the failure message is persisted for later inspection
 - **AND** any created chat session remains available for inspection or manual continuation
-
-### Requirement: Repo Library MUST store analyzer artifacts under application data storage
-The system MUST store repository snapshots, analyzer artifacts, reports, and derived search assets under the application data directory instead of the repository working tree.
-
-#### Scenario: Backend prepares storage for a run
-- **WHEN** an analysis run begins
-- **THEN** the backend creates or reuses a storage root under the application data directory
-- **AND** the run metadata points to that storage path
-

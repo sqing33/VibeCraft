@@ -22,6 +22,8 @@ type createRepoAnalysisRequest struct {
 	Depth     string   `json:"depth"`
 	Language  string   `json:"language"`
 	AgentMode string   `json:"agent_mode"`
+	CLIToolID string   `json:"cli_tool_id"`
+	ModelID   string   `json:"model_id"`
 }
 
 type repoLibrarySearchRequest struct {
@@ -65,6 +67,34 @@ func createRepoAnalysisHandler(deps Deps) gin.HandlerFunc {
 // 参数/返回：依赖 repo library service；返回仓库摘要数组。
 // 失败场景：依赖缺失或查询失败时返回 500。
 // 副作用：读取 SQLite。
+
+// syncRepoAnalysisChatHandler 功能：将关联分析 Chat 的最新 assistant 回复同步回 Repo Library report/cards/search。
+// 参数/返回：依赖 repo library service；返回更新后的 analysis run。
+// 失败场景：依赖缺失、分析不存在或同步失败时返回 4xx/5xx。
+// 副作用：重写 report.md、刷新 cards 与搜索索引。
+func syncRepoAnalysisChatHandler(deps Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.RepoLibrary == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "repo library service not configured"})
+			return
+		}
+		run, err := deps.RepoLibrary.SyncAnalysisFromChat(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			if errors.Is(err, store.ErrValidation) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			if errors.Is(err, os.ErrNotExist) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "analysis run not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"analysis_run": run})
+	}
+}
+
 func listRepoRepositoriesHandler(deps Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.RepoLibrary == nil {
@@ -260,6 +290,8 @@ func repolibCreateParams(req createRepoAnalysisRequest) repolib.CreateAnalysisPa
 		Depth:     strings.TrimSpace(req.Depth),
 		Language:  strings.TrimSpace(req.Language),
 		AgentMode: strings.TrimSpace(req.AgentMode),
+		CLIToolID: strings.TrimSpace(req.CLIToolID),
+		ModelID:   strings.TrimSpace(req.ModelID),
 	}
 }
 

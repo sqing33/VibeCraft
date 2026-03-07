@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single-entry Repo Library CLI for ingest, extraction, search, and pipeline runs."""
+"""Single-entry Repo Library CLI for prepare, ingest, extraction, search, and pipeline runs."""
 
 from __future__ import annotations
 
@@ -14,8 +14,21 @@ if str(CURRENT_DIR) not in sys.path:
 
 from extract_cards import build_cards_payload
 from helpers import ENGINE_VERSION, EngineError, log_event, write_json, write_result
-from ingest import run_ingest
+from ingest import run_ingest, run_prepare
 from search import run_search
+
+
+def handle_prepare(args: argparse.Namespace) -> dict[str, Any]:
+    return run_prepare(
+        repo_url=args.repo_url,
+        ref=args.ref,
+        storage_root=args.storage_root,
+        run_id=args.run_id,
+        snapshot_dir=args.snapshot_dir,
+        subagent_results=args.subagent_results,
+        fetch_mode=args.fetch_mode,
+        timeout=args.timeout,
+    )
 
 
 def handle_ingest(args: argparse.Namespace) -> dict[str, Any]:
@@ -147,27 +160,35 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    def add_common_ingest_flags(target: argparse.ArgumentParser) -> None:
+    def add_repo_prepare_flags(target: argparse.ArgumentParser) -> None:
         target.add_argument("--repo-url", required=True)
         target.add_argument("--ref", default="main")
-        target.add_argument("--feature", action="append", required=True)
         target.add_argument("--storage-root", required=True)
         target.add_argument("--run-id", default=None)
         target.add_argument("--snapshot-dir", default=None, help="Absolute snapshot directory preallocated by backend")
         target.add_argument("--subagent-results", default=None)
-        target.add_argument("--language", choices=["zh", "en"], default="zh")
-        target.add_argument("--depth", choices=["standard", "deep"], default="standard")
         target.add_argument("--fetch-mode", choices=["mcp-first", "git-only", "api-only"], default="mcp-first")
         target.add_argument("--timeout", type=int, default=60)
         target.add_argument("--output", required=True)
 
+    def add_report_render_flags(target: argparse.ArgumentParser) -> None:
+        target.add_argument("--feature", action="append", required=True)
+        target.add_argument("--language", choices=["zh", "en"], default="zh")
+        target.add_argument("--depth", choices=["standard", "deep"], default="standard")
+
     pipeline_parser = subparsers.add_parser("pipeline", help="Run ingest + extract-cards + search refresh")
-    add_common_ingest_flags(pipeline_parser)
+    add_repo_prepare_flags(pipeline_parser)
+    add_report_render_flags(pipeline_parser)
     pipeline_parser.add_argument("--search-refresh", choices=["auto", "force", "never"], default="auto")
     pipeline_parser.set_defaults(handler=handle_pipeline)
 
+    prepare_parser = subparsers.add_parser("prepare", help="Fetch source and build code index without rendering report")
+    add_repo_prepare_flags(prepare_parser)
+    prepare_parser.set_defaults(handler=handle_prepare)
+
     ingest_parser = subparsers.add_parser("ingest", help="Fetch source, build index, render report")
-    add_common_ingest_flags(ingest_parser)
+    add_repo_prepare_flags(ingest_parser)
+    add_report_render_flags(ingest_parser)
     ingest_parser.set_defaults(handler=handle_ingest)
 
     extract_parser = subparsers.add_parser("extract-cards", help="Derive cards and evidence from analyzer outputs")

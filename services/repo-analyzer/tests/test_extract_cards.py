@@ -8,7 +8,7 @@ if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
 from extract_cards import build_cards_payload
-from search import normalize_query_results
+from search import normalize_query_results, sync_snapshot_to_corpus
 
 
 SAMPLE_REPORT = """# GitHub Feature Principle Report
@@ -91,6 +91,49 @@ SAMPLE_SUBAGENT = {
     },
 }
 
+AI_REPORT = """# Repo Analysis
+
+## Repository Overview
+- CLI 串起 prepare、report 和 search 三段分析流。
+
+## Key Characteristics
+
+### CLI-driven pipeline
+- Source: `README.md`
+- README Signal: `repo analyzer`
+- Implementation: 通过统一 CLI 先准备源码，再消费 AI 报告。
+- Confidence: `high`
+- Key Evidence References:
+  - `app/cli.py:21`
+
+## Features
+
+### Search refresh
+- Role: 刷新向量索引并返回命中结果。
+- Capability: 支持 repo 过滤。
+- Implementation: 先同步 corpus，再 build/query 并做结果归一化。
+- Confidence: `medium`
+- Key Evidence References:
+  - `app/search.py:63`
+
+## AI Details
+
+### Search refresh
+
+#### Runtime Control Flow
+- 入口先同步 corpus，再调用 reference retrieval build/query。
+- Confidence: `high`
+
+#### Key Evidence
+- `app/search.py:63` [runtime_control_flow] - `write normalized report into corpus`
+
+#### Inference and Unknowns
+- None
+
+## Risks
+- 缺少 embeddings 依赖会导致检索刷新失败。
+"""
+
 
 class ExtractCardsTest(unittest.TestCase):
     def test_build_cards_payload_extracts_expected_card_types(self) -> None:
@@ -146,6 +189,50 @@ class ExtractCardsTest(unittest.TestCase):
         self.assertEqual(results[0]["repository"]["repo_key"], "octocat-Hello-World")
         self.assertEqual(results[0]["snapshot"]["snapshot_id"], "sha-abcdef123456")
         self.assertEqual(results[0]["run"]["run_id"], "demo-run")
+
+    def test_build_cards_payload_accepts_ai_generated_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            report_path = root / "report.md"
+            output_path = root / "cards.json"
+            report_path.write_text(AI_REPORT, encoding="utf-8")
+
+            payload = build_cards_payload(
+                report_path=report_path,
+                output_path=output_path,
+                repo_key="octocat-Hello-World",
+                snapshot_id="sha-abcdef123456",
+                run_id="demo-run",
+            )
+
+            self.assertEqual(payload["status"], "ok")
+            self.assertIn("project_characteristic", payload["type_counts"])
+            self.assertIn("feature_pattern", payload["type_counts"])
+            self.assertIn("risk_note", payload["type_counts"])
+
+    def test_sync_snapshot_to_corpus_normalizes_ai_report_headings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            report_path = root / "report.md"
+            report_path.write_text(AI_REPORT, encoding="utf-8")
+
+            sync_summary = sync_snapshot_to_corpus(
+                storage_root=root,
+                report_path=report_path,
+                repo_key="octocat-Hello-World",
+                snapshot_id="sha-abcdef123456",
+                snapshot_dir=root / "snapshot",
+                run_id="demo-run",
+            )
+
+            self.assertIsNotNone(sync_summary)
+            corpus_report = Path(sync_summary["corpus_dir"]) / "report.md"
+            corpus_text = corpus_report.read_text(encoding="utf-8")
+            self.assertIn("## Project Characteristics and Signature Implementations", corpus_text)
+            self.assertIn("## Executive Principle Summary", corpus_text)
+            self.assertIn("## Feature Principle Analysis", corpus_text)
+            self.assertIn("## Cross-feature Coupling and System Risks", corpus_text)
+            self.assertIn("### Search refresh", corpus_text)
 
 
 if __name__ == "__main__":

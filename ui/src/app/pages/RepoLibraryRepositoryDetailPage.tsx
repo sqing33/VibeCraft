@@ -3,6 +3,7 @@ import { Alert, Button, Chip, Skeleton } from '@heroui/react'
 import { ArrowLeft, FileSearch, RefreshCcw, ScrollText } from 'lucide-react'
 
 import {
+  goToChat,
   goToRepoLibraryPatternSearch,
   goToRepoLibraryRepositories,
 } from '@/app/routes'
@@ -15,6 +16,7 @@ import {
   fetchRepoLibraryRepository,
   fetchRepoLibrarySnapshotReport,
   fetchRepoLibrarySnapshots,
+  syncRepoLibraryAnalysisChat,
   type RepoLibraryAnalysisRun,
   type RepoLibraryCard,
   type RepoLibraryCardEvidence,
@@ -90,6 +92,7 @@ export function RepoLibraryRepositoryDetailPage(props: RepoLibraryRepositoryDeta
   const [selectedCard, setSelectedCard] = useState<RepoLibraryCard | null>(null)
   const [evidence, setEvidence] = useState<RepoLibraryCardEvidence[]>([])
   const [reportMarkdown, setReportMarkdown] = useState<string>('')
+  const [syncingAnalysisId, setSyncingAnalysisId] = useState<string | null>(null)
 
   const terminalRef = useRef<TerminalPaneHandle | null>(null)
 
@@ -182,7 +185,7 @@ export function RepoLibraryRepositoryDetailPage(props: RepoLibraryRepositoryDeta
 		return () => {
 			cancelled = true
 		}
-	}, [daemonUrl, selectedSnapshotId])
+	}, [daemonUrl, detail, selectedSnapshotId])
 
   useEffect(() => {
     if (!selectedCardId) {
@@ -229,6 +232,30 @@ export function RepoLibraryRepositoryDetailPage(props: RepoLibraryRepositoryDeta
   const selectedAnalysis = useMemo(
     () => analysisRuns.find((item) => item.analysis_id === selectedAnalysisId) ?? detail?.latest_analysis ?? null,
     [analysisRuns, detail?.latest_analysis, selectedAnalysisId],
+  )
+
+  const onSyncLatestChatReply = useCallback(
+    async (analysis: RepoLibraryAnalysisRun | null) => {
+      if (!analysis?.analysis_id || !analysis.chat_session_id) {
+        toast({ variant: 'destructive', title: '当前分析未关联 Chat 会话' })
+        return
+      }
+      setSyncingAnalysisId(analysis.analysis_id)
+      try {
+        await syncRepoLibraryAnalysisChat(daemonUrl, analysis.analysis_id)
+        await refresh()
+        toast({ title: '已同步最新 Chat 回复', description: analysis.chat_session_id })
+      } catch (err: unknown) {
+        toast({
+          variant: 'destructive',
+          title: '同步 Chat 回复失败',
+          description: err instanceof Error ? err.message : String(err),
+        })
+      } finally {
+        setSyncingAnalysisId(null)
+      }
+    },
+    [daemonUrl, refresh],
   )
 
   const loadTailIntoTerminal = useCallback(
@@ -448,6 +475,11 @@ export function RepoLibraryRepositoryDetailPage(props: RepoLibraryRepositoryDeta
                       <div className="mt-2 text-xs text-muted-foreground">
                         Execution: {analysis.execution_id || '待分配'}
                       </div>
+                      {analysis.chat_session_id ? (
+                        <div className="mt-1 truncate text-xs text-muted-foreground">
+                          Chat: {analysis.chat_session_id}
+                        </div>
+                      ) : null}
                       <div className="mt-1 text-xs text-muted-foreground">
                         {formatRelativeTime(analysis.updated_at || analysis.created_at || 0)}
                       </div>
@@ -459,6 +491,61 @@ export function RepoLibraryRepositoryDetailPage(props: RepoLibraryRepositoryDeta
                 })}
               </div>
             )}
+            {selectedAnalysis ? (
+              <div className="mt-3 rounded-xl border bg-muted/20 p-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-2">
+                    <div>
+                      <div className="text-sm font-medium">关联 Chat</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {selectedAnalysis.chat_session_id
+                          ? '可直接打开分析会话，或将最新 assistant 回复同步回 Repo Library。'
+                          : '当前分析尚未关联可打开的 Chat 会话。'}
+                      </div>
+                    </div>
+                    <code className="block break-all text-xs text-foreground">
+                      {selectedAnalysis.chat_session_id || '—'}
+                    </code>
+                    <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+                      <div>
+                        <div className="text-muted-foreground/80">CLI 工具</div>
+                        <div className="text-foreground">{selectedAnalysis.cli_tool_id || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground/80">模型</div>
+                        <div className="break-all text-foreground">{selectedAnalysis.model_id || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground/80">运行时</div>
+                        <div className="text-foreground">{selectedAnalysis.runtime_kind || '—'}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="flat"
+                      size="sm"
+                      isDisabled={!selectedAnalysis.chat_session_id}
+                      onPress={() => {
+                        if (!selectedAnalysis.chat_session_id) return
+                        goToChat(selectedAnalysis.chat_session_id)
+                      }}
+                    >
+                      打开分析 Chat
+                    </Button>
+                    <Button
+                      variant="light"
+                      size="sm"
+                      isDisabled={!selectedAnalysis.chat_session_id}
+                      isLoading={syncingAnalysisId === selectedAnalysis.analysis_id}
+                      onPress={() => void onSyncLatestChatReply(selectedAnalysis)}
+                    >
+                      同步最新 Chat 回复
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </section>
