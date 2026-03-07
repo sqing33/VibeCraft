@@ -120,6 +120,43 @@ export async function fetchExperts(daemonUrl: string): Promise<PublicExpert[]> {
   return (await res.json()) as PublicExpert[]
 }
 
+export type CLITool = {
+  id: string
+  label: string
+  protocol_family: string
+  cli_family: string
+  default_model_id?: string
+  command_path?: string
+  enabled: boolean
+}
+
+export type CLIToolSettings = {
+  tools: CLITool[]
+  models: LLMModelProfile[]
+}
+
+export async function fetchCLIToolSettings(daemonUrl: string): Promise<CLIToolSettings> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/cli-tools`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as CLIToolSettings
+}
+
+export async function putCLIToolSettings(daemonUrl: string, req: CLIToolSettings): Promise<CLIToolSettings> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/cli-tools`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as CLIToolSettings
+}
+
 export type LLMSettings = {
   sources: LLMSource[]
   models: LLMModelProfile[]
@@ -583,7 +620,7 @@ export type ChatTurnResult = {
 
 export async function createChatSession(
   daemonUrl: string,
-  req: { title?: string; expert_id?: string; workspace_path?: string },
+  req: { title?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; workspace_path?: string },
 ): Promise<ChatSession> {
   const res = await fetch(`${daemonUrl}/api/v1/chat/sessions`, {
     method: 'POST',
@@ -629,7 +666,7 @@ export async function fetchChatMessages(
 export async function postChatTurn(
   daemonUrl: string,
   sessionId: string,
-  req: { input?: string; expert_id?: string; files?: File[] },
+  req: { input?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; files?: File[] },
 ): Promise<ChatTurnResult> {
   const hasFiles = Array.isArray(req.files) && req.files.length > 0
   const init: RequestInit = { method: 'POST' }
@@ -639,13 +676,19 @@ export async function postChatTurn(
     if (typeof req.expert_id === 'string' && req.expert_id.trim()) {
       form.set('expert_id', req.expert_id)
     }
+    if (typeof req.cli_tool_id === 'string' && req.cli_tool_id.trim()) {
+      form.set('cli_tool_id', req.cli_tool_id)
+    }
+    if (typeof req.model_id === 'string' && req.model_id.trim()) {
+      form.set('model_id', req.model_id)
+    }
     for (const file of req.files ?? []) {
       form.append('files', file)
     }
     init.body = form
   } else {
     init.headers = { 'Content-Type': 'application/json' }
-    init.body = JSON.stringify({ input: req.input ?? '', expert_id: req.expert_id })
+    init.body = JSON.stringify({ input: req.input ?? '', expert_id: req.expert_id, cli_tool_id: req.cli_tool_id, model_id: req.model_id })
   }
   const res = await fetch(`${daemonUrl}/api/v1/chat/sessions/${sessionId}/turns`, init)
   if (!res.ok) {

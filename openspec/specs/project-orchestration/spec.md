@@ -110,3 +110,10 @@ Each orchestration agent run and synthesis step MUST persist and return runtime 
 - **WHEN** a client requests orchestration detail after one or more runs have executed
 - **THEN** each returned agent run includes runtime metadata and artifact references
 
+### Requirement: Orchestration primary CLI experts MUST use tool-bound default models
+When orchestration agent or synthesis runs resolve to a primary CLI tool expert, the execution MUST use that tool's configured default model unless explicitly overridden.
+
+#### Scenario: Orchestration agent uses claude default model
+- **WHEN** an orchestration agent run resolves to the claude tool expert
+- **THEN** the execution uses the default model configured for the `claude` CLI tool
+

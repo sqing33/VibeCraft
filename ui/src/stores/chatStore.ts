@@ -96,13 +96,15 @@ export type ChatStore = {
   loadMessages: (daemonUrl: string, sessionId: string) => Promise<void>
   createSession: (
     daemonUrl: string,
-    req: { title?: string; expert_id?: string; workspace_path?: string },
+    req: { title?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; workspace_path?: string },
   ) => Promise<ChatSession>
   sendTurn: (
     daemonUrl: string,
     sessionId: string,
     input: string,
     expertId?: string,
+    cliToolId?: string,
+    modelId?: string,
     files?: File[],
   ) => Promise<void>
   compactSession: (daemonUrl: string, sessionId: string) => Promise<void>
@@ -275,7 +277,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set({ activeSessionId: session.session_id })
     return session
   },
-  sendTurn: async (daemonUrl, sessionId, input, expertId, files = []) => {
+  sendTurn: async (daemonUrl, sessionId, input, expertId, cliToolId, modelId, files = []) => {
     set({ sending: true, error: null })
     get().clearStreaming(sessionId)
     get().clearThinking(sessionId)
@@ -295,7 +297,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       created_at: now,
     })
     try {
-      await postChatTurn(daemonUrl, sessionId, { input, expert_id: expertId, files })
+      await postChatTurn(daemonUrl, sessionId, { input, expert_id: expertId, cli_tool_id: cliToolId, model_id: modelId, files })
       await get().loadMessages(daemonUrl, sessionId)
       await get().refreshSessions(daemonUrl)
       set((state) => ({

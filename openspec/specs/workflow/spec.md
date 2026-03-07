@@ -89,3 +89,10 @@ When a workflow run requires AI planning or AI worker execution, the system MUST
 - **THEN** the resolved worker execution uses the CLI runtime by default
 - **AND** the resulting execution remains observable through the existing execution log and cancel APIs
 
+### Requirement: Workflow primary CLI experts MUST use tool-bound default models
+When workflow planning or AI worker execution resolves to a primary CLI tool expert, the execution MUST use that tool's configured default model unless explicitly overridden.
+
+#### Scenario: Workflow master uses codex default model
+- **WHEN** workflow planning runs through the codex tool expert
+- **THEN** the execution uses the default model configured for the `codex` CLI tool
+

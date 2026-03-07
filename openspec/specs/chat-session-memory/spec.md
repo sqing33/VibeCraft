@@ -78,3 +78,11 @@ The system MUST provide APIs to fork a session and to trigger compaction manuall
 - **WHEN** client calls `POST /api/v1/chat/sessions/:id/compact`
 - **THEN** compaction executes using current policy
 - **AND** a `chat.session.compacted` event is emitted
+
+### Requirement: Chat selection MUST support CLI tool and model as first-class inputs
+The chat create-session and turn APIs MUST support `cli_tool_id` and `model_id`, allowing the client to choose a CLI tool first and then a model from that tool's compatible protocol family.
+
+#### Scenario: Create session with codex tool and openai model
+- **WHEN** client creates a session with `cli_tool_id="codex"` and an OpenAI-compatible `model_id`
+- **THEN** the session is created successfully and uses that tool/model by default
+

@@ -462,3 +462,19 @@ The chat page MUST provide actions for manual compaction and session fork. The U
 - **WHEN** user clicks fork on current session
 - **THEN** the UI calls `POST /api/v1/chat/sessions/:id/fork`
 - **AND** the new forked session appears in the session list
+
+### Requirement: Settings MUST expose a dedicated CLI tools tab
+The UI MUST provide a dedicated `CLI 工具` tab for managing `Codex CLI` and `Claude Code`, including enablement, default model selection, and optional command path override.
+
+#### Scenario: User manages codex and claude tools
+- **WHEN** user opens System Settings
+- **THEN** the UI shows a `CLI 工具` tab
+- **AND** the tab allows managing both primary execution tools
+
+### Requirement: Chat UI SHALL support tool-first model selection
+The chat page MUST let the user select a CLI tool first and then choose a compatible model from that tool's model pool.
+
+#### Scenario: User chooses codex then openai model
+- **WHEN** user selects `Codex CLI` in the chat composer
+- **THEN** the model selector only shows OpenAI-compatible models
+

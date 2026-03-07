@@ -18,6 +18,7 @@ import (
 
 	"vibe-tree/backend/internal/chat"
 	"vibe-tree/backend/internal/config"
+	"vibe-tree/backend/internal/expert"
 	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/store"
 )
@@ -25,6 +26,8 @@ import (
 type createChatSessionRequest struct {
 	Title         string `json:"title"`
 	ExpertID      string `json:"expert_id"`
+	CLIToolID     string `json:"cli_tool_id"`
+	ModelID       string `json:"model_id"`
 	WorkspacePath string `json:"workspace_path"`
 }
 
@@ -47,6 +50,9 @@ func createChatSessionHandler(deps Deps) gin.HandlerFunc {
 			}
 		}
 		expertID := strings.TrimSpace(req.ExpertID)
+		if strings.TrimSpace(req.CLIToolID) != "" {
+			expertID = strings.TrimSpace(req.CLIToolID)
+		}
 		if expertID == "" {
 			expertID = "codex"
 		}
@@ -55,7 +61,7 @@ func createChatSessionHandler(deps Deps) gin.HandlerFunc {
 			workspace = "."
 		}
 
-		resolved, err := deps.Experts.Resolve(expertID, "", workspace)
+		resolved, err := deps.Experts.ResolveWithOptions(expertID, "", workspace, expert.ResolveOptions{CLIToolID: strings.TrimSpace(req.CLIToolID), ModelID: strings.TrimSpace(req.ModelID)})
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -67,8 +73,8 @@ func createChatSessionHandler(deps Deps) gin.HandlerFunc {
 
 		sess, err := deps.Store.CreateChatSession(c.Request.Context(), store.CreateChatSessionParams{
 			Title:         req.Title,
-			ExpertID:      expertID,
-			Provider:      resolved.Provider,
+			ExpertID:      firstNonEmptyTrimmed(resolved.ExpertID, expertID),
+			Provider:      firstNonEmptyTrimmed(resolved.ProtocolFamily, resolved.Provider),
 			Model:         resolved.Model,
 			WorkspacePath: workspace,
 		})
@@ -181,8 +187,10 @@ func patchChatSessionHandler(deps Deps) gin.HandlerFunc {
 const maxChatTurnBodyBytes int64 = 24 << 20
 
 type postChatTurnRequest struct {
-	Input    string `json:"input"`
-	ExpertID string `json:"expert_id"`
+	Input     string `json:"input"`
+	ExpertID  string `json:"expert_id"`
+	CLIToolID string `json:"cli_tool_id"`
+	ModelID   string `json:"model_id"`
 }
 
 func parsePostChatTurnRequest(c *gin.Context) (postChatTurnRequest, []chat.UploadedAttachment, int, error) {
@@ -202,6 +210,8 @@ func parsePostChatTurnRequest(c *gin.Context) (postChatTurnRequest, []chat.Uploa
 		}
 		req.Input = c.Request.FormValue("input")
 		req.ExpertID = c.Request.FormValue("expert_id")
+		req.CLIToolID = c.Request.FormValue("cli_tool_id")
+		req.ModelID = c.Request.FormValue("model_id")
 		uploads := make([]chat.UploadedAttachment, 0)
 		if c.Request.MultipartForm != nil {
 			for _, header := range c.Request.MultipartForm.File["files"] {
@@ -266,10 +276,13 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 			return
 		}
 		expertID := strings.TrimSpace(req.ExpertID)
+		if strings.TrimSpace(req.CLIToolID) != "" {
+			expertID = strings.TrimSpace(req.CLIToolID)
+		}
 		if expertID == "" {
 			expertID = sess.ExpertID
 		}
-		resolved, err := deps.Experts.Resolve(expertID, providerInput, sess.WorkspacePath)
+		resolved, err := deps.Experts.ResolveWithOptions(expertID, providerInput, sess.WorkspacePath, expert.ResolveOptions{CLIToolID: strings.TrimSpace(req.CLIToolID), ModelID: strings.TrimSpace(req.ModelID)})
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -284,12 +297,12 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 		}
 		result, err := deps.Chat.RunTurn(c.Request.Context(), chat.TurnParams{
 			Session:             sess,
-			ExpertID:            expertID,
+			ExpertID:            firstNonEmptyTrimmed(resolved.ExpertID, expertID),
 			UserInput:           userText,
 			ModelInput:          modelInput,
 			Attachments:         uploads,
 			Spec:                resolved.Spec,
-			Provider:            resolved.Provider,
+			Provider:            firstNonEmptyTrimmed(resolved.ProtocolFamily, resolved.Provider),
 			Model:               resolved.Model,
 			ThinkingTranslation: buildThinkingTranslationSpec(firstNonEmptyTrimmed(resolved.PrimaryModelID, resolved.Model)),
 		})

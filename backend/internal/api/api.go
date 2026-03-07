@@ -44,6 +44,8 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.GET("/experts", listExpertsHandler(deps))
 	v1.GET("/settings/basic", getBasicSettingsHandler())
 	v1.PUT("/settings/basic", putBasicSettingsHandler())
+	v1.GET("/settings/cli-tools", getCLIToolSettingsHandler())
+	v1.PUT("/settings/cli-tools", putCLIToolSettingsHandler(deps))
 	v1.GET("/settings/llm", getLLMSettingsHandler())
 	v1.PUT("/settings/llm", putLLMSettingsHandler(deps))
 	v1.POST("/settings/llm/test", llmTestHandler())

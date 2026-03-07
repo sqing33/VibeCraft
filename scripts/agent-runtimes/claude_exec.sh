@@ -6,6 +6,7 @@ prompt="${VIBE_TREE_PROMPT:-}"
 system_prompt="${VIBE_TREE_SYSTEM_PROMPT:-}"
 model="${VIBE_TREE_MODEL:-}"
 workspace="${VIBE_TREE_WORKSPACE:-$PWD}"
+cli_cmd="${VIBE_TREE_CLI_COMMAND_PATH:-claude}"
 status="ok"
 summary_text=""
 next_action=""
@@ -39,13 +40,13 @@ if [[ -n "$system_prompt" ]]; then
   args+=(--append-system-prompt "$system_prompt")
 fi
 
-if command -v claude >/dev/null 2>&1; then
+if command -v "$cli_cmd" >/dev/null 2>&1; then
   set +e
-  claude "${args[@]}" "$prompt" >"$final_file" 2>"${raw_log:-/dev/null}"
+  "$cli_cmd" "${args[@]}" "$prompt" >"$final_file" 2>"${raw_log:-/dev/null}"
   exit_code=$?
   set -e
 else
-  echo "claude CLI not found" >"${raw_log:-/dev/stderr}"
+  echo "CLI command not found: $cli_cmd" >"${raw_log:-/dev/stderr}"
   exit_code=127
 fi
 

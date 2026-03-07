@@ -6,6 +6,7 @@ prompt="${VIBE_TREE_PROMPT:-}"
 system_prompt="${VIBE_TREE_SYSTEM_PROMPT:-}"
 model="${VIBE_TREE_MODEL:-}"
 workspace="${VIBE_TREE_WORKSPACE:-$PWD}"
+cli_cmd="${VIBE_TREE_CLI_COMMAND_PATH:-codex}"
 status="ok"
 summary_text=""
 next_action=""
@@ -40,13 +41,13 @@ User request:
 '"$prompt"
 fi
 
-if command -v codex >/dev/null 2>&1; then
+if command -v "$cli_cmd" >/dev/null 2>&1; then
   set +e
-  printf '%s' "$combined_prompt" | codex exec --color never --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -C "$workspace" ${model:+--model "$model"} -o "$final_file" >"${raw_log:-/dev/null}" 2>&1
+  printf '%s' "$combined_prompt" | "$cli_cmd" exec --color never --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -C "$workspace" ${model:+--model "$model"} -o "$final_file" >"${raw_log:-/dev/null}" 2>&1
   exit_code=$?
   set -e
 else
-  echo "codex CLI not found" >"${raw_log:-/dev/stderr}"
+  echo "CLI command not found: $cli_cmd" >"${raw_log:-/dev/stderr}"
   exit_code=127
 fi
 

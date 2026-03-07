@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 import { onWsEnvelope } from '@/lib/wsBus'
-import { chatAttachmentContentUrl, fetchLLMSettings, type ChatAttachment } from '@/lib/daemon'
+import { chatAttachmentContentUrl, fetchCLIToolSettings, type ChatAttachment, type CLITool, type LLMModelProfile } from '@/lib/daemon'
 import { AttachmentPreviewModal, type AttachmentPreviewState } from '@/app/components/AttachmentPreviewModal'
 import { canPreviewAttachmentTarget, describeAttachmentPreview } from '@/lib/chatAttachmentPreview'
 import { toast } from '@/lib/toast'
@@ -114,7 +114,10 @@ export function ChatSessionsPage() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [dragActive, setDragActive] = useState(false)
   const [preview, setPreview] = useState<AttachmentPreviewState | null>(null)
-  const [allowedModelExpertIds, setAllowedModelExpertIds] = useState<Set<string>>(new Set())
+  const [newModelId, setNewModelId] = useState('')
+  const [turnModelId, setTurnModelId] = useState('')
+  const [cliTools, setCliTools] = useState<CLITool[]>([])
+  const [toolModels, setToolModels] = useState<LLMModelProfile[]>([])
   const messageScrollRef = useRef<HTMLDivElement | null>(null)
   const shouldAutoScrollRef = useRef(true)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -124,48 +127,81 @@ export function ChatSessionsPage() {
     () => sessions.find((s) => s.session_id === activeSessionId) ?? null,
     [sessions, activeSessionId],
   )
-  const selectableExperts = useMemo(
-    () =>
-      experts.filter((e) => {
-        if (e.provider === 'process') return false
-        if (e.helper_only) return false
-        if (e.runtime_kind === 'cli') return true
-        if (e.provider === 'demo') return true
-        return allowedModelExpertIds.has(e.id)
-      }),
-    [allowedModelExpertIds, experts],
-  )
   const expertsById = useMemo(() => {
-    const map = new Map<string, (typeof selectableExperts)[number]>()
-    for (const e of selectableExperts) map.set(e.id, e)
+    const map = new Map<string, (typeof experts)[number]>()
+    for (const e of experts) map.set(e.id, e)
     return map
-  }, [selectableExperts])
-  const defaultSelectableExpertId = selectableExperts[0]?.id ?? ''
+  }, [experts])
+  const selectableTools = useMemo(() => cliTools.filter((tool) => tool.enabled), [cliTools])
+  const toolsById = useMemo(() => {
+    const map = new Map<string, CLITool>()
+    for (const tool of selectableTools) map.set(tool.id, tool)
+    return map
+  }, [selectableTools])
+  const defaultSelectableExpertId = selectableTools[0]?.id ?? ''
+  const inferToolId = useCallback(
+    (meta?: { expert_id?: string; provider?: string } | null) => {
+      const explicit = meta?.expert_id?.trim() || ''
+      if (explicit && toolsById.has(explicit)) return explicit
+      const expert = explicit ? expertsById.get(explicit) : undefined
+      if (expert?.cli_family === 'claude') return 'claude'
+      if (expert?.cli_family === 'codex') return 'codex'
+      const provider = (meta?.provider?.trim() || '').toLowerCase()
+      if (provider === 'anthropic') return 'claude'
+      if (provider === 'openai') return 'codex'
+      return defaultSelectableExpertId
+    },
+    [defaultSelectableExpertId, expertsById, toolsById],
+  )
   const effectiveNewExpertId =
-    newExpertId && selectableExperts.some((e) => e.id === newExpertId)
+    newExpertId && selectableTools.some((tool) => tool.id === newExpertId)
       ? newExpertId
       : defaultSelectableExpertId
   const effectiveTurnExpertId =
-    turnExpertId && selectableExperts.some((e) => e.id === turnExpertId)
+    turnExpertId && selectableTools.some((tool) => tool.id === turnExpertId)
       ? turnExpertId
-      : activeSession?.expert_id && selectableExperts.some((e) => e.id === activeSession.expert_id)
-        ? activeSession.expert_id
-        : defaultSelectableExpertId
+      : inferToolId(activeSession)
+  const modelsForTool = useCallback(
+    (toolId: string) => {
+      const tool = toolsById.get(toolId)
+      if (!tool) return [] as LLMModelProfile[]
+      return toolModels.filter((model) => (model.provider || '').trim() === tool.protocol_family)
+    },
+    [toolModels, toolsById],
+  )
+  const effectiveNewModelId = useMemo(() => {
+    const models = modelsForTool(effectiveNewExpertId)
+    if (newModelId && models.some((model) => model.id === newModelId)) return newModelId
+    const tool = toolsById.get(effectiveNewExpertId)
+    if (tool?.default_model_id && models.some((model) => model.id === tool.default_model_id)) return tool.default_model_id
+    return models[0]?.id ?? ''
+  }, [effectiveNewExpertId, modelsForTool, newModelId, toolsById])
+  const effectiveTurnModelId = useMemo(() => {
+    const models = modelsForTool(effectiveTurnExpertId)
+    if (turnModelId && models.some((model) => model.id === turnModelId)) return turnModelId
+    if (activeSession?.model && models.some((model) => model.model === activeSession.model || model.id === activeSession.model)) {
+      return models.find((model) => model.model === activeSession.model || model.id === activeSession.model)?.id ?? ''
+    }
+    const tool = toolsById.get(effectiveTurnExpertId)
+    if (tool?.default_model_id && models.some((model) => model.id === tool.default_model_id)) return tool.default_model_id
+    return models[0]?.id ?? ''
+  }, [activeSession?.model, effectiveTurnExpertId, modelsForTool, toolsById, turnModelId])
 
   const formatModelIdentity = useCallback(
     (meta?: { expert_id?: string; provider?: string; model?: string } | null): string => {
       if (!meta) return ''
       const expertId = meta.expert_id?.trim() || ''
+      const tool = expertId ? toolsById.get(expertId) : undefined
       const expert = expertId ? expertsById.get(expertId) : undefined
-      const label = expert ? expert.label || expert.id : expertId
-      const provider = (meta.provider?.trim() || expert?.provider || '').trim()
+      const label = tool?.label || expert?.label || expertId
+      const provider = (meta.provider?.trim() || tool?.protocol_family || expert?.provider || '').trim()
       const model = (meta.model?.trim() || expert?.model || '').trim()
       const parts: string[] = []
       if (label) parts.push(label)
       if (provider && model) parts.push(`${provider}/${model}`)
       return parts.join(' · ')
     },
-    [expertsById],
+    [expertsById, toolsById],
   )
 
   const appendSelectedFiles = useCallback((files: FileList | null) => {
@@ -336,24 +372,21 @@ export function ChatSessionsPage() {
 
   useEffect(() => {
     let cancelled = false
-    void fetchLLMSettings(daemonUrl)
+    void fetchCLIToolSettings(daemonUrl)
       .then((settings) => {
         if (cancelled) return
-        const ids = new Set(
-          (settings.models ?? [])
-            .map((m) => (m.id ?? '').trim())
-            .filter((id) => id.length > 0),
-        )
-        setAllowedModelExpertIds(ids)
+        setCliTools(settings.tools ?? [])
+        setToolModels(settings.models ?? [])
       })
       .catch(() => {
         if (cancelled) return
-        setAllowedModelExpertIds(new Set())
+        setCliTools([])
+        setToolModels([])
       })
     return () => {
       cancelled = true
     }
-  }, [daemonUrl, experts])
+  }, [daemonUrl])
 
   const messages = useMemo(
     () => (activeSessionId ? messagesBySession[activeSessionId] ?? [] : []),
@@ -566,12 +599,14 @@ export function ChatSessionsPage() {
     try {
       const created = await createSession(daemonUrl, {
         title: newTitle.trim() || undefined,
-        expert_id: effectiveNewExpertId.trim() || undefined,
+        cli_tool_id: effectiveNewExpertId.trim() || undefined,
+        model_id: effectiveNewModelId.trim() || undefined,
       })
       setNewTitle('')
       setInput('')
       setSelectedFiles([])
-      setTurnExpertId(created.expert_id)
+      setTurnExpertId(inferToolId(created))
+      setTurnModelId(created.model || '')
       toast({ title: '会话已创建', description: created.session_id })
       await loadMessages(daemonUrl, created.session_id)
     } catch (err: unknown) {
@@ -592,7 +627,7 @@ export function ChatSessionsPage() {
     setInput('')
     setSelectedFiles([])
     try {
-      await sendTurn(daemonUrl, activeSessionId, text, effectiveTurnExpertId.trim() || undefined, draftFiles)
+      await sendTurn(daemonUrl, activeSessionId, text, undefined, effectiveTurnExpertId.trim() || undefined, effectiveTurnModelId.trim() || undefined, draftFiles)
     } catch (err: unknown) {
       setInput(draftInput)
       setSelectedFiles(draftFiles)
@@ -609,7 +644,8 @@ export function ChatSessionsPage() {
     try {
       const forked = await forkSession(daemonUrl, activeSessionId)
       setActiveSession(forked.session_id)
-      setTurnExpertId(forked.expert_id)
+      setTurnExpertId(inferToolId(forked))
+      setTurnModelId(forked.model || '')
       setSelectedFiles([])
       toast({ title: '已分叉会话', description: forked.session_id })
     } catch (err: unknown) {
@@ -632,6 +668,7 @@ export function ChatSessionsPage() {
       if (activeSessionId === sessionId) {
         setActiveSession(null)
         setTurnExpertId('')
+        setTurnModelId('')
         setSelectedFiles([])
       }
       toast({ title: '会话已删除（归档）', description: sessionId })
@@ -656,7 +693,8 @@ export function ChatSessionsPage() {
       if (id) return id
     }
     if (effectiveTurnExpertId.trim()) {
-      const id = formatModelIdentity({ expert_id: effectiveTurnExpertId.trim() })
+      const model = modelsForTool(effectiveTurnExpertId).find((item) => item.id === effectiveTurnModelId)?.model || ''
+      const id = formatModelIdentity({ expert_id: effectiveTurnExpertId.trim(), provider: toolsById.get(effectiveTurnExpertId)?.protocol_family, model })
       if (id) return id
     }
     if (activeSession) {
@@ -706,8 +744,7 @@ export function ChatSessionsPage() {
               size="sm"
             />
             <Select
-              aria-label="新会话 Expert"
-              placeholder="选择新会话 Expert"
+              label="CLI 工具"
               selectedKeys={effectiveNewExpertId ? new Set([effectiveNewExpertId]) : new Set()}
               onSelectionChange={(keys) => {
                 if (keys === 'all') return
@@ -716,17 +753,33 @@ export function ChatSessionsPage() {
               }}
               size="sm"
               disallowEmptySelection
-              isDisabled={selectableExperts.length === 0}
+              isDisabled={selectableTools.length === 0}
             >
-              {selectableExperts.map((e) => (
-                <SelectItem key={e.id}>{e.label || e.id}</SelectItem>
+              {selectableTools.map((tool) => (
+                <SelectItem key={tool.id}>{tool.label}</SelectItem>
+              ))}
+            </Select>
+            <Select
+              label="模型"
+              selectedKeys={effectiveNewModelId ? new Set([effectiveNewModelId]) : new Set()}
+              onSelectionChange={(keys) => {
+                if (keys === 'all') return
+                const first = keys.values().next().value
+                if (typeof first === 'string') setNewModelId(first)
+              }}
+              size="sm"
+              disallowEmptySelection
+              isDisabled={modelsForTool(effectiveNewExpertId).length === 0}
+            >
+              {modelsForTool(effectiveNewExpertId).map((model) => (
+                <SelectItem key={model.id}>{model.label || model.id} · {model.model}</SelectItem>
               ))}
             </Select>
             <Button
               color="primary"
               size="sm"
               className="w-full"
-              isDisabled={selectableExperts.length === 0}
+              isDisabled={selectableTools.length === 0}
               onPress={() => void onCreate()}
             >
               新建会话
@@ -751,7 +804,8 @@ export function ChatSessionsPage() {
                   }`}
                   onClick={() => {
                     setActiveSession(s.session_id)
-                    setTurnExpertId(s.expert_id)
+                    setTurnExpertId(inferToolId(s))
+                    setTurnModelId(s.model || '')
                     setSelectedFiles([])
                   }}
                 >
@@ -1055,11 +1109,28 @@ export function ChatSessionsPage() {
                         }}
                         size="sm"
                         disallowEmptySelection
-                        isDisabled={!activeSessionId || sending || selectableExperts.length === 0}
+                        isDisabled={!activeSessionId || sending || selectableTools.length === 0}
                         className="md:min-w-[260px]"
                       >
-                        {selectableExperts.map((e) => (
-                          <SelectItem key={e.id}>{e.label || e.id}</SelectItem>
+                        {selectableTools.map((tool) => (
+                          <SelectItem key={tool.id}>{tool.label}</SelectItem>
+                        ))}
+                      </Select>
+                      <Select
+                        label="模型"
+                        selectedKeys={effectiveTurnModelId ? new Set([effectiveTurnModelId]) : new Set()}
+                        onSelectionChange={(keys) => {
+                          if (keys === 'all') return
+                          const first = keys.values().next().value
+                          if (typeof first === 'string') setTurnModelId(first)
+                        }}
+                        size="sm"
+                        disallowEmptySelection
+                        isDisabled={!activeSessionId || sending || modelsForTool(effectiveTurnExpertId).length === 0}
+                        className="md:min-w-[260px]"
+                      >
+                        {modelsForTool(effectiveTurnExpertId).map((model) => (
+                          <SelectItem key={model.id}>{model.label || model.id} · {model.model}</SelectItem>
                         ))}
                       </Select>
                     </div>

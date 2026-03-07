@@ -19,15 +19,25 @@ type Resolved struct {
 	ManagedSource  string
 	PrimaryModelID string
 	Provider       string
+	ProtocolFamily string
 	Model          string
 	RuntimeKind    string
 	CLIFamily      string
+	ToolID         string
+	ExpertID       string
 	HelperOnly     bool
 }
 
+type ResolveOptions struct {
+	CLIToolID string
+	ModelID   string
+}
+
 type Registry struct {
-	mu      sync.RWMutex
-	experts map[string]config.ExpertConfig
+	mu       sync.RWMutex
+	experts  map[string]config.ExpertConfig
+	cliTools map[string]config.CLIToolConfig
+	llm      *config.LLMSettings
 }
 
 type PublicExpert struct {
@@ -61,7 +71,14 @@ func NewRegistry(cfg config.Config) *Registry {
 		}
 		m[e.ID] = e
 	}
-	return &Registry{experts: m}
+	tools := make(map[string]config.CLIToolConfig, len(cfg.CLITools))
+	for _, item := range cfg.CLITools {
+		if strings.TrimSpace(item.ID) == "" {
+			continue
+		}
+		tools[item.ID] = item
+	}
+	return &Registry{experts: m, cliTools: tools, llm: cfg.LLM}
 }
 
 // Reload 功能：使用新的运行配置刷新 registry（原子替换 experts map）。
@@ -79,8 +96,17 @@ func (r *Registry) Reload(cfg config.Config) {
 		}
 		m[e.ID] = e
 	}
+	tools := make(map[string]config.CLIToolConfig, len(cfg.CLITools))
+	for _, item := range cfg.CLITools {
+		if strings.TrimSpace(item.ID) == "" {
+			continue
+		}
+		tools[item.ID] = item
+	}
 	r.mu.Lock()
 	r.experts = m
+	r.cliTools = tools
+	r.llm = cfg.LLM
 	r.mu.Unlock()
 }
 
@@ -144,11 +170,13 @@ func (r *Registry) ListPublic() []PublicExpert {
 	return out
 }
 
-// Resolve 功能：将 expert_id + prompt 解析为 SDK 驱动的 RunSpec（支持 `{{prompt}}/{{workspace}}` 与 `${ENV}` 模板替换）。
-// 参数/返回：expertID 为选择的专家；prompt 为 node 的 prompt；cwd 为工作目录；返回 Resolved（含 RunSpec 与超时）。
-// 失败场景：expert 不存在、provider/model 缺失或 env 模板缺失时返回 error。
-// 副作用：读取当前进程环境变量（用于 `${VAR}` 注入）。
+// Resolve 功能：将 expert_id + prompt 解析为 RunSpec（兼容默认解析选项）。
 func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
+	return r.ResolveWithOptions(expertID, prompt, cwd, ResolveOptions{})
+}
+
+// ResolveWithOptions 功能：在 expert 基础上叠加 `cli_tool_id/model_id` 选择，生成最终 RunSpec。
+func (r *Registry) ResolveWithOptions(expertID, prompt, cwd string, opts ResolveOptions) (Resolved, error) {
 	if r == nil {
 		return Resolved{}, fmt.Errorf("expert registry not initialized")
 	}
@@ -158,6 +186,18 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 
 	r.mu.RLock()
 	e, ok := r.experts[expertID]
+	if !ok && strings.TrimSpace(opts.CLIToolID) != "" {
+		if matched, matchedID, found := selectCLIExpertByTool(r.experts, r.cliTools, strings.TrimSpace(opts.CLIToolID)); found {
+			e = matched
+			expertID = matchedID
+			ok = true
+		}
+	}
+	tools := make(map[string]config.CLIToolConfig, len(r.cliTools))
+	for id, item := range r.cliTools {
+		tools[id] = item
+	}
+	llm := r.llm
 	r.mu.RUnlock()
 	if !ok {
 		return Resolved{}, fmt.Errorf("unknown expert_id %q", expertID)
@@ -172,6 +212,46 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 	}
 
 	model := strings.TrimSpace(e.Model)
+	protocolFamily := provider
+	toolID := strings.TrimSpace(opts.CLIToolID)
+	selectedModelID := strings.TrimSpace(opts.ModelID)
+	if provider == "cli" {
+		selectedTool, selectedToolID, err := resolveCLIToolSelection(tools, e, toolID)
+		if err != nil {
+			return Resolved{}, err
+		}
+		toolID = selectedToolID
+		if selectedToolID != "" {
+			protocolFamily = strings.TrimSpace(selectedTool.ProtocolFamily)
+			if strings.TrimSpace(selectedTool.CLIFamily) != "" {
+				e.CLIFamily = strings.TrimSpace(selectedTool.CLIFamily)
+			}
+			if strings.TrimSpace(selectedTool.CommandPath) != "" {
+				if e.Env == nil {
+					e.Env = map[string]string{}
+				}
+				e.Env["VIBE_TREE_CLI_COMMAND_PATH"] = strings.TrimSpace(selectedTool.CommandPath)
+			}
+			if selectedModelID == "" {
+				selectedModelID = strings.TrimSpace(selectedTool.DefaultModelID)
+			}
+		}
+		if selectedModelID == "" {
+			selectedModelID = strings.TrimSpace(e.PrimaryModelID)
+		}
+		if strings.TrimSpace(selectedModelID) != "" {
+			selectedModel, ok := lookupLLMModel(llm, selectedModelID)
+			if !ok {
+				return Resolved{}, fmt.Errorf("expert %q: model %q does not exist", expertID, selectedModelID)
+			}
+			if protocolFamily != "" && configProtocol(selectedModel.Provider) != configProtocol(protocolFamily) {
+				return Resolved{}, fmt.Errorf("expert %q: model %q is incompatible with cli tool protocol %q", expertID, selectedModelID, protocolFamily)
+			}
+			model = strings.TrimSpace(selectedModel.Model)
+			e.PrimaryModelID = strings.TrimSpace(selectedModel.ID)
+			protocolFamily = configProtocol(selectedModel.Provider)
+		}
+	}
 	if provider != "demo" && provider != "process" && model == "" {
 		return Resolved{}, fmt.Errorf("expert %q: model is required (provider=%s)", expertID, provider)
 	}
@@ -228,9 +308,12 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 			ManagedSource:  strings.TrimSpace(e.ManagedSource),
 			PrimaryModelID: strings.TrimSpace(e.PrimaryModelID),
 			Provider:       provider,
+			ProtocolFamily: protocolFamily,
 			Model:          model,
 			RuntimeKind:    strings.TrimSpace(e.RuntimeKind),
 			CLIFamily:      strings.TrimSpace(e.CLIFamily),
+			ToolID:         toolID,
+			ExpertID:       expertID,
 			HelperOnly:     e.HelperOnly,
 		}, nil
 	case "cli":
@@ -262,6 +345,9 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 			env["VIBE_TREE_SYSTEM_PROMPT"] = strings.TrimSpace(e.SystemPrompt)
 		}
 		env["VIBE_TREE_MODEL"] = model
+		if strings.TrimSpace(e.PrimaryModelID) != "" {
+			env["VIBE_TREE_MODEL_ID"] = strings.TrimSpace(e.PrimaryModelID)
+		}
 		env["VIBE_TREE_CLI_FAMILY"] = family
 		if strings.TrimSpace(e.OutputSchema) != "" {
 			env["VIBE_TREE_OUTPUT_SCHEMA"] = strings.TrimSpace(e.OutputSchema)
@@ -281,9 +367,12 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 			ManagedSource:  strings.TrimSpace(e.ManagedSource),
 			PrimaryModelID: strings.TrimSpace(e.PrimaryModelID),
 			Provider:       "cli",
+			ProtocolFamily: protocolFamily,
 			Model:          model,
 			RuntimeKind:    strings.TrimSpace(e.RuntimeKind),
 			CLIFamily:      family,
+			ToolID:         toolID,
+			ExpertID:       expertID,
 			HelperOnly:     e.HelperOnly,
 		}, nil
 
@@ -364,14 +453,83 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 			ManagedSource:  strings.TrimSpace(e.ManagedSource),
 			PrimaryModelID: strings.TrimSpace(e.PrimaryModelID),
 			Provider:       provider,
+			ProtocolFamily: protocolFamily,
 			Model:          model,
 			RuntimeKind:    strings.TrimSpace(e.RuntimeKind),
 			CLIFamily:      strings.TrimSpace(e.CLIFamily),
+			ToolID:         toolID,
+			ExpertID:       expertID,
 			HelperOnly:     e.HelperOnly,
 		}, nil
 	default:
 		return Resolved{}, fmt.Errorf("expert %q: unsupported provider %q", expertID, provider)
 	}
+}
+
+func selectCLIExpertByTool(experts map[string]config.ExpertConfig, tools map[string]config.CLIToolConfig, toolID string) (config.ExpertConfig, string, bool) {
+	item, ok := tools[strings.TrimSpace(toolID)]
+	if !ok {
+		return config.ExpertConfig{}, "", false
+	}
+	family := runner.NormalizeCLIFamily(item.CLIFamily)
+	for id, expert := range experts {
+		if strings.TrimSpace(expert.Provider) != "cli" || expert.Disabled {
+			continue
+		}
+		if strings.TrimSpace(id) == strings.TrimSpace(toolID) {
+			return expert, id, true
+		}
+		if runner.NormalizeCLIFamily(expert.CLIFamily) == family {
+			return expert, id, true
+		}
+	}
+	return config.ExpertConfig{}, "", false
+}
+
+func resolveCLIToolSelection(tools map[string]config.CLIToolConfig, expert config.ExpertConfig, requested string) (config.CLIToolConfig, string, error) {
+	if len(tools) == 0 {
+		return config.CLIToolConfig{}, "", nil
+	}
+	if requested = strings.TrimSpace(requested); requested != "" {
+		item, ok := tools[requested]
+		if !ok {
+			return config.CLIToolConfig{}, "", fmt.Errorf("cli_tool_id %q does not exist", requested)
+		}
+		if !item.Enabled {
+			return config.CLIToolConfig{}, "", fmt.Errorf("cli_tool_id %q is disabled", requested)
+		}
+		return item, requested, nil
+	}
+	if item, ok := tools[strings.TrimSpace(expert.ID)]; ok {
+		if !item.Enabled {
+			return config.CLIToolConfig{}, "", fmt.Errorf("cli_tool_id %q is disabled", item.ID)
+		}
+		return item, strings.TrimSpace(expert.ID), nil
+	}
+	family := runner.NormalizeCLIFamily(expert.CLIFamily)
+	for id, item := range tools {
+		if runner.NormalizeCLIFamily(item.CLIFamily) == family && item.Enabled {
+			return item, id, nil
+		}
+	}
+	return config.CLIToolConfig{}, "", nil
+}
+
+func lookupLLMModel(llm *config.LLMSettings, modelID string) (config.LLMModelConfig, bool) {
+	if llm == nil {
+		return config.LLMModelConfig{}, false
+	}
+	modelID = strings.ToLower(strings.TrimSpace(modelID))
+	for _, item := range llm.Models {
+		if strings.ToLower(strings.TrimSpace(item.ID)) == modelID {
+			return item, true
+		}
+	}
+	return config.LLMModelConfig{}, false
+}
+
+func configProtocol(v string) string {
+	return strings.ToLower(strings.TrimSpace(v))
 }
 
 var envPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)

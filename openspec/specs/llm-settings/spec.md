@@ -109,3 +109,11 @@ When calling provider SDK with a configured `base_url`, the system MUST normaliz
 - **WHEN** user sets `base_url` to `https://proxy.example.com/v1`
 - **AND** the system calls Anthropic SDK
 - **THEN** the effective base URL is `https://proxy.example.com`
+
+### Requirement: LLM settings SHALL behave as a model pool for CLI tools and helper SDKs
+Saved model profiles MUST become immediately available to the compatible CLI tool model pool and helper SDK flows, without requiring them to appear as primary execution experts.
+
+#### Scenario: Saved OpenAI model becomes available under codex tool
+- **WHEN** client saves an OpenAI-compatible model profile
+- **THEN** that model becomes selectable for the `codex` CLI tool
+

@@ -96,3 +96,12 @@ The system MUST allow a helper SDK expert to declare a secondary model and fallb
 - **WHEN** a helper SDK request uses an expert whose primary model request fails
 - **AND** the expert has a configured secondary model
 - **THEN** the system retries that helper request with the secondary model
+
+### Requirement: Expert list MUST not treat model mirrors as the primary execution surface
+The system MAY keep `llm-model` expert mirrors for helper or builder flows, but primary execution selection MUST be tool-first and helper-only entries MUST be distinguishable in the public payload.
+
+#### Scenario: Public expert payload marks helper-only entries
+- **WHEN** client requests `GET /api/v1/experts`
+- **THEN** helper-only mirrored model entries are identifiable
+- **AND** UI clients can exclude them from primary chat execution selection
+

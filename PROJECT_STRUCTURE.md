@@ -74,6 +74,8 @@
 | `backend/internal/chat/attachments.go`      | Chat 附件能力：附件类型校验、大小限制、文件落盘、provider 多模态 block 构造、调试输入摘要                                               |
 | `backend/internal/chat/provider_input.go`    | Chat 多模态重建：基于本地消息 + 附件重建 OpenAI/Anthropic provider 输入                                                                |
 | `backend/internal/chat/thinking_translation.go` | Chat 思考过程翻译：按分段阈值缓冲 reasoning、调用翻译模型并广播中文 delta / 失败事件                                             |
+| `backend/internal/config/clitools.go`                | CLI 工具配置：维护 `Codex CLI` / `Claude Code` 的协议绑定、默认模型与命令路径 |
+| `backend/internal/api/settings_clitools.go`          | CLI 工具设置 API：读取/保存工具配置与默认模型，供设置页 `CLI 工具` Tab 使用 |
 | `backend/internal/openaicompat/compat.go`   | OpenAI 兼容适配：按模型探测/持久化 `responses` 或 `chat/completions`，并提供 endpoint mismatch 分类与 plain-text 调用帮助         |
 | `backend/internal/workspace/manager.go`    | Workspace 策略管理：`read_only/shared_workspace/git_worktree` 解析、worktree 分配、代码变更检查与 artifact 生成                      |
 | `backend/internal/dag/dag.go`              | DAG 解析与校验：从 master 输出提取第一个 JSON 对象并做 MVP 约束校验（无环/引用存在/expert 校验）                                      |
@@ -106,7 +108,8 @@
 | `ui/src/lib/chatAttachmentPreview.ts`      | Chat 附件预览判断：按文件后缀/MIME 推断图片/PDF/Markdown/代码/纯文本预览模式                                                         |
 | `ui/src/components/DAGView.tsx`            | React Flow DAG 视图：dagre 自动布局 + 节点按状态上色 + 点击节点联动终端                                                               |
 | `ui/src/components/TerminalPane.tsx`       | xterm.js 封装组件（fit + write/reset 接口）                                                                                           |
-| `ui/src/app/components/LLMSettingsTab.tsx` | 系统设置「模型」Tab：编辑 Sources（base_url+key）与 Models（model+source+SDK），保存后刷新 experts                                    |
+| `ui/src/app/components/CLIToolSettingsTab.tsx` | 系统设置「CLI 工具」Tab：管理 `Codex CLI` / `Claude Code` 的启用状态、默认模型与命令路径                                           |
+| `ui/src/app/components/LLMSettingsTab.tsx` | 系统设置「模型」Tab：编辑 Sources 与 Models 组成的模型池，供 CLI 工具与 helper SDK 复用                                              |
 | `ui/src/app/components/BasicSettingsTab.tsx` | 系统设置「基本设置」Tab：配置思考过程翻译的 API 源、翻译模型与目标 AI 模型列表                                                     |
 | `ui/src/app/components/ExpertSettingsTab.tsx` | 系统设置「专家」Tab：专家列表、AI 生成专家、生成会话历史、快照发布                                                                   |
 | `ui/src/lib/daemon.ts`                     | daemon URL/WS URL 解析与 health/workflow/execution/chat attachment API 封装                                                           |

@@ -13,6 +13,7 @@ type Config struct {
 	Server    ServerConfig    `json:"server"`
 	Execution ExecutionConfig `json:"execution"`
 	Experts   []ExpertConfig  `json:"experts"`
+	CLITools  []CLIToolConfig `json:"cli_tools,omitempty"`
 	Basic     *BasicSettings  `json:"basic,omitempty"`
 	LLM       *LLMSettings    `json:"llm,omitempty"`
 }
@@ -150,6 +151,7 @@ func Default() Config {
 			MaxConcurrency: 6,
 			KillGraceMs:    1500,
 		},
+		CLITools: defaultCLITools(),
 		Experts: []ExpertConfig{
 			{
 				ID:            "master",
@@ -267,6 +269,12 @@ func Load() (Config, string, error) {
 	}
 
 	applyEnvOverrides(&cfg)
+	if err := NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
+		return Config{}, "", err
+	}
+	if err := NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
+		return Config{}, "", err
+	}
 	if err := RebuildExperts(&cfg); err != nil {
 		return Config{}, "", err
 	}

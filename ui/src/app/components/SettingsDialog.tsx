@@ -20,6 +20,7 @@ import { daemonUrlFromEnv } from "@/lib/daemon";
 import { type HealthState, useDaemonStore } from "@/stores/daemonStore";
 
 import { BasicSettingsTab } from "./BasicSettingsTab";
+import { CLIToolSettingsTab } from "./CLIToolSettingsTab";
 import { LLMSettingsTab } from "./LLMSettingsTab";
 import { ExpertSettingsTab } from "./ExpertSettingsTab";
 
@@ -158,7 +159,7 @@ export function SettingsDialog() {
                   classNames={{
                     base: "w-full shrink-0",
                     panel: "h-full min-h-0 flex-1 overflow-y-auto pr-1",
-                    tabList: "grid w-full shrink-0 grid-cols-4",
+                    tabList: "grid w-full shrink-0 grid-cols-5",
                   }}
                 >
                   <Tab key="basic" title="基本设置">
@@ -318,6 +319,10 @@ export function SettingsDialog() {
                         )}
                       </section>
                     </div>
+                  </Tab>
+
+                  <Tab key="cli-tools" title="CLI 工具">
+                    <CLIToolSettingsTab />
                   </Tab>
 
                   <Tab key="llm" title="模型">
