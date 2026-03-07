@@ -144,6 +144,7 @@ func buildFinalReportTurnPrompt(source store.RepoSource, snapshot store.RepoSnap
 4. 不要把 README 标题机械地当成项目特点；项目特点必须是你归纳后的工程特征。
 5. 如果“技术栈”之类问题没有证据，就不要硬写成一个功能。
 6. 关注点是：%s
+7. 这条回复会被系统视为“正式报告版本”，后续普通追问不自动替代它；只有显式同步动作才会覆盖正式结果。
 
 请现在直接输出最终报告。`, source.RepoURL, snapshot.RequestedRef, prepared.ResolvedRef, prepared.CommitSHA, run.Depth, prepared.SourceDir, prepared.CodeIndexPath, features, features, features))
 }

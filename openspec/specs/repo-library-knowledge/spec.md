@@ -8,15 +8,17 @@ The system MUST derive structured knowledge cards from analyzer outputs includin
 
 Knowledge cards MUST support at least `project_characteristic`, `feature_pattern`, `risk_note`, and `integration_note` types.
 
+The extractor MUST tolerate minor heading-label drift in AI-generated markdown reports as long as the report still follows the overall structured analysis format.
+
 #### Scenario: Successful card extraction
 - **WHEN** an analysis run finishes with a generated report
 - **THEN** the system extracts one or more knowledge cards from the report
 - **AND** persists the cards linked to the snapshot and analysis run
 
-#### Scenario: Subagent results are unavailable
-- **WHEN** an analysis run does not produce `subagent_results.json`
-- **THEN** the system still extracts cards from `report.md`
-- **AND** marks any lower-confidence conclusions accordingly
+#### Scenario: AI report headings drift slightly
+- **WHEN** an AI-generated report uses semantically equivalent headings or labels with minor wording variation
+- **THEN** the extractor still maps those sections into cards and evidence when enough structure remains
+- **AND** the system does not fail solely because one heading text changed slightly
 
 ### Requirement: Repo Library MUST preserve evidence for each card
 Each knowledge card MUST store one or more evidence items when supporting evidence is available.

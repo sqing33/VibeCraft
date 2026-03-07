@@ -45,6 +45,14 @@ LABEL_KEYS = {
     "unknowns": {"推断与未知点", "Inference and Unknowns", "Unknowns", "Notes and Unknowns"},
 }
 
+FORMAL_REPORT_MARKERS = {
+    "# github 功能实现原理报告",
+    "## run 1",
+    "### 第一部分：项目参数与结构解析",
+    "### 第二部分：面向人的功能说明",
+    "### 第三部分：面向 ai 的实现细节与证据链",
+}
+
 SEARCH_SECTION_TITLES = {
     "project_characteristics": "Project Characteristics and Signature Implementations",
     "executive_summary": "Executive Principle Summary",
@@ -437,6 +445,12 @@ def _normalize_report(report_text: str) -> dict[str, Any]:
         "risks": risks,
     }
 
+
+
+def looks_like_formal_report(report_text: str) -> bool:
+    normalized = latest_run_text(report_text).casefold()
+    hit_count = sum(1 for marker in FORMAL_REPORT_MARKERS if marker in normalized)
+    return hit_count >= 3
 
 def render_search_compatible_report(report_text: str) -> str:
     """功能：将当前 report.md 规范化为 search/retrieval 可稳定分块的 markdown。

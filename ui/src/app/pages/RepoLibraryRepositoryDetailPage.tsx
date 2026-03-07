@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Chip, Skeleton } from '@heroui/react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { ArrowLeft, FileSearch, RefreshCcw, ScrollText } from 'lucide-react'
 
 import {
@@ -395,9 +397,9 @@ export function RepoLibraryRepositoryDetailPage(props: RepoLibraryRepositoryDeta
             </div>
 
             {reportText ? (
-              <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-xl border bg-muted/20 p-4 text-xs leading-6">
-                {reportText}
-              </pre>
+              <div className="chat-markdown max-h-80 overflow-auto rounded-xl border bg-muted/20 p-4 text-sm leading-7">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{reportText}</ReactMarkdown>
+              </div>
             ) : selectedSnapshot?.report_path ? (
               <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
                 <div>当前快照已生成报告文件。</div>

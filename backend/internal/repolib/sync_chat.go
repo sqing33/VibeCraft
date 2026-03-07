@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"vibe-tree/backend/internal/store"
@@ -51,6 +52,9 @@ func (s *Service) SyncAnalysisFromChat(ctx context.Context, runID string) (store
 	if reportText == "" {
 		return store.RepoAnalysisRun{}, fmt.Errorf("%w: latest assistant message is empty", store.ErrValidation)
 	}
+	if !looksLikeFormalAnalysisReport(reportText) {
+		return store.RepoAnalysisRun{}, fmt.Errorf("%w: latest assistant reply is not a formal analysis report; continue the chat if needed, then sync only when a full report is ready", store.ErrValidation)
+	}
 	layout, err := s.prepareSnapshotLayoutForID(source.RepoKey, snapshot.ID)
 	if err != nil {
 		return store.RepoAnalysisRun{}, err
@@ -88,4 +92,23 @@ func firstNonEmptyStringPtr(value *string, fallback string) string {
 		return *value
 	}
 	return fallback
+}
+
+
+func looksLikeFormalAnalysisReport(text string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(text))
+	markers := []string{
+		"# github 功能实现原理报告",
+		"## run 1",
+		"### 第一部分：项目参数与结构解析",
+		"### 第二部分：面向人的功能说明",
+		"### 第三部分：面向 ai 的实现细节与证据链",
+	}
+	hits := 0
+	for _, marker := range markers {
+		if strings.Contains(trimmed, strings.ToLower(marker)) {
+			hits++
+		}
+	}
+	return hits >= 3
 }
