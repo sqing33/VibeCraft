@@ -74,6 +74,8 @@ func createChatSessionHandler(deps Deps) gin.HandlerFunc {
 		sess, err := deps.Store.CreateChatSession(c.Request.Context(), store.CreateChatSessionParams{
 			Title:         req.Title,
 			ExpertID:      firstNonEmptyTrimmed(resolved.ExpertID, expertID),
+			CLIToolID:     pointerOrNilString(strings.TrimSpace(req.CLIToolID)),
+			ModelID:       pointerOrNilString(strings.TrimSpace(req.ModelID)),
 			Provider:      firstNonEmptyTrimmed(resolved.ProtocolFamily, resolved.Provider),
 			Model:         resolved.Model,
 			WorkspacePath: workspace,
@@ -298,13 +300,15 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 		result, err := deps.Chat.RunTurn(c.Request.Context(), chat.TurnParams{
 			Session:             sess,
 			ExpertID:            firstNonEmptyTrimmed(resolved.ExpertID, expertID),
+			CLIToolID:           pointerOrNilString(firstNonEmptyTrimmed(strings.TrimSpace(req.CLIToolID), resolved.ToolID)),
+			ModelID:             pointerOrNilString(strings.TrimSpace(req.ModelID)),
 			UserInput:           userText,
 			ModelInput:          modelInput,
 			Attachments:         uploads,
 			Spec:                resolved.Spec,
 			Provider:            firstNonEmptyTrimmed(resolved.ProtocolFamily, resolved.Provider),
 			Model:               resolved.Model,
-			ThinkingTranslation: buildThinkingTranslationSpec(firstNonEmptyTrimmed(resolved.PrimaryModelID, resolved.Model)),
+			ThinkingTranslation: buildThinkingTranslationSpec(firstNonEmptyTrimmed(strings.TrimSpace(req.ModelID), resolved.PrimaryModelID, resolved.Model)),
 		})
 		if err != nil {
 			if errors.Is(err, store.ErrValidation) {
@@ -496,4 +500,12 @@ func firstNonEmptyTrimmed(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func pointerOrNilString(v string) *string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	return &v
 }

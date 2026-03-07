@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const schemaVersion = 7
+const schemaVersion = 8
 
 // Migrate 功能：执行 state DB schema 迁移（MVP：使用 PRAGMA user_version 管理版本）。
 // 参数/返回：ctx 控制超时；成功返回 nil。
@@ -189,6 +189,9 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   expert_id TEXT NOT NULL,
+  cli_tool_id TEXT,
+  model_id TEXT,
+  cli_session_id TEXT,
   provider TEXT NOT NULL,
   model TEXT NOT NULL,
   workspace_path TEXT NOT NULL,
@@ -585,7 +588,6 @@ CREATE TABLE IF NOT EXISTS repo_similarity_queries (
 	return nil
 }
 
-
 func reconcileCompatibility(ctx context.Context, db *sql.DB) error {
 	if db == nil {
 		return fmt.Errorf("db is nil")
@@ -876,4 +878,48 @@ func tableColumns(ctx context.Context, tx *sql.Tx, table string) (map[string]boo
 		return nil, fmt.Errorf("iterate table_info(%s): %w", table, err)
 	}
 	return cols, nil
+}
+
+func migrateV8(ctx context.Context, tx *sql.Tx) error {
+	cols, err := tableColumns(ctx, tx, "chat_sessions")
+	if err != nil {
+		return err
+	}
+	if !cols["cli_tool_id"] {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE chat_sessions ADD COLUMN cli_tool_id TEXT;`); err != nil {
+			return fmt.Errorf("add chat_sessions.cli_tool_id: %w", err)
+		}
+	}
+	if !cols["model_id"] {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE chat_sessions ADD COLUMN model_id TEXT;`); err != nil {
+			return fmt.Errorf("add chat_sessions.model_id: %w", err)
+		}
+	}
+	if !cols["cli_session_id"] {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE chat_sessions ADD COLUMN cli_session_id TEXT;`); err != nil {
+			return fmt.Errorf("add chat_sessions.cli_session_id: %w", err)
+		}
+	}
+	return nil
+}
+
+func ensureChatSessionCLIColumns(ctx context.Context, tx *sql.Tx) error {
+	cols, err := tableColumns(ctx, tx, "chat_sessions")
+	if err != nil {
+		return err
+	}
+	needed := map[string]string{
+		"cli_tool_id":    `ALTER TABLE chat_sessions ADD COLUMN cli_tool_id TEXT;`,
+		"model_id":       `ALTER TABLE chat_sessions ADD COLUMN model_id TEXT;`,
+		"cli_session_id": `ALTER TABLE chat_sessions ADD COLUMN cli_session_id TEXT;`,
+	}
+	for key, stmt := range needed {
+		if cols[key] {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("repair chat_sessions.%s: %w", key, err)
+		}
+	}
+	return nil
 }

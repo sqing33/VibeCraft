@@ -24,6 +24,9 @@ type ChatSession struct {
 	ID            string  `json:"session_id"`
 	Title         string  `json:"title"`
 	ExpertID      string  `json:"expert_id"`
+	CLIToolID     *string `json:"cli_tool_id,omitempty"`
+	ModelID       *string `json:"model_id,omitempty"`
+	CLISessionID  *string `json:"cli_session_id,omitempty"`
 	Provider      string  `json:"provider"`
 	Model         string  `json:"model"`
 	WorkspacePath string  `json:"workspace_path"`
@@ -85,6 +88,9 @@ type ChatCompaction struct {
 type CreateChatSessionParams struct {
 	Title         string
 	ExpertID      string
+	CLIToolID     *string
+	ModelID       *string
+	CLISessionID  *string
 	Provider      string
 	Model         string
 	WorkspacePath string
@@ -123,6 +129,9 @@ func (s *Store) CreateChatSession(ctx context.Context, params CreateChatSessionP
 		ID:            id.New("cs_"),
 		Title:         title,
 		ExpertID:      expertID,
+		CLIToolID:     params.CLIToolID,
+		ModelID:       params.ModelID,
+		CLISessionID:  params.CLISessionID,
 		Provider:      provider,
 		Model:         model,
 		WorkspacePath: workspace,
@@ -133,11 +142,14 @@ func (s *Store) CreateChatSession(ctx context.Context, params CreateChatSessionP
 	}
 	_, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO chat_sessions (id, title, expert_id, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0);`,
+		`INSERT INTO chat_sessions (id, title, expert_id, cli_tool_id, model_id, cli_session_id, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0);`,
 		session.ID,
 		session.Title,
 		session.ExpertID,
+		session.CLIToolID,
+		session.ModelID,
+		session.CLISessionID,
 		session.Provider,
 		session.Model,
 		session.WorkspacePath,
@@ -160,7 +172,7 @@ func (s *Store) ListChatSessions(ctx context.Context, limit int) ([]ChatSession,
 	}
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT id, title, expert_id, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn
+		`SELECT id, title, expert_id, cli_tool_id, model_id, cli_session_id, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn
 		   FROM chat_sessions
 		  ORDER BY updated_at DESC
 		  LIMIT ?;`,
@@ -194,7 +206,7 @@ func (s *Store) GetChatSession(ctx context.Context, sessionID string) (ChatSessi
 	}
 	row := s.db.QueryRowContext(
 		ctx,
-		`SELECT id, title, expert_id, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn
+		`SELECT id, title, expert_id, cli_tool_id, model_id, cli_session_id, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn
 		   FROM chat_sessions
 		  WHERE id = ?
 		  LIMIT 1;`,
@@ -230,7 +242,7 @@ func (s *Store) PatchChatSession(ctx context.Context, sessionID string, patch Pa
 
 	row := tx.QueryRowContext(
 		ctx,
-		`SELECT id, title, expert_id, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn
+		`SELECT id, title, expert_id, cli_tool_id, model_id, cli_session_id, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn
 		   FROM chat_sessions
 		  WHERE id = ?
 		  LIMIT 1;`,
@@ -280,10 +292,13 @@ func (s *Store) PatchChatSession(ctx context.Context, sessionID string, patch Pa
 }
 
 type UpdateChatSessionDefaultsParams struct {
-	SessionID string
-	ExpertID  string
-	Provider  string
-	Model     string
+	SessionID    string
+	ExpertID     string
+	CLIToolID    *string
+	ModelID      *string
+	CLISessionID *string
+	Provider     string
+	Model        string
 }
 
 func (s *Store) UpdateChatSessionDefaults(ctx context.Context, params UpdateChatSessionDefaultsParams) (ChatSession, error) {
@@ -314,9 +329,12 @@ func (s *Store) UpdateChatSessionDefaults(ctx context.Context, params UpdateChat
 	res, err := s.db.ExecContext(
 		ctx,
 		`UPDATE chat_sessions
-		    SET expert_id = ?, provider = ?, model = ?, updated_at = ?
+		    SET expert_id = ?, cli_tool_id = ?, model_id = ?, cli_session_id = COALESCE(?, cli_session_id), provider = ?, model = ?, updated_at = ?
 		  WHERE id = ?;`,
 		expertID,
+		params.CLIToolID,
+		params.ModelID,
+		params.CLISessionID,
 		provider,
 		model,
 		now,
@@ -810,6 +828,9 @@ func (s *Store) ForkChatSession(ctx context.Context, sessionID string, title str
 		ID:            id.New("cs_"),
 		Title:         nextTitle,
 		ExpertID:      source.ExpertID,
+		CLIToolID:     source.CLIToolID,
+		ModelID:       source.ModelID,
+		CLISessionID:  nil,
 		Provider:      source.Provider,
 		Model:         source.Model,
 		WorkspacePath: source.WorkspacePath,
@@ -826,11 +847,14 @@ func (s *Store) ForkChatSession(ctx context.Context, sessionID string, title str
 	defer tx.Rollback()
 	_, err = tx.ExecContext(
 		ctx,
-		`INSERT INTO chat_sessions (id, title, expert_id, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO chat_sessions (id, title, expert_id, cli_tool_id, model_id, cli_session_id, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		fork.ID,
 		fork.Title,
 		fork.ExpertID,
+		fork.CLIToolID,
+		fork.ModelID,
+		fork.CLISessionID,
 		fork.Provider,
 		fork.Model,
 		fork.WorkspacePath,
@@ -906,6 +930,9 @@ func scanChatSession(s scanner) (ChatSession, error) {
 		&session.ID,
 		&session.Title,
 		&session.ExpertID,
+		&session.CLIToolID,
+		&session.ModelID,
+		&session.CLISessionID,
 		&session.Provider,
 		&session.Model,
 		&session.WorkspacePath,
@@ -983,4 +1010,11 @@ func scanChatAttachment(s scanner) (ChatAttachment, error) {
 		return ChatAttachment{}, err
 	}
 	return attachment, nil
+}
+
+func pointerStringValue(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return strings.TrimSpace(*v)
 }

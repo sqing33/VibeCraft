@@ -478,3 +478,21 @@ The chat page MUST let the user select a CLI tool first and then choose a compat
 - **WHEN** user selects `Codex CLI` in the chat composer
 - **THEN** the model selector only shows OpenAI-compatible models
 
+### Requirement: Chat model selectors MUST display the selected model label
+The Chat page's tool-first model selectors MUST visibly display the currently selected model label whenever the selected key matches an available model option.
+
+#### Scenario: New-session model selector shows selected label
+- **WHEN** user selects a model for a new chat session
+- **THEN** the model select control shows that model label in the collapsed field
+
+#### Scenario: Composer model selector shows current session model
+- **WHEN** an active session already has a selected tool/model combination
+- **THEN** the composer model select shows the matching label instead of an empty field
+
+### Requirement: Chat model selectors MUST visibly render the selected label
+The Chat page's model selectors MUST render the selected model label in the collapsed control whenever the selected key matches an available option.
+
+#### Scenario: Composer model select shows selected label
+- **WHEN** the current tool/model combination is valid
+- **THEN** the composer model select shows the selected model label instead of an empty field
+

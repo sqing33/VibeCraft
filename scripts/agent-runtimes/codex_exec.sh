@@ -5,19 +5,20 @@ artifact_dir="${VIBE_TREE_ARTIFACT_DIR:-}"
 prompt="${VIBE_TREE_PROMPT:-}"
 system_prompt="${VIBE_TREE_SYSTEM_PROMPT:-}"
 model="${VIBE_TREE_MODEL:-}"
+model_id="${VIBE_TREE_MODEL_ID:-}"
 workspace="${VIBE_TREE_WORKSPACE:-$PWD}"
 cli_cmd="${VIBE_TREE_CLI_COMMAND_PATH:-codex}"
+resume_session_id="${VIBE_TREE_RESUME_SESSION_ID:-}"
 status="ok"
 summary_text=""
 next_action=""
 modified_code="false"
 
-if [[ -n "$artifact_dir" ]]; then
-  mkdir -p "$artifact_dir"
-fi
+mkdir -p "${artifact_dir:-$(mktemp -d)}"
 final_file="${artifact_dir:+$artifact_dir/final_message.md}"
 summary_file="${artifact_dir:+$artifact_dir/summary.json}"
 artifacts_file="${artifact_dir:+$artifact_dir/artifacts.json}"
+session_file="${artifact_dir:+$artifact_dir/session.json}"
 raw_log="${artifact_dir:+$artifact_dir/raw_output.log}"
 patch_file="${artifact_dir:+$artifact_dir/patch.diff}"
 
@@ -34,32 +35,87 @@ trap 'for f in "${cleanup_files[@]:-}"; do [[ -n "$f" ]] && rm -f "$f"; done' EX
 
 combined_prompt="$prompt"
 if [[ -n "$system_prompt" ]]; then
-  combined_prompt=$'System instructions:
-'"$system_prompt"$'
-
-User request:
-'"$prompt"
+  combined_prompt=$'System instructions:\n'"$system_prompt"$'\n\nUser request:\n'"$prompt"
 fi
 
-if command -v "$cli_cmd" >/dev/null 2>&1; then
+if ! command -v "$cli_cmd" >/dev/null 2>&1; then
+  echo "CLI command not found: $cli_cmd" >"$raw_log"
+  exit_code=127
+else
   set +e
-  printf '%s' "$combined_prompt" | "$cli_cmd" exec --color never --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -C "$workspace" ${model:+--model "$model"} -o "$final_file" >"${raw_log:-/dev/null}" 2>&1
+  if [[ -n "$resume_session_id" ]]; then
+    (
+      cd "$workspace"
+      printf '%s' "$combined_prompt" | "$cli_cmd" exec resume --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox ${model:+--model "$model"} -o "$final_file" "$resume_session_id" -
+    ) >"$raw_log" 2>&1
+  else
+    (
+      cd "$workspace"
+      printf '%s' "$combined_prompt" | "$cli_cmd" exec --json --color never --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox ${model:+--model "$model"} -o "$final_file" -
+    ) >"$raw_log" 2>&1
+  fi
   exit_code=$?
   set -e
-else
-  echo "CLI command not found: $cli_cmd" >"${raw_log:-/dev/stderr}"
-  exit_code=127
 fi
 
+session_id="$(python3 - "$raw_log" <<'PY'
+import json, sys
+from pathlib import Path
+
+def walk(obj):
+    if isinstance(obj, dict):
+        if isinstance(obj.get('thread_id'), str) and obj['thread_id'].strip():
+            return obj['thread_id'].strip()
+        thread = obj.get('thread')
+        if isinstance(thread, dict) and isinstance(thread.get('id'), str) and thread['id'].strip():
+            return thread['id'].strip()
+        if isinstance(obj.get('session_id'), str) and obj['session_id'].strip():
+            return obj['session_id'].strip()
+        for v in obj.values():
+            got = walk(v)
+            if got:
+                return got
+    elif isinstance(obj, list):
+        for item in obj:
+            got = walk(item)
+            if got:
+                return got
+    return ''
+
+path = Path(sys.argv[1])
+if path.exists():
+    for raw in path.read_text(encoding='utf-8', errors='ignore').splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            continue
+        got = walk(obj)
+        if got:
+            print(got)
+            break
+PY
+)"
+
 if [[ -f "$final_file" ]]; then
-  cat "$final_file"
-  summary_text="$(tr -d '
-' < "$final_file" | tail -n 12 | tr '
-' ' ' | sed 's/[[:space:]]\+/ /g' | sed 's/^ //; s/ $//')"
+  summary_text="$(python3 - "$final_file" <<'PY'
+import sys
+from pathlib import Path
+text = Path(sys.argv[1]).read_text(encoding='utf-8', errors='ignore').strip()
+print(' '.join(text.splitlines()[-12:]).strip())
+PY
+)"
 fi
-if [[ -z "$summary_text" && -n "$raw_log" && -f "$raw_log" ]]; then
-  summary_text="$(tail -n 20 "$raw_log" | tr '
-' ' ' | sed 's/[[:space:]]\+/ /g' | sed 's/^ //; s/ $//')"
+if [[ -z "$summary_text" && -f "$raw_log" ]]; then
+  summary_text="$(python3 - "$raw_log" <<'PY'
+import sys
+from pathlib import Path
+text = Path(sys.argv[1]).read_text(encoding='utf-8', errors='ignore').strip().splitlines()
+print(' '.join(text[-20:]).strip())
+PY
+)"
 fi
 if [[ -z "$summary_text" ]]; then
   summary_text="CLI run finished"
@@ -73,7 +129,7 @@ if git -C "$workspace" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     modified_code="false"
   else
     modified_code="true"
-    git -C "$workspace" diff --no-ext-diff > "$patch_file" || true
+    if [[ -n "$patch_file" ]]; then git -C "$workspace" diff --no-ext-diff > "$patch_file" || true; fi
   fi
 fi
 if [[ -n "$summary_file" ]]; then
@@ -100,4 +156,18 @@ print(json.dumps({"artifacts": [{
 }]}, ensure_ascii=False))
 JSON
 fi
+if [[ -n "$session_file" && -n "$session_id" ]]; then
+  export session_id model resumed_flag="false"
+  if [[ -n "$resume_session_id" ]]; then export resumed_flag="true"; fi
+  python3 - <<'JSON' > "$session_file"
+import json, os
+print(json.dumps({
+  "tool_id": "codex",
+  "session_id": os.environ.get("session_id", ""),
+  "model": os.environ.get("model", "") or os.environ.get("model_id", ""),
+  "resumed": os.environ.get("resumed_flag", "false").lower() == "true",
+}, ensure_ascii=False))
+JSON
+fi
+cat "$final_file"
 exit $exit_code

@@ -67,6 +67,8 @@ type Manager struct {
 type TurnParams struct {
 	Session             store.ChatSession
 	ExpertID            string
+	CLIToolID           *string
+	ModelID             *string
 	UserInput           string
 	ModelInput          string
 	Attachments         []UploadedAttachment
@@ -361,66 +363,108 @@ func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, userMs
 	if strings.TrimSpace(spec.Command) == "" {
 		return TurnResult{}, fmt.Errorf("%w: chat expert is not executable", store.ErrValidation)
 	}
-	if err := m.ensureCompaction(ctx, sess, modelInput, runner.SDKSpec{}, nil); err != nil {
-		return TurnResult{}, err
-	}
-	messages, err := m.store.ListChatMessages(ctx, sess.ID, 1000)
-	if err != nil {
-		return TurnResult{}, err
-	}
-	prompt, debugInput := buildCLITurnPrompt(sess, messages, userMsg, modelInput, m.keepRecent)
-	if spec.Env == nil {
-		spec.Env = map[string]string{}
-	}
-	spec.Env["VIBE_TREE_PROMPT"] = prompt
+
+	attemptResume := strings.TrimSpace(pointerStringValue(sess.CLISessionID))
 	artifactDir, err := cliruntime.ChatTurnArtifactDir(sess.ID, userMsg.ID)
-	if err == nil {
-		spec = cliruntime.PrepareRunSpec(spec, artifactDir)
-	}
-	if strings.TrimSpace(spec.Cwd) == "" {
-		spec.Cwd = sess.WorkspacePath
-	}
-	handle, err := m.runtimeRunner.StartOneshot(ctx, spec)
 	if err != nil {
-		return TurnResult{}, err
+		artifactDir = ""
 	}
-	output := handle.Output()
-	var stdout strings.Builder
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		if output == nil {
-			return
+
+	runOnce := func(prompt string, contextMode string, resumeSessionID string) (string, string, error) {
+		runSpec := spec
+		if runSpec.Env == nil {
+			runSpec.Env = map[string]string{}
 		}
-		defer output.Close()
-		if data, err := io.ReadAll(output); err == nil {
-			stdout.Write(data)
+		runSpec.Env["VIBE_TREE_PROMPT"] = prompt
+		if resumeSessionID != "" {
+			runSpec.Env["VIBE_TREE_RESUME_SESSION_ID"] = resumeSessionID
+		} else {
+			delete(runSpec.Env, "VIBE_TREE_RESUME_SESSION_ID")
 		}
-	}()
-	exitRes, waitErr := handle.Wait()
-	<-done
-	finalText := strings.TrimSpace(stdout.String())
-	if artifactDir != "" {
-		if artifactText, err := cliruntime.ReadFinalMessage(artifactDir); err == nil && strings.TrimSpace(artifactText) != "" {
-			finalText = artifactText
+		if artifactDir != "" {
+			runSpec = cliruntime.PrepareRunSpec(runSpec, artifactDir)
 		}
-	}
-	if strings.TrimSpace(finalText) == "" {
-		if summary := cliruntime.SummaryText(artifactDir); summary != nil {
-			finalText = strings.TrimSpace(*summary)
+		if strings.TrimSpace(runSpec.Cwd) == "" {
+			runSpec.Cwd = sess.WorkspacePath
 		}
-	}
-	if waitErr != nil || exitRes.ExitCode != 0 {
-		if strings.TrimSpace(finalText) == "" {
-			if waitErr != nil {
-				return TurnResult{}, waitErr
+		handle, err := m.runtimeRunner.StartOneshot(ctx, runSpec)
+		if err != nil {
+			return "", "", err
+		}
+		output := handle.Output()
+		var stdout strings.Builder
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			if output == nil {
+				return
 			}
-			return TurnResult{}, fmt.Errorf("cli runtime exited with code %d", exitRes.ExitCode)
+			defer output.Close()
+			if data, err := io.ReadAll(output); err == nil {
+				stdout.Write(data)
+			}
+		}()
+		exitRes, waitErr := handle.Wait()
+		<-done
+		finalText := strings.TrimSpace(stdout.String())
+		if artifactDir != "" {
+			if artifactText, err := cliruntime.ReadFinalMessage(artifactDir); err == nil && strings.TrimSpace(artifactText) != "" {
+				finalText = artifactText
+			}
+		}
+		if strings.TrimSpace(finalText) == "" {
+			if summary := cliruntime.SummaryText(artifactDir); summary != nil {
+				finalText = strings.TrimSpace(*summary)
+			}
+		}
+		if waitErr != nil || exitRes.ExitCode != 0 {
+			if strings.TrimSpace(finalText) == "" {
+				if waitErr != nil {
+					return "", "", waitErr
+				}
+				return "", "", fmt.Errorf("cli runtime exited with code %d", exitRes.ExitCode)
+			}
+		}
+		newSessionID := ""
+		if artifactDir != "" {
+			if cliSession, err := cliruntime.ReadSession(artifactDir); err == nil {
+				newSessionID = strings.TrimSpace(cliSession.SessionID)
+			}
+		}
+		if strings.TrimSpace(finalText) == "" {
+			finalText = "(empty response)"
+		}
+		return finalText, firstNonEmptyTrimmed(newSessionID, resumeSessionID), nil
+	}
+
+	var (
+		finalText    string
+		cliSessionID string
+		contextMode  string
+	)
+	if attemptResume != "" {
+		prompt := buildCLIIncrementalPrompt(userMsg, modelInput)
+		finalText, cliSessionID, err = runOnce(prompt, "cli_resume", attemptResume)
+		if err == nil {
+			contextMode = "cli_resume"
 		}
 	}
-	if strings.TrimSpace(finalText) == "" {
-		finalText = "(empty response)"
+	if err != nil || contextMode == "" {
+		if err := m.ensureCompaction(ctx, sess, modelInput, runner.SDKSpec{}, nil); err != nil {
+			return TurnResult{}, err
+		}
+		messages, msgErr := m.store.ListChatMessages(ctx, sess.ID, 1000)
+		if msgErr != nil {
+			return TurnResult{}, msgErr
+		}
+		prompt, _ := buildCLITurnPrompt(sess, messages, userMsg, modelInput, m.keepRecent)
+		finalText, cliSessionID, err = runOnce(prompt, "cli_reconstructed", "")
+		if err != nil {
+			return TurnResult{}, err
+		}
+		contextMode = "cli_reconstructed"
 	}
+
 	m.broadcast("chat.turn.delta", map[string]any{"session_id": sess.ID, "delta": finalText})
 	assistantMsg, err := m.store.AppendChatMessage(ctx, store.AppendChatMessageParams{
 		SessionID:   sess.ID,
@@ -434,10 +478,13 @@ func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, userMs
 		return TurnResult{}, err
 	}
 	_, _ = m.store.UpdateChatSessionDefaults(ctx, store.UpdateChatSessionDefaultsParams{
-		SessionID: sess.ID,
-		ExpertID:  expertID,
-		Provider:  provider,
-		Model:     model,
+		SessionID:    sess.ID,
+		ExpertID:     expertID,
+		CLIToolID:    sess.CLIToolID,
+		ModelID:      sess.ModelID,
+		CLISessionID: pointerOrNilString(cliSessionID),
+		Provider:     provider,
+		Model:        model,
 	})
 	m.broadcast("chat.turn.completed", map[string]any{
 		"session_id":                   sess.ID,
@@ -447,8 +494,8 @@ func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, userMs
 		"translated_reasoning_text":    "",
 		"thinking_translation_applied": false,
 		"thinking_translation_failed":  false,
-		"model_input":                  debugInput,
-		"context_mode":                 "cli_reconstructed",
+		"model_input":                  modelInput,
+		"context_mode":                 contextMode,
 		"token_in":                     nil,
 		"token_out":                    nil,
 		"cached_input_tokens":          nil,
@@ -458,14 +505,32 @@ func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, userMs
 		AssistantMessage:           assistantMsg,
 		ReasoningText:              nil,
 		TranslatedReasoningText:    nil,
-		ModelInput:                 pointerString(debugInput),
-		ContextMode:                pointerString("cli_reconstructed"),
+		ModelInput:                 pointerString(modelInput),
+		ContextMode:                pointerString(contextMode),
 		CachedInputTokens:          nil,
 		ThinkingTranslationApplied: false,
 		ThinkingTranslationFailed:  false,
 	}, nil
 }
 
+func buildCLIIncrementalPrompt(currentUser store.ChatMessage, modelInput string) string {
+	parts := make([]string, 0, 2)
+	if current := buildCurrentInputDebug(modelInput, currentUser.Attachments); strings.TrimSpace(current) != "" {
+		parts = append(parts, current)
+	}
+	if lines := cliAttachmentPathLines(currentUser.Attachments); len(lines) > 0 {
+		parts = append(parts, "Attachment file paths:\n"+strings.Join(lines, "\n"))
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
+func pointerOrNilString(v string) *string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	return &v
+}
 func buildCLITurnPrompt(sess store.ChatSession, messages []store.ChatMessage, currentUser store.ChatMessage, modelInput string, keepRecent int) (string, string) {
 	messages = applyCurrentModelInput(messages, currentUser, modelInput)
 	prompt := renderConversation(sess.Summary, messages, "", keepRecent)
@@ -1429,4 +1494,20 @@ func defaultAnthropicThinkingBudget(maxTokens int) int64 {
 		return 0
 	}
 	return budget
+}
+
+func firstNonEmptyTrimmed(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func pointerStringValue(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return strings.TrimSpace(*v)
 }

@@ -86,3 +86,17 @@ The chat create-session and turn APIs MUST support `cli_tool_id` and `model_id`,
 - **WHEN** client creates a session with `cli_tool_id="codex"` and an OpenAI-compatible `model_id`
 - **THEN** the session is created successfully and uses that tool/model by default
 
+### Requirement: Chat sessions MUST store CLI tool/model/session metadata
+Chat sessions MUST persist the selected CLI tool, selected model id, and the last known CLI session reference needed to continue a CLI-native conversation.
+
+#### Scenario: Session stores codex tool and session reference
+- **WHEN** a codex-backed chat session completes one turn
+- **THEN** the session record includes `cli_tool_id`, `model_id`, and the persisted CLI session reference
+
+### Requirement: Chat sessions MUST store CLI tool/model/session metadata compatibly
+Chat sessions MUST persist the selected CLI tool, selected model id, and the last known CLI session reference, and the daemon MUST repair missing columns when opening older databases.
+
+#### Scenario: Old database is repaired before chat list query
+- **WHEN** the daemon opens a database created before `cli_tool_id` existed
+- **THEN** migration or repair logic adds the missing columns before `ListChatSessions` queries them
+

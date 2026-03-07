@@ -57,3 +57,18 @@ The system MUST NOT auto-select helper SDK execution for default chat, workflow,
 - **WHEN** a chat turn has thinking translation enabled
 - **THEN** the reasoning translation subtask may invoke the helper SDK configuration
 - **AND** the parent chat turn still runs through the CLI runtime
+
+### Requirement: CLI wrappers MUST write session.json for chat turns
+CLI wrappers used by chat turns MUST write a `session.json` artifact whenever the underlying CLI exposes a resumable session/thread identifier.
+
+#### Scenario: Wrapper writes session.json
+- **WHEN** a chat turn completes and the CLI exposes a session/thread id
+- **THEN** the wrapper writes `session.json` containing the tool id and session id
+
+### Requirement: Chat wrappers MUST prefer native resume when session id exists
+When a chat session already has a CLI-native session/thread id, wrappers MUST prefer the tool's native resume mechanism and accept only the current turn input from the application layer.
+
+#### Scenario: Codex wrapper resumes by stored session id
+- **WHEN** a chat turn provides `VIBE_TREE_RESUME_SESSION_ID` to the Codex wrapper
+- **THEN** the wrapper invokes `codex exec resume` for that turn
+

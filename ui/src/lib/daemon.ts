@@ -569,6 +569,9 @@ export type ChatSession = {
   session_id: string
   title: string
   expert_id: string
+  cli_tool_id?: string
+  model_id?: string
+  cli_session_id?: string
   provider: string
   model: string
   workspace_path: string

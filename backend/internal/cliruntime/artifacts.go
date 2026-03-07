@@ -20,6 +20,13 @@ type Summary struct {
 	KeyFiles     []string `json:"key_files,omitempty"`
 }
 
+type Session struct {
+	ToolID    string `json:"tool_id"`
+	SessionID string `json:"session_id"`
+	Model     string `json:"model,omitempty"`
+	Resumed   bool   `json:"resumed,omitempty"`
+}
+
 type artifactList struct {
 	Artifacts []artifactItem `json:"artifacts"`
 }
@@ -79,6 +86,21 @@ func ReadSummary(dir string) (*Summary, error) {
 		return nil, fmt.Errorf("parse summary.json: %w", err)
 	}
 	return &summary, nil
+}
+
+func ReadSession(dir string) (*Session, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "session.json"))
+	if err != nil {
+		return nil, err
+	}
+	var session Session
+	if err := json.Unmarshal(data, &session); err != nil {
+		return nil, fmt.Errorf("parse session.json: %w", err)
+	}
+	if strings.TrimSpace(session.SessionID) == "" {
+		return nil, os.ErrNotExist
+	}
+	return &session, nil
 }
 
 func ReadFinalMessage(dir string) (string, error) {

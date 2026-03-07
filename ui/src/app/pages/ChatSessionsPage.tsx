@@ -606,7 +606,7 @@ export function ChatSessionsPage() {
       setInput('')
       setSelectedFiles([])
       setTurnExpertId(inferToolId(created))
-      setTurnModelId(created.model || '')
+      setTurnModelId(created.model_id || created.model || '')
       toast({ title: '会话已创建', description: created.session_id })
       await loadMessages(daemonUrl, created.session_id)
     } catch (err: unknown) {
@@ -645,7 +645,7 @@ export function ChatSessionsPage() {
       const forked = await forkSession(daemonUrl, activeSessionId)
       setActiveSession(forked.session_id)
       setTurnExpertId(inferToolId(forked))
-      setTurnModelId(forked.model || '')
+      setTurnModelId(forked.model_id || forked.model || '')
       setSelectedFiles([])
       toast({ title: '已分叉会话', description: forked.session_id })
     } catch (err: unknown) {
@@ -762,6 +762,10 @@ export function ChatSessionsPage() {
             <Select
               label="模型"
               selectedKeys={effectiveNewModelId ? new Set([effectiveNewModelId]) : new Set()}
+              renderValue={() => {
+                const selected = modelsForTool(effectiveNewExpertId).find((model) => model.id === effectiveNewModelId)
+                return selected ? `${selected.label || selected.id} · ${selected.model}` : ''
+              }}
               onSelectionChange={(keys) => {
                 if (keys === 'all') return
                 const first = keys.values().next().value
@@ -805,7 +809,7 @@ export function ChatSessionsPage() {
                   onClick={() => {
                     setActiveSession(s.session_id)
                     setTurnExpertId(inferToolId(s))
-                    setTurnModelId(s.model || '')
+                    setTurnModelId(s.model_id || s.model || '')
                     setSelectedFiles([])
                   }}
                 >
@@ -1119,6 +1123,10 @@ export function ChatSessionsPage() {
                       <Select
                         label="模型"
                         selectedKeys={effectiveTurnModelId ? new Set([effectiveTurnModelId]) : new Set()}
+                        renderValue={() => {
+                          const selected = modelsForTool(effectiveTurnExpertId).find((model) => model.id === effectiveTurnModelId)
+                          return selected ? `${selected.label || selected.id} · ${selected.model}` : ''
+                        }}
                         onSelectionChange={(keys) => {
                           if (keys === 'all') return
                           const first = keys.values().next().value
