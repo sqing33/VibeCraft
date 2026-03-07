@@ -87,6 +87,8 @@ func RebuildExperts(cfg *Config) error {
 			}
 			base.Description = strings.TrimSpace(base.Description)
 			base.Provider = normalizeProvider(m.Provider)
+			base.RuntimeKind = "sdk_helper"
+			base.HelperOnly = true
 			base.Model = strings.TrimSpace(m.Model)
 			base.BaseURL = strings.TrimSpace(sourceByID[strings.TrimSpace(m.SourceID)].BaseURL)
 			base.Env = mergeProviderEnv(base.Env, base.Provider, sourceByID[strings.TrimSpace(m.SourceID)].APIKey)
@@ -146,6 +148,8 @@ func hydrateExpert(raw ExpertConfig, llm *LLMSettings) (ExpertConfig, error) {
 	}
 	e.ManagedSource = ManagedSourceExpertProfile
 	e.Provider = normalizeProvider(primaryModel.Provider)
+	e.RuntimeKind = "sdk_helper"
+	e.HelperOnly = true
 	e.Model = strings.TrimSpace(primaryModel.Model)
 	e.BaseURL = strings.TrimSpace(primarySource.BaseURL)
 	e.Env = mergeProviderEnv(e.Env, e.Provider, primarySource.APIKey)
@@ -201,6 +205,23 @@ func normalizeExpert(e ExpertConfig) ExpertConfig {
 	e.PrimaryModelID = strings.TrimSpace(e.PrimaryModelID)
 	e.SecondaryModelID = strings.TrimSpace(e.SecondaryModelID)
 	e.Provider = normalizeProvider(e.Provider)
+	e.RuntimeKind = strings.TrimSpace(e.RuntimeKind)
+	e.CLIFamily = normalizeCLIFamily(e.CLIFamily)
+	if e.RuntimeKind == "" {
+		switch e.Provider {
+		case "cli":
+			e.RuntimeKind = "cli"
+		case "process":
+			e.RuntimeKind = "process"
+		case "demo":
+			e.RuntimeKind = "demo"
+		case "openai", "anthropic":
+			e.RuntimeKind = "sdk_helper"
+		}
+	}
+	if e.Provider == "openai" || e.Provider == "anthropic" {
+		e.HelperOnly = true
+	}
 	e.Model = strings.TrimSpace(e.Model)
 	e.BaseURL = strings.TrimSpace(e.BaseURL)
 	e.SecondaryProvider = normalizeProvider(e.SecondaryProvider)
@@ -240,7 +261,7 @@ func inferManagedSource(e ExpertConfig) string {
 	if strings.TrimSpace(e.ID) == "master" || strings.TrimSpace(e.ID) == "bash" || strings.TrimSpace(e.ID) == "demo" || strings.TrimSpace(e.ID) == "codex" || strings.TrimSpace(e.ID) == "claudecode" {
 		return ManagedSourceBuiltin
 	}
-	if p := normalizeProvider(e.Provider); p == "process" || p == "demo" {
+	if p := normalizeProvider(e.Provider); p == "process" || p == "demo" || p == "cli" {
 		return ManagedSourceBuiltin
 	}
 	return ManagedSourceBuiltin
@@ -330,7 +351,7 @@ func validateExpertList(experts []ExpertConfig) error {
 		seen[id] = struct{}{}
 		provider := normalizeProvider(e.Provider)
 		switch provider {
-		case "", "openai", "anthropic", "demo", "process":
+		case "", "openai", "anthropic", "demo", "process", "cli":
 		default:
 			return fmt.Errorf("experts[%d].provider %q is not supported", i, e.Provider)
 		}
@@ -344,4 +365,15 @@ func validateExpertList(experts []ExpertConfig) error {
 		}
 	}
 	return nil
+}
+
+func normalizeCLIFamily(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "claude", "claudecode":
+		return "claude"
+	case "codex", "openai":
+		return "codex"
+	default:
+		return strings.ToLower(strings.TrimSpace(v))
+	}
 }

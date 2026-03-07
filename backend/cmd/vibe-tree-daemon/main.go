@@ -85,7 +85,7 @@ func main() {
 	}
 	execMgr := execution.NewManager(execRunner, grace, hub)
 	experts := expert.NewRegistry(cfg)
-	chatMgr := chat.NewManager(stateStore, hub, chat.Options{})
+	chatMgr := chat.NewManager(stateStore, hub, chat.Options{Runner: execRunner})
 	orchMgr := orchestration.NewManager(orchestration.Options{
 		Store:          stateStore,
 		Executions:     execMgr,

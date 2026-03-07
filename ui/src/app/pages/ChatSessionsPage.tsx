@@ -126,9 +126,13 @@ export function ChatSessionsPage() {
   )
   const selectableExperts = useMemo(
     () =>
-      experts.filter(
-        (e) => e.provider !== 'process' && allowedModelExpertIds.has(e.id),
-      ),
+      experts.filter((e) => {
+        if (e.provider === 'process') return false
+        if (e.helper_only) return false
+        if (e.runtime_kind === 'cli') return true
+        if (e.provider === 'demo') return true
+        return allowedModelExpertIds.has(e.id)
+      }),
     [allowedModelExpertIds, experts],
   )
   const expertsById = useMemo(() => {

@@ -57,3 +57,21 @@ The synthesis output MUST report enough information for a human to understand wh
 - **THEN** the synthesis output includes both runs' workspace references and code-change summaries
 - **AND** the synthesis states the recommended next step for review, merge, or follow-up work
 
+### Requirement: CLI agent runs MUST persist standardized runtime artifact references
+For agent runs executed through CLI runtime, the system MUST persist the artifact directory and any structured runtime outputs needed for review, retry, and synthesis.
+
+#### Scenario: Modifying CLI agent persists artifact directory
+- **WHEN** a CLI-backed agent run completes after editing repository files
+- **THEN** the persisted agent run data includes the artifact directory reference together with its workspace metadata
+
+#### Scenario: Analysis-only CLI agent still persists artifacts
+- **WHEN** a CLI-backed agent run completes without editing files
+- **THEN** the persisted agent run data still includes the artifact directory reference
+
+### Requirement: Synthesis MUST consume CLI runtime summaries in addition to workspace metadata
+When a round synthesis step is executed, it MUST consume both workspace metadata and the standardized CLI runtime summaries produced by that round's agent runs.
+
+#### Scenario: Synthesis uses CLI summaries from parallel runs
+- **WHEN** two CLI-backed agent runs complete in the same round
+- **THEN** the synthesis input includes each run's runtime summary and workspace reference
+

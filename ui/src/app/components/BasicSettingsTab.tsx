@@ -187,32 +187,34 @@ export function BasicSettingsTab() {
               />
             ) : null}
 
-            <Select
-              aria-label="翻译 API 源"
-              label="API 源"
-              placeholder={hasSources ? '请选择翻译 API 源' : '请先到模型页配置 API 源'}
-              selectedKeys={draft.source_id ? new Set([draft.source_id]) : new Set([])}
-              selectionMode="single"
-              isDisabled={!hasSources}
-              onSelectionChange={(keys) =>
-                setDraft((prev) => ({
-                  ...prev,
-                  source_id: selectionToString(keys),
-                }))
-              }
-            >
-              {sources.map((source) => (
-                <SelectItem key={source.id}>{source.label?.trim() || source.id}</SelectItem>
-              ))}
-            </Select>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Select
+                aria-label="翻译 API 源"
+                label="API 源"
+                placeholder={hasSources ? '请选择翻译 API 源' : '请先到模型页配置 API 源'}
+                selectedKeys={draft.source_id ? new Set([draft.source_id]) : new Set([])}
+                selectionMode="single"
+                isDisabled={!hasSources}
+                onSelectionChange={(keys) =>
+                  setDraft((prev) => ({
+                    ...prev,
+                    source_id: selectionToString(keys),
+                  }))
+                }
+              >
+                {sources.map((source) => (
+                  <SelectItem key={source.id}>{source.label?.trim() || source.id}</SelectItem>
+                ))}
+              </Select>
 
-            <Input
-              label="翻译模型"
-              placeholder="例如：gpt-4.1-mini-translator"
-              value={draft.model}
-              isDisabled={!hasSources}
-              onValueChange={(value) => setDraft((prev) => ({ ...prev, model: value }))}
-            />
+              <Input
+                label="翻译模型"
+                placeholder="例如：gpt-4.1-mini-translator"
+                value={draft.model}
+                isDisabled={!hasSources}
+                onValueChange={(value) => setDraft((prev) => ({ ...prev, model: value }))}
+              />
+            </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">

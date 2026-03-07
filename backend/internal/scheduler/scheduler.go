@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"vibe-tree/backend/internal/cliruntime"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/executionflow"
 	"vibe-tree/backend/internal/expert"
@@ -98,9 +99,17 @@ func (s *Scheduler) startNode(ctx context.Context, n store.RunnableNode) error {
 	if err != nil {
 		return err
 	}
+	artifactDir := ""
+	spec := resolved.Spec
+	if resolved.Provider == "cli" {
+		if dir, err := cliruntime.WorkflowNodeArtifactDir(n.WorkflowID, n.ID); err == nil {
+			artifactDir = dir
+			spec = cliruntime.PrepareRunSpec(spec, dir)
+		}
+	}
 
 	execCtx, cancelExec := executionflow.NewExecutionContext(resolved.Timeout)
-	_, err = executionflow.StartRecordedExecution(execCtx, s.executions, resolved.Spec, execution.StartOptions{
+	_, err = executionflow.StartRecordedExecution(execCtx, s.executions, spec, execution.StartOptions{
 		WorkflowID: n.WorkflowID,
 		NodeID:     n.ID,
 		OnExit: func(final execution.Execution) {
@@ -115,7 +124,10 @@ func (s *Scheduler) startNode(ctx context.Context, n store.RunnableNode) error {
 				endedAt = final.EndedAt.UnixMilli()
 			}
 			startedAt := final.StartedAt.UnixMilli()
-			summary := executionflow.TailSummary(final.ID, 4000)
+			summary := cliruntime.SummaryText(artifactDir)
+			if summary == nil {
+				summary = executionflow.TailSummary(final.ID, 4000)
+			}
 
 			updatedWf, updatedNodes, err := s.store.FinalizeExecution(ctx, store.FinalizeExecutionParams{
 				ExecutionID:   final.ID,

@@ -18,6 +18,11 @@ type Resolved struct {
 	Timeout        time.Duration
 	ManagedSource  string
 	PrimaryModelID string
+	Provider       string
+	Model          string
+	RuntimeKind    string
+	CLIFamily      string
+	HelperOnly     bool
 }
 
 type Registry struct {
@@ -38,6 +43,9 @@ type PublicExpert struct {
 	EnabledSkills    []string `json:"enabled_skills,omitempty"`
 	Provider         string   `json:"provider"`
 	Model            string   `json:"model"`
+	RuntimeKind      string   `json:"runtime_kind,omitempty"`
+	CLIFamily        string   `json:"cli_family,omitempty"`
+	HelperOnly       bool     `json:"helper_only,omitempty"`
 	TimeoutMs        int      `json:"timeout_ms"`
 }
 
@@ -124,6 +132,9 @@ func (r *Registry) ListPublic() []PublicExpert {
 			EnabledSkills:    append([]string(nil), e.EnabledSkills...),
 			Provider:         provider,
 			Model:            model,
+			RuntimeKind:      strings.TrimSpace(e.RuntimeKind),
+			CLIFamily:        strings.TrimSpace(e.CLIFamily),
+			HelperOnly:       e.HelperOnly,
 			TimeoutMs:        e.TimeoutMs,
 		})
 	}
@@ -216,7 +227,66 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 			Timeout:        timeout,
 			ManagedSource:  strings.TrimSpace(e.ManagedSource),
 			PrimaryModelID: strings.TrimSpace(e.PrimaryModelID),
+			Provider:       provider,
+			Model:          model,
+			RuntimeKind:    strings.TrimSpace(e.RuntimeKind),
+			CLIFamily:      strings.TrimSpace(e.CLIFamily),
+			HelperOnly:     e.HelperOnly,
 		}, nil
+	case "cli":
+		family := runner.NormalizeCLIFamily(e.CLIFamily)
+		if family == "" {
+			if strings.Contains(strings.ToLower(strings.TrimSpace(e.ID)), "claude") {
+				family = "claude"
+			} else {
+				family = "codex"
+			}
+		}
+		scriptPath, err := runner.CLIScriptPath(family)
+		if err != nil {
+			return Resolved{}, fmt.Errorf("expert %q: %w", expertID, err)
+		}
+		baseURL := strings.TrimSpace(e.BaseURL)
+		if baseURL != "" {
+			expanded, err := expandEnvTemplate(baseURL)
+			if err != nil {
+				return Resolved{}, fmt.Errorf("expert %q: base_url: %w", expertID, err)
+			}
+			baseURL = expanded
+		}
+		if strings.TrimSpace(e.OutputSchema) != "" && strings.ToLower(strings.TrimSpace(e.OutputSchema)) != "dag_v1" && strings.ToLower(strings.TrimSpace(e.OutputSchema)) != "expert_builder_v1" {
+			return Resolved{}, fmt.Errorf("expert %q: output_schema %q is not supported", expertID, e.OutputSchema)
+		}
+		env["VIBE_TREE_PROMPT"] = finalPrompt
+		if strings.TrimSpace(e.SystemPrompt) != "" {
+			env["VIBE_TREE_SYSTEM_PROMPT"] = strings.TrimSpace(e.SystemPrompt)
+		}
+		env["VIBE_TREE_MODEL"] = model
+		env["VIBE_TREE_CLI_FAMILY"] = family
+		if strings.TrimSpace(e.OutputSchema) != "" {
+			env["VIBE_TREE_OUTPUT_SCHEMA"] = strings.TrimSpace(e.OutputSchema)
+		}
+		if baseURL != "" {
+			env["VIBE_TREE_BASE_URL"] = baseURL
+		}
+
+		return Resolved{
+			Spec: runner.RunSpec{
+				Command: "bash",
+				Args:    []string{scriptPath},
+				Env:     env,
+				Cwd:     cwd,
+			},
+			Timeout:        timeout,
+			ManagedSource:  strings.TrimSpace(e.ManagedSource),
+			PrimaryModelID: strings.TrimSpace(e.PrimaryModelID),
+			Provider:       "cli",
+			Model:          model,
+			RuntimeKind:    strings.TrimSpace(e.RuntimeKind),
+			CLIFamily:      family,
+			HelperOnly:     e.HelperOnly,
+		}, nil
+
 	case "openai", "anthropic", "demo":
 		// LLM/Demo 走 SDK 驱动；禁止 legacy CLI 字段悄悄生效。
 		if strings.TrimSpace(e.Command) != "" || len(e.Args) > 0 || strings.TrimSpace(e.RunMode) != "" {
@@ -293,6 +363,11 @@ func (r *Registry) Resolve(expertID, prompt, cwd string) (Resolved, error) {
 			Timeout:        timeout,
 			ManagedSource:  strings.TrimSpace(e.ManagedSource),
 			PrimaryModelID: strings.TrimSpace(e.PrimaryModelID),
+			Provider:       provider,
+			Model:          model,
+			RuntimeKind:    strings.TrimSpace(e.RuntimeKind),
+			CLIFamily:      strings.TrimSpace(e.CLIFamily),
+			HelperOnly:     e.HelperOnly,
 		}, nil
 	default:
 		return Resolved{}, fmt.Errorf("expert %q: unsupported provider %q", expertID, provider)

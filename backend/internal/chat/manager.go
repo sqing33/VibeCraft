@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	openai_responses "github.com/openai/openai-go/responses"
 	openai_shared "github.com/openai/openai-go/shared"
 
+	"vibe-tree/backend/internal/cliruntime"
 	"vibe-tree/backend/internal/openaicompat"
 	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/store"
@@ -39,12 +41,14 @@ type Options struct {
 	ThinkingTranslationForceChars int
 	ThinkingTranslationIdle       time.Duration
 	ThinkingTranslator            ThinkingTranslatorFunc
+	Runner                        runner.Runner
 }
 
 type Manager struct {
 	store *store.Store
 	hub   *ws.Hub
 
+	runtimeRunner   runner.Runner
 	openaiClient    openai.Client
 	anthropicClient anthropic.Client
 
@@ -66,6 +70,9 @@ type TurnParams struct {
 	UserInput           string
 	ModelInput          string
 	Attachments         []UploadedAttachment
+	Spec                runner.RunSpec
+	Provider            string
+	Model               string
 	SDK                 runner.SDKSpec
 	Env                 map[string]string
 	Fallbacks           []runner.SDKFallback
@@ -138,6 +145,7 @@ func NewManager(st *store.Store, hub *ws.Hub, opts Options) *Manager {
 	return &Manager{
 		store:                         st,
 		hub:                           hub,
+		runtimeRunner:                 opts.Runner,
 		openaiClient:                  openai.NewClient(),
 		anthropicClient:               anthropic.NewClient(),
 		softRatio:                     soft,
@@ -185,8 +193,26 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 		}
 	}
 
-	provider := strings.ToLower(strings.TrimSpace(params.SDK.Provider))
-	model := strings.TrimSpace(params.SDK.Model)
+	spec := params.Spec
+	if spec.SDK == nil && strings.TrimSpace(params.SDK.Provider) != "" {
+		sdkCopy := params.SDK
+		spec = runner.RunSpec{
+			Command:      "sdk:" + strings.TrimSpace(sdkCopy.Provider),
+			Args:         []string{"model=" + strings.TrimSpace(sdkCopy.Model)},
+			Env:          cloneEnvMap(params.Env),
+			Cwd:          params.Session.WorkspacePath,
+			SDK:          &sdkCopy,
+			SDKFallbacks: append([]runner.SDKFallback(nil), params.Fallbacks...),
+		}
+	}
+	provider := strings.ToLower(strings.TrimSpace(params.Provider))
+	if provider == "" && spec.SDK != nil {
+		provider = strings.ToLower(strings.TrimSpace(spec.SDK.Provider))
+	}
+	model := strings.TrimSpace(params.Model)
+	if model == "" && spec.SDK != nil {
+		model = strings.TrimSpace(spec.SDK.Model)
+	}
 
 	userMsg, err := m.store.AppendChatMessage(ctx, store.AppendChatMessageParams{
 		SessionID:   params.Session.ID,
@@ -215,7 +241,10 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 		"model":           model,
 	})
 
-	if err := m.ensureCompaction(ctx, params.Session, modelInput, params.SDK, params.Env); err != nil {
+	if spec.SDK == nil {
+		return m.runCLITurn(ctx, params.Session, userMsg, modelInput, spec, expertID, provider, model)
+	}
+	if err := m.ensureCompaction(ctx, params.Session, modelInput, *spec.SDK, spec.Env); err != nil {
 		return TurnResult{}, err
 	}
 
@@ -225,7 +254,7 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 	}
 	translationRuntime := newThinkingTranslationRuntime(m, params.Session.ID, params.ThinkingTranslation)
 
-	usedSDK, respText, reasoningText, anchorUpdate, callMeta, err := m.callProviderWithFallbacks(ctx, params.Session, userMsg, params.SDK, params.Env, modelInput, anchor, params.Fallbacks, translationRuntime)
+	usedSDK, respText, reasoningText, anchorUpdate, callMeta, err := m.callProviderWithFallbacks(ctx, params.Session, userMsg, *spec.SDK, spec.Env, modelInput, anchor, spec.SDKFallbacks, translationRuntime)
 	if err != nil {
 		return TurnResult{}, err
 	}
@@ -323,6 +352,162 @@ func (m *Manager) callProviderWithAnchorRetry(ctx context.Context, sess store.Ch
 		return m.callProvider(ctx, sess, currentUser, sdk, env, modelInput, store.ChatAnchor{}, translationRuntime)
 	}
 	return "", "", store.ChatAnchor{}, providerCallMeta{}, err
+}
+
+func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string) (TurnResult, error) {
+	if m.runtimeRunner == nil {
+		return TurnResult{}, fmt.Errorf("chat runtime runner not configured")
+	}
+	if strings.TrimSpace(spec.Command) == "" {
+		return TurnResult{}, fmt.Errorf("%w: chat expert is not executable", store.ErrValidation)
+	}
+	if err := m.ensureCompaction(ctx, sess, modelInput, runner.SDKSpec{}, nil); err != nil {
+		return TurnResult{}, err
+	}
+	messages, err := m.store.ListChatMessages(ctx, sess.ID, 1000)
+	if err != nil {
+		return TurnResult{}, err
+	}
+	prompt, debugInput := buildCLITurnPrompt(sess, messages, userMsg, modelInput, m.keepRecent)
+	if spec.Env == nil {
+		spec.Env = map[string]string{}
+	}
+	spec.Env["VIBE_TREE_PROMPT"] = prompt
+	artifactDir, err := cliruntime.ChatTurnArtifactDir(sess.ID, userMsg.ID)
+	if err == nil {
+		spec = cliruntime.PrepareRunSpec(spec, artifactDir)
+	}
+	if strings.TrimSpace(spec.Cwd) == "" {
+		spec.Cwd = sess.WorkspacePath
+	}
+	handle, err := m.runtimeRunner.StartOneshot(ctx, spec)
+	if err != nil {
+		return TurnResult{}, err
+	}
+	output := handle.Output()
+	var stdout strings.Builder
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if output == nil {
+			return
+		}
+		defer output.Close()
+		if data, err := io.ReadAll(output); err == nil {
+			stdout.Write(data)
+		}
+	}()
+	exitRes, waitErr := handle.Wait()
+	<-done
+	finalText := strings.TrimSpace(stdout.String())
+	if artifactDir != "" {
+		if artifactText, err := cliruntime.ReadFinalMessage(artifactDir); err == nil && strings.TrimSpace(artifactText) != "" {
+			finalText = artifactText
+		}
+	}
+	if strings.TrimSpace(finalText) == "" {
+		if summary := cliruntime.SummaryText(artifactDir); summary != nil {
+			finalText = strings.TrimSpace(*summary)
+		}
+	}
+	if waitErr != nil || exitRes.ExitCode != 0 {
+		if strings.TrimSpace(finalText) == "" {
+			if waitErr != nil {
+				return TurnResult{}, waitErr
+			}
+			return TurnResult{}, fmt.Errorf("cli runtime exited with code %d", exitRes.ExitCode)
+		}
+	}
+	if strings.TrimSpace(finalText) == "" {
+		finalText = "(empty response)"
+	}
+	m.broadcast("chat.turn.delta", map[string]any{"session_id": sess.ID, "delta": finalText})
+	assistantMsg, err := m.store.AppendChatMessage(ctx, store.AppendChatMessageParams{
+		SessionID:   sess.ID,
+		Role:        "assistant",
+		ContentText: finalText,
+		ExpertID:    pointerString(expertID),
+		Provider:    pointerString(provider),
+		Model:       pointerString(model),
+	})
+	if err != nil {
+		return TurnResult{}, err
+	}
+	_, _ = m.store.UpdateChatSessionDefaults(ctx, store.UpdateChatSessionDefaultsParams{
+		SessionID: sess.ID,
+		ExpertID:  expertID,
+		Provider:  provider,
+		Model:     model,
+	})
+	m.broadcast("chat.turn.completed", map[string]any{
+		"session_id":                   sess.ID,
+		"user_message_id":              userMsg.ID,
+		"message":                      assistantMsg,
+		"reasoning_text":               "",
+		"translated_reasoning_text":    "",
+		"thinking_translation_applied": false,
+		"thinking_translation_failed":  false,
+		"model_input":                  debugInput,
+		"context_mode":                 "cli_reconstructed",
+		"token_in":                     nil,
+		"token_out":                    nil,
+		"cached_input_tokens":          nil,
+	})
+	return TurnResult{
+		UserMessage:                userMsg,
+		AssistantMessage:           assistantMsg,
+		ReasoningText:              nil,
+		TranslatedReasoningText:    nil,
+		ModelInput:                 pointerString(debugInput),
+		ContextMode:                pointerString("cli_reconstructed"),
+		CachedInputTokens:          nil,
+		ThinkingTranslationApplied: false,
+		ThinkingTranslationFailed:  false,
+	}, nil
+}
+
+func buildCLITurnPrompt(sess store.ChatSession, messages []store.ChatMessage, currentUser store.ChatMessage, modelInput string, keepRecent int) (string, string) {
+	messages = applyCurrentModelInput(messages, currentUser, modelInput)
+	prompt := renderConversation(sess.Summary, messages, "", keepRecent)
+	debug := renderConversationDebug(sess.Summary, messages, keepRecent)
+	if current := buildCurrentInputDebug(modelInput, currentUser.Attachments); strings.TrimSpace(current) != "" {
+		if strings.TrimSpace(prompt) != "" {
+			prompt = strings.TrimSpace(prompt) + "\n\n" + current
+		} else {
+			prompt = current
+		}
+		if strings.TrimSpace(debug) != "" {
+			debug = strings.TrimSpace(debug) + "\n\n" + current
+		} else {
+			debug = current
+		}
+	}
+	if lines := cliAttachmentPathLines(currentUser.Attachments); len(lines) > 0 {
+		block := "Attachment file paths:\n" + strings.Join(lines, "\n")
+		if strings.TrimSpace(prompt) != "" {
+			prompt = strings.TrimSpace(prompt) + "\n\n" + block
+		} else {
+			prompt = block
+		}
+		if strings.TrimSpace(debug) != "" {
+			debug = strings.TrimSpace(debug) + "\n\n" + block
+		} else {
+			debug = block
+		}
+	}
+	return strings.TrimSpace(prompt), strings.TrimSpace(debug)
+}
+
+func cliAttachmentPathLines(attachments []store.ChatAttachment) []string {
+	out := make([]string, 0, len(attachments))
+	for _, att := range attachments {
+		fullPath, err := attachmentDiskPath(att.StorageRelPath)
+		if err != nil {
+			continue
+		}
+		out = append(out, fmt.Sprintf("- %s (%s): %s", att.FileName, att.Kind, fullPath))
+	}
+	return out
 }
 
 func (m *Manager) CompactSession(ctx context.Context, sessionID string, sdk runner.SDKSpec, env map[string]string) (store.ChatSession, *store.ChatCompaction, error) {

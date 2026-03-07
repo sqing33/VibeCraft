@@ -46,13 +46,17 @@ type ExpertConfig struct {
 	GeneratedAt       int64    `json:"generated_at,omitempty"`
 	UpdatedAt         int64    `json:"updated_at,omitempty"`
 	Disabled          bool     `json:"disabled,omitempty"`
+	RuntimeKind       string   `json:"runtime_kind,omitempty"`
+	CLIFamily         string   `json:"cli_family,omitempty"`
+	HelperOnly        bool     `json:"helper_only,omitempty"`
 
-	// Provider 表示该 expert 的执行后端（SDK 驱动，不再启动外部 CLI）。
+	// Provider 表示该 expert 的执行后端（CLI / SDK helper / 本地进程）。
 	// 支持值：
 	// - "openai"：Codex（OpenAI SDK）
 	// - "anthropic"：ClaudeCode（Anthropic SDK）
 	// - "demo"：内置演示（不依赖外部网络/密钥）
 	// - "process"：本地进程执行（兼容 bash 等 worker）
+	// - "cli"：通过外部 CLI runtime 执行（如 codex / claude）
 	Provider string `json:"provider"`
 
 	// Model 为 SDK 调用的模型名；demo 可留空。
@@ -151,10 +155,12 @@ func Default() Config {
 				ID:            "master",
 				Label:         "Master Planner",
 				ManagedSource: ManagedSourceBuiltin,
-				Provider:      "anthropic",
-				Model:         "claude-3-7-sonnet-latest",
+				Provider:      "cli",
+				RuntimeKind:   "cli",
+				CLIFamily:     "codex",
+				Model:         "gpt-5-codex",
 				SystemPrompt:  "You are the workflow master planner for vibe-tree. Output MUST be a single JSON object (no markdown, no extra text).",
-				Env:           map[string]string{"ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"},
+				Env:           map[string]string{},
 				OutputSchema:  "dag_v1",
 				// 30min：AI 节点默认超时（可按节点覆盖）。
 				TimeoutMs: 30 * 60 * 1000,
@@ -175,6 +181,7 @@ func Default() Config {
 				Label:         "Demo",
 				ManagedSource: ManagedSourceBuiltin,
 				Provider:      "demo",
+				RuntimeKind:   "demo",
 				Env:           map[string]string{},
 				// 30s：演示执行默认超时（不会触发网络请求）。
 				TimeoutMs: 30 * 1000,
@@ -183,10 +190,12 @@ func Default() Config {
 				ID:            "codex",
 				Label:         "Codex",
 				ManagedSource: ManagedSourceBuiltin,
-				Provider:      "openai",
+				Provider:      "cli",
+				RuntimeKind:   "cli",
+				CLIFamily:     "codex",
 				Model:         "gpt-5-codex",
 				SystemPrompt:  "You are Codex. Respond in plain text suitable for a terminal. Do not use markdown unless explicitly requested.",
-				Env:           map[string]string{"OPENAI_API_KEY": "${OPENAI_API_KEY}"},
+				Env:           map[string]string{},
 				// 30min：AI 节点默认超时（可按节点覆盖）。
 				TimeoutMs: 30 * 60 * 1000,
 			},
@@ -194,10 +203,12 @@ func Default() Config {
 				ID:            "claudecode",
 				Label:         "ClaudeCode",
 				ManagedSource: ManagedSourceBuiltin,
-				Provider:      "anthropic",
+				Provider:      "cli",
+				RuntimeKind:   "cli",
+				CLIFamily:     "claude",
 				Model:         "claude-3-7-sonnet-latest",
 				SystemPrompt:  "You are Claude. Respond in plain text suitable for a terminal. Do not use markdown unless explicitly requested.",
-				Env:           map[string]string{"ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"},
+				Env:           map[string]string{},
 				TimeoutMs:     30 * 60 * 1000,
 			},
 		},

@@ -103,11 +103,11 @@ func (s *Store) CreateChatSession(ctx context.Context, params CreateChatSessionP
 		return ChatSession{}, fmt.Errorf("%w: expert_id is required", ErrValidation)
 	}
 	provider := strings.ToLower(strings.TrimSpace(params.Provider))
-	if provider != "openai" && provider != "anthropic" && provider != "demo" {
+	if provider != "openai" && provider != "anthropic" && provider != "demo" && provider != "cli" {
 		return ChatSession{}, fmt.Errorf("%w: unsupported provider %q", ErrValidation, params.Provider)
 	}
 	model := strings.TrimSpace(params.Model)
-	if provider == "demo" && model == "" {
+	if (provider == "demo" || provider == "cli") && model == "" {
 		model = "demo"
 	}
 	if model == "" {
@@ -299,11 +299,11 @@ func (s *Store) UpdateChatSessionDefaults(ctx context.Context, params UpdateChat
 		return ChatSession{}, fmt.Errorf("%w: expert_id is required", ErrValidation)
 	}
 	provider := strings.ToLower(strings.TrimSpace(params.Provider))
-	if provider != "openai" && provider != "anthropic" && provider != "demo" {
+	if provider != "openai" && provider != "anthropic" && provider != "demo" && provider != "cli" {
 		return ChatSession{}, fmt.Errorf("%w: unsupported provider %q", ErrValidation, params.Provider)
 	}
 	model := strings.TrimSpace(params.Model)
-	if provider == "demo" && model == "" {
+	if (provider == "demo" || provider == "cli") && model == "" {
 		model = "demo"
 	}
 	if model == "" {
@@ -651,7 +651,7 @@ func (s *Store) UpsertChatAnchor(ctx context.Context, params UpsertChatAnchorPar
 		return fmt.Errorf("%w: session_id is required", ErrValidation)
 	}
 	provider := strings.ToLower(strings.TrimSpace(params.Provider))
-	if provider != "openai" && provider != "anthropic" && provider != "demo" {
+	if provider != "openai" && provider != "anthropic" && provider != "demo" && provider != "cli" {
 		return fmt.Errorf("%w: unsupported provider %q", ErrValidation, params.Provider)
 	}
 	now := time.Now().UnixMilli()

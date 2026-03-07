@@ -577,9 +577,9 @@ export function LLMSettingsTab() {
                   </Button>
                 </div>
 
-                <div className="mt-3 space-y-3">
+                <div className="mt-3 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                   {source.models.length === 0 ? (
-                    <div className="text-sm text-muted-foreground">
+                    <div className="text-sm text-muted-foreground md:col-span-2 lg:col-span-3">
                       尚未为该 Source 配置模型。
                     </div>
                   ) : null}
@@ -589,7 +589,7 @@ export function LLMSettingsTab() {
                     const isTesting = testingId === model.local_id;
                     return (
                       <div key={model.local_id} className="rounded-md border bg-card p-3">
-                        <div className="flex items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
                           <div className="min-w-0">
                             <div className="truncate text-sm font-semibold">
                               {(model.value || "").trim() || "未命名模型"}

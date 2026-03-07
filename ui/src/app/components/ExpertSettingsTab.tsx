@@ -83,6 +83,8 @@ function formatProvider(provider?: string): string {
       return "演示";
     case "process":
       return "本地进程";
+    case "cli":
+      return "CLI";
     default:
       return provider?.trim() || "未知";
   }

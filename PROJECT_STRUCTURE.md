@@ -36,6 +36,7 @@
 | `.codex/skills/github-feature-analyzer/scripts/ensure_uv_unix.sh` | UV 引导脚本：在 Linux/macOS 上检测或安装 uv（二进制不入库），为检索脚本提供统一运行前置 |
 | `.codex/skills/github-feature-analyzer/scripts/setup_reference_venv.sh` | UV 环境初始化：强制 uv-managed Python 3.12，创建并同步固定 `.venv-reference` |
 | `.codex/skills/github-feature-analyzer/scripts/reference_retrieval_uv.sh` | UV 检索入口：先确保环境，再执行 `reference_retrieval.py` 的 `build/query` |
+| `docs/cli-pivot-and-repo-library-plan.md` | 规划文档：CLI-first 转型路线、SDK/CLI 职责重构，以及 GitHub analyzer 作为 Repo Library 功能集成方案 |
 | `backend/cmd/vibe-tree-daemon/main.go`     | daemon 进程入口，负责加载配置、启动 HTTP Server、处理优雅退出                                                                         |
 | `backend/internal/server/server.go`        | Gin Engine 装配：恢复中间件、请求日志、dev CORS，并挂载 `internal/api` 路由；可选挂载 UI 静态资源（`ui/dist` 或 `VIBE_TREE_UI_DIST`） |
 | `backend/internal/api/api.go`              | HTTP/WS handlers：health、workflow CRUD、execution start/log/cancel、WebSocket 升级入口                                               |

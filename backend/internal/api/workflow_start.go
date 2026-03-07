@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"vibe-tree/backend/internal/cliruntime"
 	"vibe-tree/backend/internal/dag"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/executionflow"
@@ -96,6 +97,13 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 		}
 
 		spec := resolved.Spec
+		artifactDir := ""
+		if resolved.Provider == "cli" {
+			if dir, err := cliruntime.WorkflowNodeArtifactDir(wf.ID, node.ID); err == nil {
+				artifactDir = dir
+				spec = cliruntime.PrepareRunSpec(spec, dir)
+			}
+		}
 		execCtx, cancelExec := executionflow.NewExecutionContext(resolved.Timeout)
 
 		exec, err := executionflow.StartRecordedExecution(execCtx, deps.Executions, spec, execution.StartOptions{
@@ -151,6 +159,9 @@ func startWorkflowHandler(deps Deps) gin.HandlerFunc {
 
 				if finalError == "" {
 					finalError = executionflow.ErrorMessage(final)
+				}
+				if finalSummary == nil && artifactDir != "" {
+					finalSummary = cliruntime.SummaryText(artifactDir)
 				}
 				if (finalStatus == "failed" || finalStatus == "timeout") && finalSummary == nil {
 					finalSummary = executionflow.TailSummary(final.ID, 4000)

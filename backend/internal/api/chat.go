@@ -18,6 +18,7 @@ import (
 
 	"vibe-tree/backend/internal/chat"
 	"vibe-tree/backend/internal/config"
+	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/store"
 )
 
@@ -59,16 +60,16 @@ func createChatSessionHandler(deps Deps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if resolved.Spec.SDK == nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "expert must be sdk provider"})
+		if resolved.HelperOnly || resolved.Provider == "process" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "expert is not chat-capable"})
 			return
 		}
 
 		sess, err := deps.Store.CreateChatSession(c.Request.Context(), store.CreateChatSessionParams{
 			Title:         req.Title,
 			ExpertID:      expertID,
-			Provider:      resolved.Spec.SDK.Provider,
-			Model:         resolved.Spec.SDK.Model,
+			Provider:      resolved.Provider,
+			Model:         resolved.Model,
 			WorkspacePath: workspace,
 		})
 		if err != nil {
@@ -273,21 +274,24 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if resolved.Spec.SDK == nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "session expert is not sdk provider"})
+		if resolved.HelperOnly || resolved.Provider == "process" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "session expert is not chat-capable"})
 			return
 		}
-		sdk := *resolved.Spec.SDK
+		modelInput := providerInput
+		if resolved.Spec.SDK != nil {
+			modelInput = resolved.Spec.SDK.Prompt
+		}
 		result, err := deps.Chat.RunTurn(c.Request.Context(), chat.TurnParams{
 			Session:             sess,
 			ExpertID:            expertID,
 			UserInput:           userText,
-			ModelInput:          sdk.Prompt,
+			ModelInput:          modelInput,
 			Attachments:         uploads,
-			SDK:                 sdk,
-			Env:                 resolved.Spec.Env,
-			Fallbacks:           resolved.Spec.SDKFallbacks,
-			ThinkingTranslation: buildThinkingTranslationSpec(resolved.PrimaryModelID),
+			Spec:                resolved.Spec,
+			Provider:            resolved.Provider,
+			Model:               resolved.Model,
+			ThinkingTranslation: buildThinkingTranslationSpec(firstNonEmptyTrimmed(resolved.PrimaryModelID, resolved.Model)),
 		})
 		if err != nil {
 			if errors.Is(err, store.ErrValidation) {
@@ -416,11 +420,10 @@ func compactChatSessionHandler(deps Deps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if resolved.Spec.SDK == nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "session expert is not sdk provider"})
-			return
+		var sdk runner.SDKSpec
+		if resolved.Spec.SDK != nil {
+			sdk = *resolved.Spec.SDK
 		}
-		sdk := *resolved.Spec.SDK
 
 		sess, rec, err := deps.Chat.CompactSession(c.Request.Context(), sessionID, sdk, resolved.Spec.Env)
 		if err != nil {
@@ -471,4 +474,13 @@ func forkChatSessionHandler(deps Deps) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, sess)
 	}
+}
+
+func firstNonEmptyTrimmed(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

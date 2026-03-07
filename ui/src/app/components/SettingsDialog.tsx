@@ -144,21 +144,21 @@ export function SettingsDialog() {
         size="5xl"
         scrollBehavior="inside"
         classNames={{
-          base: "max-h-[85vh] min-h-0",
+          base: "h-[80vh] max-h-[85vh] min-h-0",
         }}
       >
-        <ModalContent>
+        <ModalContent className="h-full min-h-0 overflow-hidden">
           {() => (
             <>
               <ModalHeader>系统设置</ModalHeader>
-              <ModalBody className="min-h-0">
+              <ModalBody className="flex min-h-0 flex-1 overflow-hidden">
                 <Tabs
-                  defaultSelectedKey="diagnostics"
+                  defaultSelectedKey="basic"
                   aria-label="系统设置"
                   classNames={{
-                    base: "min-h-0",
-                    panel: "min-h-0 overflow-y-auto pr-1",
-                    tabList: "grid w-full grid-cols-4",
+                    base: "flex h-full min-h-0 flex-1 flex-col",
+                    panel: "h-full min-h-0 flex-1 overflow-y-auto pr-1",
+                    tabList: "grid w-full shrink-0 grid-cols-4",
                   }}
                 >
                   <Tab key="basic" title="基本设置">

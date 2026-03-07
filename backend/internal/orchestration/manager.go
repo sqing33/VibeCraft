@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"vibe-tree/backend/internal/cliruntime"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/executionflow"
 	"vibe-tree/backend/internal/expert"
@@ -181,6 +182,22 @@ func (m *Manager) startAgentRun(ctx context.Context, run store.AgentRun) error {
 	if err != nil {
 		return err
 	}
+	resolved, err := m.experts.Resolve(run.ExpertID, buildAgentPrompt(run), prepared.WorkspacePath)
+	if err != nil {
+		return err
+	}
+	artifactDir := ""
+	artifacts := append([]store.AgentRunArtifactInput(nil), prepared.Artifacts...)
+	if resolved.Provider == "cli" {
+		if dir, err := cliruntime.AgentRunArtifactDir(run.OrchestrationID, run.ID); err == nil {
+			artifactDir = dir
+			resolved.Spec = cliruntime.PrepareRunSpec(resolved.Spec, dir)
+			payload := mustJSON(map[string]any{"runtime_kind": resolved.RuntimeKind, "provider": resolved.Provider, "model": resolved.Model, "cli_family": resolved.CLIFamily, "artifact_dir": dir})
+			summary := fmt.Sprintf("CLI runtime=%s family=%s artifact_dir=%s", resolved.RuntimeKind, resolved.CLIFamily, dir)
+			artifacts = append(artifacts, store.AgentRunArtifactInput{Kind: "cli_runtime", Title: "CLI Runtime", Summary: &summary, PayloadJSON: &payload})
+		}
+	}
+
 	updatedRun, _, err := m.store.UpdateAgentRunWorkspace(launchCtx, store.UpdateAgentRunWorkspaceParams{
 		AgentRunID:    run.ID,
 		WorkspaceMode: prepared.Mode,
@@ -188,14 +205,12 @@ func (m *Manager) startAgentRun(ctx context.Context, run store.AgentRun) error {
 		BranchName:    prepared.BranchName,
 		BaseRef:       prepared.BaseRef,
 		WorktreePath:  prepared.WorktreePath,
-		Artifacts:     prepared.Artifacts,
+		Artifacts:     artifacts,
 	})
 	if err == nil {
 		run = updatedRun
 		broadcastAgentRunUpdated(m.hub, run)
 	}
-
-	resolved, err := m.experts.Resolve(run.ExpertID, buildAgentPrompt(run), run.WorkspacePath)
 	if err != nil {
 		return err
 	}
@@ -211,7 +226,17 @@ func (m *Manager) startAgentRun(ctx context.Context, run store.AgentRun) error {
 			finalizeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			summary := executionflow.TailSummary(final.ID, 4000)
+			if artifactDir != "" {
+				if cliSummary := cliruntime.SummaryText(artifactDir); cliSummary != nil {
+					summary = cliSummary
+				}
+			}
 			inspection, _ := workspace.Inspect(finalizeCtx, run)
+			if artifactDir != "" {
+				if extra, err := cliruntime.CollectArtifacts(artifactDir); err == nil {
+					inspection.Artifacts = append(inspection.Artifacts, extra...)
+				}
+			}
 			orch, round, updatedRun, synthesis, _, err := m.store.FinalizeAgentRunExecution(finalizeCtx, store.FinalizeAgentRunExecutionParams{
 				ExecutionID:     final.ID,
 				OrchestrationID: final.OrchestrationID,
@@ -443,6 +468,11 @@ func (m *Manager) allowedPlanSize(ctx context.Context) int {
 
 func executionLogPath(executionID string) (string, error) {
 	return paths.ExecutionLogPath(executionID)
+}
+
+func mustJSON(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
 }
 
 func broadcastOrchestrationUpdated(hub *ws.Hub, orch store.Orchestration) {

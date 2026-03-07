@@ -99,6 +99,9 @@ export type PublicExpert = {
   label: string
   provider: string
   model: string
+  runtime_kind?: string
+  cli_family?: string
+  helper_only?: boolean
   timeout_ms: number
 }
 
@@ -287,6 +290,9 @@ export type ExpertSettingsItem = {
   enabled_skills?: string[]
   provider?: string
   model?: string
+  runtime_kind?: string
+  cli_family?: string
+  helper_only?: boolean
   system_prompt?: string
   prompt_template?: string
   output_format?: string
