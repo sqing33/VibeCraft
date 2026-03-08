@@ -12,6 +12,14 @@ import {
   type ChatMessage,
   type ChatSession,
 } from '@/lib/daemon'
+import {
+  applyThinkingTranslationDelta,
+  applyTurnFeedEvent,
+  ensureTurnFeed,
+  finalizeTurnFeed,
+  type ChatTurnEventPayload,
+  type ChatTurnFeed,
+} from '@/lib/chatTurnFeed'
 
 type TurnMeta = {
   expert_id?: string
@@ -72,6 +80,8 @@ export type ChatStore = {
   turnMetaBySession: Record<string, TurnMeta | null>
   turnInputByUserMessageId: Record<string, TurnInputMeta | undefined>
   usageByMessageId: Record<string, UsageMeta | undefined>
+  activeTurnFeedBySession: Record<string, ChatTurnFeed | undefined>
+  completedTurnFeedByAssistantMessageId: Record<string, ChatTurnFeed | undefined>
   loading: boolean
   sending: boolean
   error: string | null
@@ -92,6 +102,14 @@ export type ChatStore = {
   setTurnMeta: (sessionId: string, meta: TurnMeta | null) => void
   setTurnInputMeta: (userMessageId: string, meta: TurnInputMeta) => void
   setUsageMeta: (messageId: string, meta: UsageMeta) => void
+  startTurnFeed: (sessionId: string, userMessageId: string, meta?: TurnMeta | null) => void
+  applyTurnEvent: (event: ChatTurnEventPayload) => void
+  completeTurnFeed: (
+    sessionId: string,
+    assistantMessageId: string,
+    opts?: { thinking?: string; translatedThinking?: string; translationFailed?: boolean },
+  ) => void
+  clearTurnFeed: (sessionId: string) => void
   refreshSessions: (daemonUrl: string) => Promise<void>
   loadMessages: (daemonUrl: string, sessionId: string) => Promise<void>
   createSession: (
@@ -123,6 +141,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   turnMetaBySession: {},
   turnInputByUserMessageId: {},
   usageByMessageId: {},
+  activeTurnFeedBySession: {},
+  completedTurnFeedByAssistantMessageId: {},
   loading: false,
   sending: false,
   error: null,
@@ -176,6 +196,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       translatedThinkingBySession: {
         ...state.translatedThinkingBySession,
         [sessionId]: (state.translatedThinkingBySession[sessionId] ?? '') + delta,
+      },
+      activeTurnFeedBySession: {
+        ...state.activeTurnFeedBySession,
+        [sessionId]: applyThinkingTranslationDelta(state.activeTurnFeedBySession[sessionId], delta),
       },
     })),
   setThinking: (sessionId, thinking) =>
@@ -245,6 +269,42 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         [messageId]: meta,
       },
     })),
+  startTurnFeed: (sessionId, userMessageId, meta) =>
+    set((state) => ({
+      activeTurnFeedBySession: {
+        ...state.activeTurnFeedBySession,
+        [sessionId]: ensureTurnFeed(state.activeTurnFeedBySession[sessionId], sessionId, userMessageId, meta),
+      },
+    })),
+  applyTurnEvent: (event) =>
+    set((state) => ({
+      activeTurnFeedBySession: {
+        ...state.activeTurnFeedBySession,
+        [event.session_id]: applyTurnFeedEvent(state.activeTurnFeedBySession[event.session_id], event),
+      },
+    })),
+  completeTurnFeed: (sessionId, assistantMessageId, opts) =>
+    set((state) => {
+      const activeFeed = finalizeTurnFeed(state.activeTurnFeedBySession[sessionId], assistantMessageId, opts)
+      const nextActive = { ...state.activeTurnFeedBySession }
+      delete nextActive[sessionId]
+      if (!activeFeed) {
+        return { activeTurnFeedBySession: nextActive }
+      }
+      return {
+        activeTurnFeedBySession: nextActive,
+        completedTurnFeedByAssistantMessageId: {
+          ...state.completedTurnFeedByAssistantMessageId,
+          [assistantMessageId]: activeFeed,
+        },
+      }
+    }),
+  clearTurnFeed: (sessionId) =>
+    set((state) => {
+      const next = { ...state.activeTurnFeedBySession }
+      delete next[sessionId]
+      return { activeTurnFeedBySession: next }
+    }),
   refreshSessions: async (daemonUrl) => {
     set({ loading: true, error: null })
     try {
@@ -282,6 +342,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     get().clearStreaming(sessionId)
     get().clearThinking(sessionId)
     get().resetThinkingTranslation(sessionId)
+    get().clearTurnFeed(sessionId)
     get().setTurnMeta(sessionId, expertId ? { expert_id: expertId } : null)
     const now = Date.now()
     const lastTurn = (get().messagesBySession[sessionId] ?? []).at(-1)?.turn ?? 0
@@ -318,6 +379,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           [sessionId]: '',
         },
       }))
+      get().clearTurnFeed(sessionId)
       get().setTurnMeta(sessionId, null)
       throw err
     }

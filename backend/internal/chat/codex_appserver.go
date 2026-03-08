@@ -125,6 +125,7 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 		}
 
 		translationRuntime := newThinkingTranslationRuntime(m, sess.ID, thinkingTranslation)
+		feedEmitter := newCodexTurnFeedEmitter(m, sess.ID, userMsg.ID)
 		var assistantBuf strings.Builder
 		var reasoningSummaryBuf strings.Builder
 		var reasoningContentBuf strings.Builder
@@ -245,6 +246,7 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 					}
 				}
 
+				feedEmitter.consume(note.Method, note.Params)
 				events := parseCodexAppServerNotification(note.Method, note.Params)
 				for _, event := range events {
 					switch event.Type {
@@ -317,40 +319,42 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 }
 
 func parseCodexAppServerNotification(method string, params json.RawMessage) []cliStreamEvent {
-	switch method {
-	case "thread/started":
-		var payload struct {
-			ThreadID string `json:"threadId"`
+	var raw map[string]any
+	if len(params) > 0 {
+		_ = json.Unmarshal(params, &raw)
+	}
+	suffix := codexEventSuffix(method)
+	switch suffix {
+	case "thread_started":
+		if sid := firstNonEmptyTrimmed(stringValue(raw["threadId"]), stringValue(raw["thread_id"])); sid != "" {
+			return []cliStreamEvent{{Type: "session", SessionID: sid}}
 		}
-		if json.Unmarshal(params, &payload) == nil && strings.TrimSpace(payload.ThreadID) != "" {
-			return []cliStreamEvent{{Type: "session", SessionID: strings.TrimSpace(payload.ThreadID)}}
+	case "agent_message_content_delta":
+		if delta := extractDeltaText(raw); delta != "" {
+			return []cliStreamEvent{{Type: "assistant_delta", Delta: delta}}
 		}
-	case "item/agentMessage/delta":
-		var payload struct {
-			Delta string `json:"delta"`
+	case "reasoning_content_delta", "reasoning_summary_text_delta", "reasoning_text_delta":
+		if delta := extractDeltaText(raw); delta != "" {
+			return []cliStreamEvent{{Type: "thinking_delta", Delta: delta}}
 		}
-		if json.Unmarshal(params, &payload) == nil && payload.Delta != "" {
-			return []cliStreamEvent{{Type: "assistant_delta", Delta: payload.Delta}}
+	case "plan_delta":
+		if delta := extractDeltaText(raw); delta != "" {
+			return []cliStreamEvent{{Type: "progress_delta", Delta: delta}}
 		}
-	case "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
-		var payload struct {
-			Delta string `json:"delta"`
-		}
-		if json.Unmarshal(params, &payload) == nil && payload.Delta != "" {
-			return []cliStreamEvent{{Type: "thinking_delta", Delta: payload.Delta}}
-		}
-	case "item/plan/delta":
-		var payload struct {
-			Delta string `json:"delta"`
-		}
-		if json.Unmarshal(params, &payload) == nil && payload.Delta != "" {
-			return []cliStreamEvent{{Type: "progress_delta", Delta: payload.Delta}}
-		}
-	case "item/started", "item/completed":
-		snapshot := parseCodexAppServerCompletedItem(params)
-		if snapshot.Type == "commandExecution" && strings.TrimSpace(snapshot.Command) != "" {
+	case "task_started":
+		msg := firstNonEmptyTrimmed(stringValue(raw["message"]), stringValue(raw["title"]), "task started")
+		return []cliStreamEvent{{Type: "progress_delta", Delta: msg}}
+	case "mcp_startup_update":
+		phase := firstNonEmptyTrimmed(stringValue(raw["phase"]), stringValue(raw["status"]), stringValue(raw["state"]), "starting")
+		msg := firstNonEmptyTrimmed(stringValue(raw["message"]), "MCP: "+phase)
+		return []cliStreamEvent{{Type: "progress_delta", Delta: msg}}
+	case "mcp_startup_complete":
+		return []cliStreamEvent{{Type: "progress_delta", Delta: "MCP ready"}}
+	case "item_started", "item_completed":
+		snapshot := parseCodexEventItemSnapshot(raw)
+		if normalizeItemType(snapshot.Type) == "command_execution" && strings.TrimSpace(snapshot.Command) != "" {
 			prefix := "[tool] "
-			if method == "item/completed" {
+			if suffix == "item_completed" {
 				prefix = "[tool] done: "
 			}
 			return []cliStreamEvent{{Type: "progress_delta", Delta: prefix + strings.TrimSpace(snapshot.Command)}}
@@ -360,26 +364,18 @@ func parseCodexAppServerNotification(method string, params json.RawMessage) []cl
 }
 
 func parseCodexAppServerCompletedItem(params json.RawMessage) codexCompletedItemSnapshot {
-	var payload struct {
-		Item struct {
-			Type             string   `json:"type"`
-			Text             string   `json:"text"`
-			Summary          []string `json:"summary"`
-			Content          []string `json:"content"`
-			Command          string   `json:"command"`
-			AggregatedOutput string   `json:"aggregatedOutput"`
-		} `json:"item"`
-	}
-	if err := json.Unmarshal(params, &payload); err != nil {
+	var raw map[string]any
+	if err := json.Unmarshal(params, &raw); err != nil {
 		return codexCompletedItemSnapshot{}
 	}
+	snapshot := parseCodexEventItemSnapshot(raw)
 	return codexCompletedItemSnapshot{
-		Type:             strings.TrimSpace(payload.Item.Type),
-		Text:             payload.Item.Text,
-		Summary:          payload.Item.Summary,
-		Content:          payload.Item.Content,
-		Command:          payload.Item.Command,
-		AggregatedOutput: payload.Item.AggregatedOutput,
+		Type:             strings.TrimSpace(snapshot.Type),
+		Text:             snapshot.Text,
+		Summary:          snapshot.Summary,
+		Content:          snapshot.Content,
+		Command:          snapshot.Command,
+		AggregatedOutput: snapshot.AggregatedOutput,
 	}
 }
 

@@ -101,3 +101,14 @@ The final `chat.turn.completed` payload MUST include the translated reasoning te
 - **WHEN** the translation request fails for a translated turn
 - **THEN** the system emits `chat.turn.thinking.translation.failed`
 - **AND** the original reasoning stream remains available to the client for fallback display
+
+### Requirement: Structured runtime feed MUST keep translation scoped to thinking
+When thinking translation is enabled during a Codex turn, translated reasoning MUST remain scoped to the active thinking entry in the runtime feed.
+
+The system MUST NOT overwrite answer, tool, plan, or progress entries with translated thinking text.
+
+#### Scenario: Thinking translation updates active thinking entry
+- **WHEN** translated thinking deltas are emitted during a Codex turn
+- **THEN** the frontend updates the active `kind=thinking` entry with translated content metadata
+- **AND** the original answer and tool entries remain unchanged
+

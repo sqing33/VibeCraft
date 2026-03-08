@@ -1,6 +1,6 @@
 # vibe-tree 项目结构与功能定位索引
 
-> 更新时间：2026-03-07
+> 更新时间：2026-03-08
 > 说明：本文档用于开发期快速定位功能文件。修改前先读本文件，再做定向检索。
 
 ## 1. 项目概览
@@ -75,7 +75,8 @@
 | `backend/internal/execution/manager.go`    | Execution 管理：启动/取消、日志落盘、WS 推送 `execution.*`/`node.log`                                                                 |
 | `backend/internal/orchestration/manager.go` | Orchestration 管理：goal 拆分首轮 agent runs、并发调度 queued agent run、cancel/retry/synthesis 收敛                                 |
 | `backend/internal/chat/manager.go`         | Chat 管理：多轮会话、provider anchor（OpenAI/Anthropic）、附件持久化接入、自动上下文压缩/跳过策略、WS `chat.*` 推送                |
-| `backend/internal/chat/codex_appserver.go` | Codex Chat app-server 客户端：JSON-RPC 握手、`thread/start|resume`、细粒度 delta 映射、token usage 与 artifact 写入             |
+| `backend/internal/chat/codex_appserver.go` | Codex Chat app-server 客户端：JSON-RPC 握手、`thread/start|resume`、细粒度 delta 映射、结构化 `chat.turn.event` 广播、token usage 与 artifact 写入             |
+| `backend/internal/chat/codex_turn_feed.go` | Codex turn feed 归一化：兼容 `item/*` 与 `codex/event/*`，把 answer/thinking/tool/plan/question/system 分层成结构化聊天事件 |
 | `backend/internal/chat/attachments.go`      | Chat 附件能力：附件类型校验、大小限制、文件落盘、provider 多模态 block 构造、调试输入摘要                                               |
 | `backend/internal/chat/provider_input.go`    | Chat 多模态重建：基于本地消息 + 附件重建 OpenAI/Anthropic provider 输入                                                                |
 | `backend/internal/chat/thinking_translation.go` | Chat 思考过程翻译：按分段阈值缓冲 reasoning、调用翻译模型并广播中文 delta / 失败事件                                             |
@@ -108,7 +109,9 @@
 | `ui/src/App.tsx`                           | 前端入口：daemon health + WS 连接管理 + 路由（`#/orchestrations` 主入口、`#/chat`、隐藏兼容的 legacy workflow 路由）                 |
 | `ui/src/app/pages/OrchestrationsPage.tsx`  | Orchestrations 首页：顶部 goal 输入区 + orchestration 列表                                                                            |
 | `ui/src/app/pages/OrchestrationDetailPage.tsx` | Orchestration 详情页：按 round 展示并行 agent 卡片、详情面板、日志、artifact、continue/retry/cancel 控制                    |
-| `ui/src/app/pages/ChatSessionsPage.tsx`    | Chat 会话页：会话列表、消息流式渲染、发送消息/上传附件、拖拽上传、附件标签与图片/PDF/文本代码预览、手动压缩/分叉/归档                                       |
+| `ui/src/app/pages/ChatSessionsPage.tsx`    | Chat 会话页：会话列表、结构化 turn feed 渲染、消息流式渲染、发送消息/上传附件、拖拽上传、附件预览、手动压缩/分叉/归档                                       |
+| `ui/src/app/components/chat/ChatTurnFeed.tsx` | Chat turn feed 组件：按 thinking/tool/plan/question/progress/answer 分层渲染 Codex 运行时条目 |
+| `ui/src/lib/chatTurnFeed.ts`                 | Chat turn feed 类型与 reducer：前端运行时结构化事件应用、thinking 翻译合并与 completed feed 收敛 |
 | `ui/src/app/components/AttachmentPreviewModal.tsx` | Chat 附件预览弹窗：图片/PDF 预览、Markdown 渲染、代码高亮与纯文本展示                                                              |
 | `ui/src/lib/chatAttachmentPreview.ts`      | Chat 附件预览判断：按文件后缀/MIME 推断图片/PDF/Markdown/代码/纯文本预览模式                                                         |
 | `ui/src/components/DAGView.tsx`            | React Flow DAG 视图：dagre 自动布局 + 节点按状态上色 + 点击节点联动终端                                                               |
@@ -118,7 +121,7 @@
 | `ui/src/app/components/BasicSettingsTab.tsx` | 系统设置「基本设置」Tab：配置思考过程翻译的 API 源、翻译模型与目标 AI 模型列表                                                     |
 | `ui/src/app/components/ExpertSettingsTab.tsx` | 系统设置「专家」Tab：专家列表、AI 生成专家、生成会话历史、快照发布                                                                   |
 | `ui/src/lib/daemon.ts`                     | daemon URL/WS URL 解析与 health/workflow/execution/chat attachment API 封装                                                           |
-| `ui/src/stores/chatStore.ts`               | Chat 前端状态：sessions/messages/streaming/sending 状态与 chat API actions                                                            |
+| `ui/src/stores/chatStore.ts`               | Chat 前端状态：sessions/messages/legacy streaming 状态、结构化 turn feed 状态与 chat API actions                                                            |
 | `scripts/dev.sh`                           | 本地开发一键启动脚本（并行拉起 backend 与 UI）                                                                                        |
 | `backend/.air.toml`                        | 后端热重载配置（Air）：本地开发时监听 Go 源码变更并自动重建/重启 daemon                                                                |
 | `scripts/web.sh`                           | Web 单进程启动脚本（构建 UI 并由 daemon 静态托管 `ui/dist`）                                                                          |
@@ -185,7 +188,7 @@
 | Workflow DAG 视图（React Flow）    | `ui/src/components/DAGView.tsx`, `ui/src/App.tsx`                                                                                                                                                                                          |
 | health/workflow/execution API 封装 | `ui/src/lib/daemon.ts`                                                                                                                                                                                                                     |
 | 终端渲染与路由                     | `ui/src/components/TerminalPane.tsx`, `ui/src/App.tsx`                                                                                                                                                                                     |
-| Chat 会话 UI                       | `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/App.tsx`, `ui/src/app/components/Topbar.tsx`                                                                                                                       |
+| Chat 会话 UI                       | `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/app/components/chat/ChatTurnFeed.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/chatTurnFeed.ts`, `ui/src/App.tsx`, `ui/src/app/components/Topbar.tsx`                                                                                                                       |
 | 本地一键启动                       | `scripts/dev.sh`                                                                                                                                                                                                                           |
 | Web 单进程启动（daemon 托管 UI）   | `scripts/web.sh`, `backend/internal/server/server.go`                                                                                                                                                                                      |
 | UI 开发端口代理与构建配置          | `ui/vite.config.ts`, `ui/package.json`                                                                                                                                                                                                     |

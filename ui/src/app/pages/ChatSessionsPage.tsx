@@ -8,7 +8,9 @@ import { goToChat } from '@/app/routes'
 import { onWsEnvelope } from '@/lib/wsBus'
 import { chatAttachmentContentUrl, fetchCLIToolSettings, type ChatAttachment, type ChatSession, type CLITool, type LLMModelProfile } from '@/lib/daemon'
 import { AttachmentPreviewModal, type AttachmentPreviewState } from '@/app/components/AttachmentPreviewModal'
+import { ChatTurnFeed as ChatTurnFeedView } from '@/app/components/chat/ChatTurnFeed'
 import { canPreviewAttachmentTarget, describeAttachmentPreview } from '@/lib/chatAttachmentPreview'
+import { type ChatTurnEventPayload, feedAnswerText, hasFeedEntries } from '@/lib/chatTurnFeed'
 import { toast } from '@/lib/toast'
 import { formatRelativeTime } from '@/lib/time'
 import { useDaemonStore } from '@/stores/daemonStore'
@@ -111,6 +113,8 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const turnMetaBySession = useChatStore((s) => s.turnMetaBySession)
   const turnInputByUserMessageId = useChatStore((s) => s.turnInputByUserMessageId)
   const usageByMessageId = useChatStore((s) => s.usageByMessageId)
+  const activeTurnFeedBySession = useChatStore((s) => s.activeTurnFeedBySession)
+  const completedTurnFeedByAssistantMessageId = useChatStore((s) => s.completedTurnFeedByAssistantMessageId)
   const loading = useChatStore((s) => s.loading)
   const sending = useChatStore((s) => s.sending)
   const error = useChatStore((s) => s.error)
@@ -128,6 +132,10 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const setTurnMeta = useChatStore((s) => s.setTurnMeta)
   const setTurnInputMeta = useChatStore((s) => s.setTurnInputMeta)
   const setUsageMeta = useChatStore((s) => s.setUsageMeta)
+  const startTurnFeed = useChatStore((s) => s.startTurnFeed)
+  const applyTurnEvent = useChatStore((s) => s.applyTurnEvent)
+  const completeTurnFeed = useChatStore((s) => s.completeTurnFeed)
+  const clearTurnFeed = useChatStore((s) => s.clearTurnFeed)
   const refreshSessions = useChatStore((s) => s.refreshSessions)
   const loadMessages = useChatStore((s) => s.loadMessages)
   const createSession = useChatStore((s) => s.createSession)
@@ -473,6 +481,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const streaming = activeSessionId ? streamingBySession[activeSessionId] ?? '' : ''
   const thinking = activeSessionId ? thinkingBySession[activeSessionId] ?? '' : ''
   const translatedThinking = activeSessionId ? translatedThinkingBySession[activeSessionId] ?? '' : ''
+  const activeTurnFeed = activeSessionId ? activeTurnFeedBySession[activeSessionId] : undefined
   const thinkingTranslationState = activeSessionId
     ? thinkingTranslationStateBySession[activeSessionId] ?? { applied: false, failed: false }
     : { applied: false, failed: false }
@@ -489,7 +498,8 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     }
     return null
   }, [messages])
-  const pendingAssistant = sending || streaming.length > 0
+  const pendingAnswerText = feedAnswerText(activeTurnFeed) || streaming
+  const pendingAssistant = sending || hasFeedEntries(activeTurnFeed) || streaming.length > 0
 
   const refresh = useCallback(async () => {
     await refreshSessions(daemonUrl)
@@ -516,7 +526,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     if (!el) return
     if (!shouldAutoScrollRef.current) return
     el.scrollTop = el.scrollHeight
-  }, [messages, streaming, thinking, translatedThinking, thinkingTranslationState.failed])
+  }, [messages, streaming, thinking, translatedThinking, thinkingTranslationState.failed, activeTurnFeed])
 
   useEffect(() => {
     const el = messageScrollRef.current
@@ -545,6 +555,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
         const payload = env.payload as
           | {
               session_id?: string
+              user_message_id?: string
               expert_id?: string
               provider?: string
               model?: string
@@ -554,11 +565,25 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
         clearStreaming(payload.session_id)
         clearThinking(payload.session_id)
         resetThinkingTranslation(payload.session_id)
+        clearTurnFeed(payload.session_id)
         setTurnMeta(payload.session_id, {
           expert_id: payload.expert_id,
           provider: payload.provider,
           model: payload.model,
         })
+        if (typeof payload.user_message_id === 'string' && payload.user_message_id) {
+          startTurnFeed(payload.session_id, payload.user_message_id, {
+            expert_id: payload.expert_id,
+            provider: payload.provider,
+            model: payload.model,
+          })
+        }
+        return
+      }
+      if (env.type === 'chat.turn.event') {
+        const payload = env.payload as ChatTurnEventPayload | undefined
+        if (!payload?.session_id || !payload.user_message_id || !payload.entry_id) return
+        applyTurnEvent(payload)
         return
       }
       if (env.type === 'chat.turn.thinking.delta') {
@@ -651,6 +676,11 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
             token_out: tokenOut,
             cached_input_tokens: cachedInputTokens,
           })
+          completeTurnFeed(payload.session_id, assistantMessageId, {
+            thinking: payload.reasoning_text,
+            translatedThinking: payload.translated_reasoning_text,
+            translationFailed: payload.thinking_translation_failed === true,
+          })
         }
         clearStreaming(payload.session_id)
         setTurnMeta(payload.session_id, null)
@@ -675,6 +705,10 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     setTurnMeta,
     setTurnInputMeta,
     setUsageMeta,
+    startTurnFeed,
+    applyTurnEvent,
+    completeTurnFeed,
+    clearTurnFeed,
     daemonUrl,
     loadMessages,
     refreshSessions,
@@ -1015,11 +1049,13 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                         : inputMeta?.context_mode === 'demo'
                           ? '上下文模式：Demo'
                           : ''
+                  const completedFeed = isAssistant ? completedTurnFeedByAssistantMessageId[m.message_id] : undefined
                   const showThinkingDrawer =
                     isAssistant &&
                     m.message_id === lastAssistantMessageId &&
                     Boolean(displayedThinking.trim()) &&
-                    !pendingAssistant
+                    !pendingAssistant &&
+                    !completedFeed
                   return (
                     <div key={m.message_id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
                       <div
@@ -1050,6 +1086,16 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                         ) : (
                           <div className="whitespace-pre-wrap text-sm">{m.content_text}</div>
                         )}
+                        {completedFeed ? (
+                          <details className="mt-3 rounded-md border border-dashed bg-muted/20 px-2 py-2">
+                            <summary className="cursor-pointer select-none text-xs text-muted-foreground">
+                              查看本轮过程详情
+                            </summary>
+                            <div className="mt-3">
+                              <ChatTurnFeedView feed={completedFeed} identity={identity} compact />
+                            </div>
+                          </details>
+                        ) : null}
                         {Array.isArray(m.attachments) && m.attachments.length > 0 ? (
                           <div className="mt-2 flex flex-wrap gap-1">
                             {m.attachments.map((attachment) => {
@@ -1103,32 +1149,38 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                   <div className="flex justify-start">
                     <div
                       className={`rounded-[24px] border border-dashed bg-background/80 px-4 py-3 shadow-sm ${
-                        shouldUseFullWidth(streaming) ? 'w-full' : 'max-w-[90%]'
+                        shouldUseFullWidth(pendingAnswerText || displayedThinking) ? 'w-full' : 'max-w-[90%]'
                       }`}
                     >
-                      <div className="mb-1 text-[11px] font-medium text-muted-foreground">
-                        AI{pendingIdentity ? ` · ${pendingIdentity}` : ''} {streaming ? '回复中' : '思考中'}
-                      </div>
-                      {displayedThinking.trim() ? (
-                        <details className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
-                          <summary className="cursor-pointer select-none text-muted-foreground">
-                            查看完整思考过程
-                          </summary>
-                          <div className="chat-markdown mt-2 text-xs text-muted-foreground">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayedThinking}</ReactMarkdown>
-                          </div>
-                        </details>
-                      ) : pendingThinkingTranslation ? (
-                        <div className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
-                          正在翻译思考过程…
-                        </div>
-                      ) : null}
-                      {streaming ? (
-                        <div className="chat-markdown text-sm">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{streaming}</ReactMarkdown>
-                        </div>
+                      {activeTurnFeed && hasFeedEntries(activeTurnFeed) ? (
+                        <ChatTurnFeedView feed={activeTurnFeed} pending identity={pendingIdentity} />
                       ) : (
-                        <div className="text-sm text-muted-foreground">正在思考…</div>
+                        <>
+                          <div className="mb-1 text-[11px] font-medium text-muted-foreground">
+                            AI{pendingIdentity ? ` · ${pendingIdentity}` : ''} {streaming ? '回复中' : '思考中'}
+                          </div>
+                          {displayedThinking.trim() ? (
+                            <details className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
+                              <summary className="cursor-pointer select-none text-muted-foreground">
+                                查看完整思考过程
+                              </summary>
+                              <div className="chat-markdown mt-2 text-xs text-muted-foreground">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayedThinking}</ReactMarkdown>
+                              </div>
+                            </details>
+                          ) : pendingThinkingTranslation ? (
+                            <div className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+                              正在翻译思考过程…
+                            </div>
+                          ) : null}
+                          {streaming ? (
+                            <div className="chat-markdown text-sm">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{streaming}</ReactMarkdown>
+                            </div>
+                          ) : (
+                            <div className="text-sm text-muted-foreground">正在思考…</div>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>

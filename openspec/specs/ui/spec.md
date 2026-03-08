@@ -524,3 +524,19 @@ The Chat UI MUST render CLI-generated mid-turn assistant deltas as they arrive, 
 #### Scenario: Assistant bubble grows during CLI turn
 - **WHEN** CLI assistant deltas are received through WebSocket
 - **THEN** the pending assistant bubble updates incrementally before completion
+
+### Requirement: Chat UI MUST render structured Codex turn layers
+The chat page MUST render Codex runtime activity as layered UI blocks instead of a single mixed pending bubble.
+
+The UI MUST support distinct presentation for progress/system messages, thinking, tool execution, plans, questions, and the final answer.
+
+#### Scenario: Active Codex turn shows layered entries
+- **WHEN** the frontend receives `chat.turn.event` entries for an active Codex turn
+- **THEN** the chat page renders each entry according to its `kind` with a dedicated style
+- **AND** the final answer remains visually primary
+
+#### Scenario: Completed turn keeps process details attached
+- **WHEN** a Codex turn completes and the final assistant message appears in the transcript
+- **THEN** the frontend keeps the structured runtime feed as a collapsible detail block below that assistant message
+- **AND** historical messages without feed data continue to render normally
+

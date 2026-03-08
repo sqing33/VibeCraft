@@ -21,3 +21,19 @@ If the fine-grained Codex transport cannot be started or initialized, the system
 - **WHEN** the Codex fine-grained transport fails before turn execution begins
 - **THEN** the system retries the turn through the legacy CLI wrapper path
 - **AND** the user still receives a valid assistant result when the wrapper path succeeds
+
+### Requirement: CLI chat MUST expose a structured runtime feed for Codex turns
+When a Codex-backed chat turn streams runtime activity, the daemon MUST emit `chat.turn.event` entries that keep answer text separate from other runtime activity.
+
+The daemon MUST preserve backward compatibility by continuing to emit legacy `chat.turn.delta` events while the structured feed is available.
+
+#### Scenario: Codex emits structured answer events
+- **WHEN** a Codex-backed chat turn streams assistant text
+- **THEN** the daemon emits `chat.turn.event` entries with `kind=answer` and append/upsert operations
+- **AND** the daemon also emits legacy `chat.turn.delta` compatibility events
+
+#### Scenario: Final assistant message matches structured answer feed
+- **WHEN** the turn completes
+- **THEN** the final assistant message matches the accumulated `kind=answer` content
+- **AND** the frontend can render answer independently from thinking, tool, plan, and progress entries
+

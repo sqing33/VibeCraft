@@ -26,6 +26,41 @@ func TestParseCodexAppServerNotificationCommandStarted(t *testing.T) {
 	}
 }
 
+func TestParseCodexAppServerNotificationLegacyReasoningDelta(t *testing.T) {
+	events := parseCodexAppServerNotification("codex/event/reasoning_content_delta", json.RawMessage(`{"delta":"plan more"}`))
+	if len(events) != 1 || events[0].Type != "thinking_delta" || events[0].Delta != "plan more" {
+		t.Fatalf("unexpected events: %+v", events)
+	}
+}
+
+func TestParseCodexAppServerNotificationLegacyAnswerDelta(t *testing.T) {
+	events := parseCodexAppServerNotification("codex/event/agent_message_content_delta", json.RawMessage(`{"delta":"done"}`))
+	if len(events) != 1 || events[0].Type != "assistant_delta" || events[0].Delta != "done" {
+		t.Fatalf("unexpected events: %+v", events)
+	}
+}
+
+func TestParseCodexAppServerNotificationPreservesDeltaWhitespace(t *testing.T) {
+	events := parseCodexAppServerNotification("codex/event/agent_message_content_delta", json.RawMessage("{\"delta\":\" hello\\n\"}"))
+	if len(events) != 1 || events[0].Type != "assistant_delta" || events[0].Delta != " hello\n" {
+		t.Fatalf("unexpected events: %+v", events)
+	}
+}
+
+func TestParseCodexAppServerNotificationLegacyTaskStarted(t *testing.T) {
+	events := parseCodexAppServerNotification("codex/event/task_started", json.RawMessage(`{"message":"Starting task"}`))
+	if len(events) != 1 || events[0].Type != "progress_delta" || events[0].Delta != "Starting task" {
+		t.Fatalf("unexpected events: %+v", events)
+	}
+}
+
+func TestParseCodexAppServerNotificationLegacyMCPReady(t *testing.T) {
+	events := parseCodexAppServerNotification("codex/event/mcp_startup_complete", json.RawMessage(`{"status":"ready"}`))
+	if len(events) != 1 || events[0].Type != "progress_delta" || events[0].Delta != "MCP ready" {
+		t.Fatalf("unexpected events: %+v", events)
+	}
+}
+
 func TestParseCodexAppServerTurnMetrics(t *testing.T) {
 	metrics := parseCodexAppServerTurnMetrics(json.RawMessage(`{"threadId":"th_1","turnId":"tu_1","tokenUsage":{"last":{"inputTokens":10,"cachedInputTokens":3,"outputTokens":7}}}`))
 	if metrics.TokenIn == nil || *metrics.TokenIn != 13 {

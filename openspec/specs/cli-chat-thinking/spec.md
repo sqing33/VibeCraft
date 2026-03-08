@@ -22,3 +22,19 @@ If a tool does not expose stable reasoning text, the system MAY show plan/progre
 #### Scenario: Codex emits plan deltas without reasoning
 - **WHEN** Codex app-server emits `item/plan/delta` but no stable reasoning text yet
 - **THEN** the daemon emits user-visible intermediate updates instead of waiting for `item.completed`
+
+### Requirement: CLI chat MUST distinguish thinking from tool, plan, and question activity
+When Codex exposes reasoning, command execution, plan updates, user-input requests, or system progress during a chat turn, the daemon MUST map them into distinct structured runtime entries instead of collapsing them into a single thinking string.
+
+Legacy `chat.turn.thinking.delta` events MAY continue for compatibility, but they MUST NOT be the only representation of tool or plan activity.
+
+#### Scenario: Codex emits command execution events
+- **WHEN** Codex app-server emits command execution start/output/end notifications
+- **THEN** the daemon emits `chat.turn.event` entries with `kind=tool` and stable entry IDs
+- **AND** command output updates the same tool entry in place
+
+#### Scenario: Codex emits plan or question events
+- **WHEN** Codex app-server emits plan deltas or user-input requests
+- **THEN** the daemon emits `chat.turn.event` entries with `kind=plan` or `kind=question`
+- **AND** the frontend can render them with dedicated styles
+
