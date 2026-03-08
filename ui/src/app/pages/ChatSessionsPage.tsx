@@ -138,6 +138,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const clearTurnFeed = useChatStore((s) => s.clearTurnFeed)
   const refreshSessions = useChatStore((s) => s.refreshSessions)
   const loadMessages = useChatStore((s) => s.loadMessages)
+  const loadTurns = useChatStore((s) => s.loadTurns)
   const createSession = useChatStore((s) => s.createSession)
   const sendTurn = useChatStore((s) => s.sendTurn)
   const forkSession = useChatStore((s) => s.forkSession)
@@ -518,8 +519,11 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
 
   useEffect(() => {
     if (!activeSessionId) return
-    void loadMessages(daemonUrl, activeSessionId)
-  }, [activeSessionId, daemonUrl, loadMessages])
+    void Promise.all([
+      loadMessages(daemonUrl, activeSessionId),
+      loadTurns(daemonUrl, activeSessionId),
+    ])
+  }, [activeSessionId, daemonUrl, loadMessages, loadTurns])
 
   useEffect(() => {
     const el = messageScrollRef.current
@@ -684,8 +688,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
         }
         clearStreaming(payload.session_id)
         setTurnMeta(payload.session_id, null)
-        void refreshSessions(daemonUrl)
-        void loadMessages(daemonUrl, payload.session_id)
+        void Promise.all([refreshSessions(daemonUrl), loadMessages(daemonUrl, payload.session_id), loadTurns(daemonUrl, payload.session_id)])
         return
       }
       if (env.type === 'chat.session.compacted') {
@@ -711,6 +714,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     clearTurnFeed,
     daemonUrl,
     loadMessages,
+    loadTurns,
     refreshSessions,
   ])
 

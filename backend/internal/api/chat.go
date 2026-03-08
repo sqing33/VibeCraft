@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -170,6 +171,44 @@ func listChatMessagesHandler(deps Deps) gin.HandlerFunc {
 	}
 }
 
+// listChatTurnsHandler 功能：返回一个 session 下最近若干轮已持久化的 chat timeline 快照。
+// 参数/返回：通过 `:id` 指定 session，`limit` 控制返回轮数；返回 `[]store.ChatTurn`。
+// 失败场景：session 不存在、limit 非法或查询失败时返回 4xx/5xx。
+// 副作用：读取 SQLite 中的 turn 与 item 快照。
+func listChatTurnsHandler(deps Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Store == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "store not configured"})
+			return
+		}
+		limit := 200
+		if raw := c.Query("limit"); raw != "" {
+			if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+				limit = v
+			}
+		}
+		sessionID := c.Param("id")
+		if _, err := deps.Store.GetChatSession(c.Request.Context(), sessionID); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		turns, err := deps.Store.ListChatTurns(c.Request.Context(), sessionID, limit)
+		if err != nil {
+			if errors.Is(err, store.ErrValidation) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, turns)
+	}
+}
+
 type patchChatSessionRequest struct {
 	Title  *string `json:"title"`
 	Status *string `json:"status"`
@@ -325,7 +364,8 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 		if resolved.Spec.SDK != nil {
 			modelInput = resolved.Spec.SDK.Prompt
 		}
-		result, err := deps.Chat.RunTurn(c.Request.Context(), chat.TurnParams{
+		turnCtx := context.WithoutCancel(c.Request.Context())
+		result, err := deps.Chat.RunTurn(turnCtx, chat.TurnParams{
 			Session:             sess,
 			ExpertID:            firstNonEmptyTrimmed(resolved.ExpertID, expertID),
 			CLIToolID:           pointerOrNilString(firstNonEmptyTrimmed(strings.TrimSpace(req.CLIToolID), resolved.ToolID)),

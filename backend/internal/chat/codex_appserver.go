@@ -70,22 +70,22 @@ var newCodexAppServerClient = func(ctx context.Context, spec runner.RunSpec) (co
 	return startCodexAppServerClient(ctx, spec)
 }
 
-func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
+func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
 	if runner.NormalizeCLIFamily(spec.Env["VIBE_TREE_CLI_FAMILY"]) == "codex" {
-		result, err := m.runCodexAppServerTurn(ctx, sess, userMsg, modelInput, spec, expertID, provider, model, thinkingTranslation)
+		result, err := m.runCodexAppServerTurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, thinkingTranslation)
 		if err == nil {
 			return result, nil
 		}
 		var early *codexAppServerEarlyFailure
 		if errors.As(err, &early) {
-			return m.runLegacyCLITurn(ctx, sess, userMsg, modelInput, spec, expertID, provider, model)
+			return m.runLegacyCLITurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, thinkingTranslation)
 		}
 		return TurnResult{}, err
 	}
-	return m.runLegacyCLITurn(ctx, sess, userMsg, modelInput, spec, expertID, provider, model)
+	return m.runLegacyCLITurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, thinkingTranslation)
 }
 
-func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSession, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
+func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
 	artifactDir, err := cliruntime.ChatTurnArtifactDir(sess.ID, userMsg.ID)
 	if err != nil {
 		artifactDir = ""
@@ -124,8 +124,8 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 			return TurnResult{}, &codexAppServerEarlyFailure{err: err}
 		}
 
-		translationRuntime := newThinkingTranslationRuntime(m, sess.ID, thinkingTranslation)
-		feedEmitter := newCodexTurnFeedEmitter(m, sess.ID, userMsg.ID, translationRuntime)
+		translationRuntime := newThinkingTranslationRuntime(m, sess.ID, turn.ID, thinkingTranslation)
+		feedEmitter := newCodexTurnFeedEmitter(m, turn.ID, sess.ID, userMsg.ID, translationRuntime)
 		var assistantBuf strings.Builder
 		var reasoningSummaryBuf strings.Builder
 		var reasoningContentBuf strings.Builder
@@ -204,6 +204,22 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 						Provider:     provider,
 						Model:        model,
 					})
+					if err := m.completeTurnEntry(ctx, turn.ID, "answer", "answer", finalText, nil); err != nil {
+						return TurnResult{}, err
+					}
+					if strings.TrimSpace(reasoningText) != "" && len(feedEmitter.thinkingStates) == 0 {
+						if err := m.completeTurnEntry(ctx, turn.ID, "thinking:1", "thinking", reasoningText, nil); err != nil {
+							return TurnResult{}, err
+						}
+						if strings.TrimSpace(translatedReasoningText) != "" || thinkingTranslationFailed {
+							if err := m.replaceTurnTranslation(ctx, turn.ID, "thinking:1", translatedReasoningText, thinkingTranslationFailed); err != nil {
+								return TurnResult{}, err
+							}
+						}
+					}
+					if err := m.completeTurnTimeline(ctx, turn, assistantMsg, contextMode, providerCallMeta{TokenIn: metrics.TokenIn, TokenOut: metrics.TokenOut, CachedInputTokens: metrics.CachedInputTokens, ModelInput: modelInput, ContextMode: contextMode}, thinkingTranslationApplied, thinkingTranslationFailed); err != nil {
+						return TurnResult{}, err
+					}
 					m.broadcast("chat.turn.completed", map[string]any{
 						"session_id":                   sess.ID,
 						"user_message_id":              userMsg.ID,

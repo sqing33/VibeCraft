@@ -462,3 +462,63 @@ func TestChatSession_AttachmentContentEndpoint(t *testing.T) {
 		t.Fatalf("unexpected attachment content: %q", string(payload))
 	}
 }
+
+func TestChatTurnsAPI_ReturnsPersistedTimeline(t *testing.T) {
+	env := newTestEnv(t, config.Default(), 2)
+	baseURL := env.httpSrv.URL
+
+	createBody, _ := json.Marshal(map[string]any{
+		"title":          "chat-turns",
+		"expert_id":      "demo",
+		"workspace_path": ".",
+	})
+	createRes, err := http.Post(baseURL+"/api/v1/chat/sessions", "application/json", bytes.NewReader(createBody))
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer createRes.Body.Close()
+	var sess store.ChatSession
+	if err := json.NewDecoder(createRes.Body).Decode(&sess); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	turnBody, _ := json.Marshal(map[string]any{"input": "hello turns"})
+	turnRes, err := http.Post(baseURL+"/api/v1/chat/sessions/"+sess.ID+"/turns", "application/json", bytes.NewReader(turnBody))
+	if err != nil {
+		t.Fatalf("post turn: %v", err)
+	}
+	defer turnRes.Body.Close()
+	if turnRes.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(turnRes.Body)
+		t.Fatalf("unexpected turn status: %s body=%s", turnRes.Status, strings.TrimSpace(string(body)))
+	}
+
+	turnsRes, err := http.Get(baseURL + "/api/v1/chat/sessions/" + sess.ID + "/turns")
+	if err != nil {
+		t.Fatalf("list turns: %v", err)
+	}
+	defer turnsRes.Body.Close()
+	if turnsRes.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(turnsRes.Body)
+		t.Fatalf("unexpected turns status: %s body=%s", turnsRes.Status, strings.TrimSpace(string(body)))
+	}
+	var turns []store.ChatTurn
+	if err := json.NewDecoder(turnsRes.Body).Decode(&turns); err != nil {
+		t.Fatalf("decode turns response: %v", err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(turns))
+	}
+	if turns[0].Status != "completed" {
+		t.Fatalf("expected completed turn, got %+v", turns[0])
+	}
+	if turns[0].AssistantMessageID == nil || *turns[0].AssistantMessageID == "" {
+		t.Fatalf("expected assistant linkage, got %+v", turns[0])
+	}
+	if len(turns[0].Items) == 0 {
+		t.Fatalf("expected persisted items, got %+v", turns[0])
+	}
+	if turns[0].Items[0].Kind != "answer" {
+		t.Fatalf("expected answer item first, got %+v", turns[0].Items)
+	}
+}

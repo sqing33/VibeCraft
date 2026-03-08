@@ -56,7 +56,7 @@
 | `backend/internal/server/server.go`        | Gin Engine 装配：恢复中间件、请求日志、dev CORS，并挂载 `internal/api` 路由；可选挂载 UI 静态资源（`ui/dist` 或 `VIBE_TREE_UI_DIST`） |
 | `backend/internal/api/api.go`              | HTTP/WS handlers：health、workflow CRUD、execution start/log/cancel、WebSocket 升级入口                                               |
 | `backend/internal/api/orchestrations.go`   | Orchestration HTTP handlers：create/list/detail/cancel 与 agent-run retry                                                              |
-| `backend/internal/api/chat.go`             | Chat Session API：会话创建/列表/消息查询/多轮发送/附件上传/附件内容预览（JSON + multipart）/手动压缩/分叉/归档（`/api/v1/chat/*`）                |
+| `backend/internal/api/chat.go`             | Chat Session API：会话创建/列表/消息查询/turn timeline 快照读取/多轮发送/附件上传/附件内容预览（JSON + multipart）/手动压缩/分叉/归档（`/api/v1/chat/*`） |
 | `backend/internal/executionflow/runtime.go` | Execution 共享 helper：统一 execution 启动记录、超时上下文与终态摘要/错误信息                                                         |
 | `backend/internal/api/info.go`             | 排障信息 API：`GET /api/v1/info`（version + XDG paths）                                                                               |
 | `backend/internal/api/experts.go`          | Experts 列表 API：`GET /api/v1/experts`（仅安全字段，供 UI 下拉）                                                                     |
@@ -75,6 +75,7 @@
 | `backend/internal/execution/manager.go`    | Execution 管理：启动/取消、日志落盘、WS 推送 `execution.*`/`node.log`                                                                 |
 | `backend/internal/orchestration/manager.go` | Orchestration 管理：goal 拆分首轮 agent runs、并发调度 queued agent run、cancel/retry/synthesis 收敛                                 |
 | `backend/internal/chat/manager.go`         | Chat 管理：多轮会话、provider anchor（OpenAI/Anthropic）、附件持久化接入、自动上下文压缩/跳过策略、WS `chat.*` 推送                |
+| `backend/internal/chat/timeline_persistence.go` | Chat timeline 持久化桥接：把 turn 启动、结构化事件、thinking 翻译与完成态回写到 `chat_turns/chat_turn_items` |
 | `backend/internal/chat/codex_appserver.go` | Codex Chat app-server 客户端：JSON-RPC 握手、`thread/start|resume`、细粒度 delta 映射、结构化 `chat.turn.event` 广播、token usage 与 artifact 写入             |
 | `backend/internal/chat/codex_turn_feed.go` | Codex turn feed 归一化：兼容 `item/*` 与 `codex/event/*`，把 answer/thinking/tool/plan/question/system 分层成结构化聊天事件 |
 | `backend/internal/chat/attachments.go`      | Chat 附件能力：附件类型校验、大小限制、文件落盘、provider 多模态 block 构造、调试输入摘要                                               |
@@ -90,6 +91,7 @@
 | `backend/internal/store/sqlite.go`         | SQLite state DB 打开与 pragma 初始化（WAL/busy_timeout/foreign_keys）                                                                 |
 | `backend/internal/store/migrate.go`        | SQLite migrations（使用 `PRAGMA user_version` 管理 schema 版本；含 chat attachments 与 expert builder sessions）                     |
 | `backend/internal/store/chat.go`           | Chat 存储：chat sessions/messages/attachments/anchors/compactions 的 SQLite CRUD + hydration                                          |
+| `backend/internal/store/chat_turns.go`     | Chat turn timeline 存储：turn/item 创建、增量 upsert、翻译状态回写、完成态收敛与 session 级恢复查询 |
 | `backend/internal/store/orchestrations.go` | Orchestration 存储：SQLite orchestration/round/agent_run/synthesis/artifact CRUD 与详情查询                                           |
 | `backend/internal/store/orchestration_executions.go` | Agent-run execution 存储：agent_run_executions 落库、终态收敛、synthesis 生成与 retry/cancel 支撑                        |
 | `backend/internal/store/orchestration_recovery.go` | Orchestration 恢复：daemon 重启后把遗留 running agent run 标记为 failed/retryable                                          |
@@ -120,8 +122,8 @@
 | `ui/src/app/components/LLMSettingsTab.tsx` | 系统设置「模型」Tab：编辑 Sources 与 Models 组成的模型池，供 CLI 工具与 helper SDK 复用                                              |
 | `ui/src/app/components/BasicSettingsTab.tsx` | 系统设置「基本设置」Tab：配置思考过程翻译的 API 源、翻译模型与目标 AI 模型列表                                                     |
 | `ui/src/app/components/ExpertSettingsTab.tsx` | 系统设置「专家」Tab：专家列表、AI 生成专家、生成会话历史、快照发布                                                                   |
-| `ui/src/lib/daemon.ts`                     | daemon URL/WS URL 解析与 health/workflow/execution/chat attachment API 封装                                                           |
-| `ui/src/stores/chatStore.ts`               | Chat 前端状态：sessions/messages/legacy streaming 状态、结构化 turn feed 状态与 chat API actions                                                            |
+| `ui/src/lib/daemon.ts`                     | daemon URL/WS URL 解析与 health/workflow/execution/chat attachment/chat turns API 封装                                                 |
+| `ui/src/stores/chatStore.ts`               | Chat 前端状态：sessions/messages、后端可恢复 turn timeline、轻量视图态与 chat API actions                                            |
 | `scripts/dev.sh`                           | 本地开发一键启动脚本（并行拉起 backend 与 UI）                                                                                        |
 | `backend/.air.toml`                        | 后端热重载配置（Air）：本地开发时监听 Go 源码变更并自动重建/重启 daemon                                                                |
 | `scripts/web.sh`                           | Web 单进程启动脚本（构建 UI 并由 daemon 静态托管 `ui/dist`）                                                                          |
@@ -143,7 +145,7 @@
 | dotenv/.env 自动加载               | `backend/internal/dotenv/dotenv.go`, `backend/cmd/vibe-tree-daemon/main.go`                                                                                                                                                                |
 | UI 运行时切换 daemon URL           | `ui/src/App.tsx`                                                                                                                                                                                                                           |
 | 模型设置（Sources/Models）         | `backend/internal/api/settings_llm.go`, `backend/internal/config/llm_settings.go`, `backend/internal/config/llm_mirror.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/LLMSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
-| 基本设置 / 思考过程翻译            | `backend/internal/api/settings_basic.go`, `backend/internal/config/basic_settings.go`, `backend/internal/api/chat.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/thinking_translation.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/BasicSettingsTab.tsx`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/daemon.ts` |
+| 基本设置 / 思考过程翻译            | `backend/internal/api/settings_basic.go`, `backend/internal/config/basic_settings.go`, `backend/internal/api/chat.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/thinking_translation.go`, `backend/internal/chat/timeline_persistence.go`, `backend/internal/store/chat_turns.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/BasicSettingsTab.tsx`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/daemon.ts` |
 | OpenAI 兼容接口自动切换            | `backend/internal/openaicompat/compat.go`, `backend/internal/api/settings_llm_test_call.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/thinking_translation.go`, `backend/internal/runner/sdk_runner.go`, `backend/internal/config/openai_api_style.go` |
 | 专家设置 / AI 创建专家             | `backend/internal/api/settings_experts.go`, `backend/internal/api/settings_expert_sessions.go`, `backend/internal/expertbuilder/service.go`, `backend/internal/skillcatalog/catalog.go`, `.codex/skills/expert-creator/SKILL.md`, `ui/src/app/components/ExpertSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
 | XDG 配置路径                       | `backend/internal/config/config.go`                                                                                                                                                                                                        |
@@ -151,7 +153,7 @@
 | Expert 配置/模板解析               | `backend/internal/config/config.go`, `backend/internal/expert/expert.go`                                                                                                                                                                   |
 | execution timeout 语义             | `backend/internal/execution/manager.go`, `backend/internal/scheduler/scheduler.go`                                                                                                                                                         |
 | SQLite state.db 初始化             | `backend/cmd/vibe-tree-daemon/main.go`, `backend/internal/store/sqlite.go`, `backend/internal/store/migrate.go`                                                                                                                            |
-| Chat Session API                   | `backend/internal/api/chat.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/attachments.go`, `backend/internal/store/chat.go`, `ui/src/lib/daemon.ts`                                                                                |
+| Chat Session API                   | `backend/internal/api/chat.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/attachments.go`, `backend/internal/chat/timeline_persistence.go`, `backend/internal/store/chat.go`, `backend/internal/store/chat_turns.go`, `ui/src/lib/daemon.ts`                                                                                |
 | Chat 自动上下文压缩               | `backend/internal/chat/manager.go`, `backend/internal/store/chat.go`                                                                                                                                                                                           |
 | Chat provider anchor 续上下文      | `backend/internal/chat/manager.go`, `backend/internal/store/chat.go`                                                                                                                                                                                           |
 | Chat 附件上传与多模态输入          | `backend/internal/api/chat.go`, `backend/internal/chat/attachments.go`, `backend/internal/chat/provider_input.go`, `backend/internal/store/chat.go`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/lib/daemon.ts`                                 |

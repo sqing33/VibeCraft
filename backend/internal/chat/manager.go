@@ -234,6 +234,17 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 		}
 		userMsg.Attachments = attachments
 	}
+	turnTimeline, err := m.startTurnTimeline(ctx, params.Session, userMsg, expertID, provider, model, modelInput)
+	if err != nil {
+		return TurnResult{}, err
+	}
+	turnCompleted := false
+	defer func() {
+		if turnCompleted || err == nil {
+			return
+		}
+		_ = m.failTurnTimeline(ctxNoCancel(ctx), turnTimeline, err)
+	}()
 	m.broadcast("chat.turn.started", map[string]any{
 		"session_id":      params.Session.ID,
 		"user_message_id": userMsg.ID,
@@ -244,7 +255,12 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 	})
 
 	if spec.SDK == nil {
-		return m.runCLITurn(ctx, params.Session, userMsg, modelInput, spec, expertID, provider, model, params.ThinkingTranslation)
+		result, runErr := m.runCLITurn(ctx, params.Session, turnTimeline, userMsg, modelInput, spec, expertID, provider, model, params.ThinkingTranslation)
+		if runErr == nil {
+			turnCompleted = true
+		}
+		err = runErr
+		return result, err
 	}
 	if err := m.ensureCompaction(ctx, params.Session, modelInput, *spec.SDK, spec.Env); err != nil {
 		return TurnResult{}, err
@@ -254,7 +270,7 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 	if strings.EqualFold(provider, params.Session.Provider) && strings.EqualFold(model, params.Session.Model) {
 		anchor, _ = m.store.GetChatAnchor(ctx, params.Session.ID)
 	}
-	translationRuntime := newThinkingTranslationRuntime(m, params.Session.ID, params.ThinkingTranslation)
+	translationRuntime := newThinkingTranslationRuntime(m, params.Session.ID, turnTimeline.ID, params.ThinkingTranslation)
 
 	usedSDK, respText, reasoningText, anchorUpdate, callMeta, err := m.callProviderWithFallbacks(ctx, params.Session, userMsg, *spec.SDK, spec.Env, modelInput, anchor, spec.SDKFallbacks, translationRuntime)
 	if err != nil {
@@ -298,6 +314,23 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 		Provider:  provider,
 		Model:     model,
 	})
+	if err := m.completeTurnEntry(ctx, turnTimeline.ID, "answer", "answer", respText, nil); err != nil {
+		return TurnResult{}, err
+	}
+	if strings.TrimSpace(reasoningText) != "" {
+		if err := m.completeTurnEntry(ctx, turnTimeline.ID, "thinking:1", "thinking", reasoningText, nil); err != nil {
+			return TurnResult{}, err
+		}
+		if strings.TrimSpace(translatedReasoningText) != "" || translationFailed {
+			if err := m.replaceTurnTranslation(ctx, turnTimeline.ID, "thinking:1", translatedReasoningText, translationFailed); err != nil {
+				return TurnResult{}, err
+			}
+		}
+	}
+	if err := m.completeTurnTimeline(ctx, turnTimeline, assistantMsg, callMeta.ContextMode, callMeta, translationApplied, translationFailed); err != nil {
+		return TurnResult{}, err
+	}
+	turnCompleted = true
 
 	m.broadcast("chat.turn.completed", map[string]any{
 		"session_id":                   params.Session.ID,
@@ -356,7 +389,7 @@ func (m *Manager) callProviderWithAnchorRetry(ctx context.Context, sess store.Ch
 	return "", "", store.ChatAnchor{}, providerCallMeta{}, err
 }
 
-func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string) (TurnResult, error) {
+func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
 	if m.runtimeRunner == nil {
 		return TurnResult{}, fmt.Errorf("chat runtime runner not configured")
 	}
@@ -369,6 +402,9 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 		artifactDir = ""
 	}
 	attemptResume := strings.TrimSpace(pointerStringValue(sess.CLISessionID))
+	translatedReasoningText := ""
+	thinkingTranslationApplied := false
+	thinkingTranslationFailed := false
 
 	runOnce := func(prompt string, contextMode string, resumeSessionID string) (finalText string, reasoningText string, nextSessionID string, err error) {
 		runSpec := spec
@@ -395,7 +431,8 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 		toolID := strings.TrimSpace(runSpec.Env["VIBE_TREE_CLI_FAMILY"])
 		assistantBuf := strings.Builder{}
 		thinkingBuf := strings.Builder{}
-		translationRuntime := newThinkingTranslationRuntime(m, sess.ID, nil)
+		translationRuntime := newThinkingTranslationRuntime(m, sess.ID, turn.ID, thinkingTranslation)
+		feedEmitter := newCodexTurnFeedEmitter(m, turn.ID, sess.ID, userMsg.ID, translationRuntime)
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
@@ -423,20 +460,23 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 							continue
 						}
 						assistantBuf.WriteString(event.Delta)
+						feedEmitter.emit(ctx, chatTurnEventPayload{EntryID: "answer", Kind: "answer", Op: "append", Status: "streaming", Delta: event.Delta})
 						m.broadcast("chat.turn.delta", map[string]any{"session_id": sess.ID, "delta": event.Delta})
 					case "thinking_delta":
 						if event.Delta == "" {
 							continue
 						}
 						thinkingBuf.WriteString(event.Delta)
+						feedEmitter.emit(ctx, chatTurnEventPayload{EntryID: "thinking:1", Kind: "thinking", Op: "append", Status: "streaming", Delta: event.Delta})
 						m.broadcast("chat.turn.thinking.delta", map[string]any{"session_id": sess.ID, "delta": event.Delta})
 						if translationRuntime != nil {
-							translationRuntime.add(ctx, "", event.Delta)
+							translationRuntime.add(ctx, "thinking:1", event.Delta)
 						}
 					case "progress_delta":
 						if event.Delta == "" {
 							continue
 						}
+						feedEmitter.emit(ctx, chatTurnEventPayload{EntryID: "progress:legacy", Kind: "progress", Op: "upsert", Status: "streaming", Content: event.Delta})
 						m.broadcast("chat.turn.thinking.delta", map[string]any{"session_id": sess.ID, "delta": event.Delta})
 					case "final":
 						if strings.TrimSpace(event.Text) != "" {
@@ -453,6 +493,13 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 		<-done
 		if translationRuntime != nil {
 			translationRuntime.complete(ctx)
+			translatedReasoningText = translationRuntime.translatedText()
+			thinkingTranslationApplied = translationRuntime.applied()
+			thinkingTranslationFailed = translationRuntime.failedState()
+		} else {
+			translatedReasoningText = ""
+			thinkingTranslationApplied = false
+			thinkingTranslationFailed = false
 		}
 		if strings.TrimSpace(finalText) == "" && assistantBuf.Len() > 0 {
 			finalText = strings.TrimSpace(assistantBuf.String())
@@ -514,9 +561,6 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 		contextMode = "cli_reconstructed"
 	}
 
-	translatedReasoningText := ""
-	thinkingTranslationApplied := false
-	thinkingTranslationFailed := false
 	assistantMsg, err := m.store.AppendChatMessage(ctx, store.AppendChatMessageParams{
 		SessionID:   sess.ID,
 		Role:        "assistant",
@@ -537,6 +581,22 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 		Provider:     provider,
 		Model:        model,
 	})
+	if err := m.completeTurnEntry(ctx, turn.ID, "answer", "answer", finalText, nil); err != nil {
+		return TurnResult{}, err
+	}
+	if strings.TrimSpace(reasoningText) != "" {
+		if err := m.completeTurnEntry(ctx, turn.ID, "thinking:1", "thinking", reasoningText, nil); err != nil {
+			return TurnResult{}, err
+		}
+		if strings.TrimSpace(translatedReasoningText) != "" || thinkingTranslationFailed {
+			if err := m.replaceTurnTranslation(ctx, turn.ID, "thinking:1", translatedReasoningText, thinkingTranslationFailed); err != nil {
+				return TurnResult{}, err
+			}
+		}
+	}
+	if err := m.completeTurnTimeline(ctx, turn, assistantMsg, contextMode, providerCallMeta{ModelInput: modelInput, ContextMode: contextMode}, thinkingTranslationApplied, thinkingTranslationFailed); err != nil {
+		return TurnResult{}, err
+	}
 	m.broadcast("chat.turn.completed", map[string]any{
 		"session_id":                   sess.ID,
 		"user_message_id":              userMsg.ID,

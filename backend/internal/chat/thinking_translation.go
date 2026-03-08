@@ -31,23 +31,26 @@ type ThinkingTranslationSpec struct {
 type ThinkingTranslatorFunc func(ctx context.Context, spec ThinkingTranslationSpec, text string) (string, error)
 
 type thinkingTranslationRuntime struct {
-	manager       *Manager
-	sessionID     string
-	spec          *ThinkingTranslationSpec
-	buffer        string
-	bufferEntryID string
-	lastDelta     time.Time
-	failed        bool
-	translated    strings.Builder
+	manager           *Manager
+	sessionID         string
+	turnID            string
+	spec              *ThinkingTranslationSpec
+	buffer            string
+	bufferEntryID     string
+	lastDelta         time.Time
+	failed            bool
+	translatedByEntry map[string]string
+	entryOrder        []string
 }
 
-func newThinkingTranslationRuntime(manager *Manager, sessionID string, spec *ThinkingTranslationSpec) *thinkingTranslationRuntime {
+func newThinkingTranslationRuntime(manager *Manager, sessionID, turnID string, spec *ThinkingTranslationSpec) *thinkingTranslationRuntime {
 	if manager == nil || spec == nil {
 		return nil
 	}
 	return &thinkingTranslationRuntime{
 		manager:   manager,
 		sessionID: sessionID,
+		turnID:    strings.TrimSpace(turnID),
 		spec: &ThinkingTranslationSpec{
 			Provider: strings.ToLower(strings.TrimSpace(spec.Provider)),
 			Model:    strings.TrimSpace(spec.Model),
@@ -69,7 +72,51 @@ func (t *thinkingTranslationRuntime) translatedText() string {
 	if t == nil {
 		return ""
 	}
-	return strings.TrimSpace(t.translated.String())
+	var out strings.Builder
+	for _, entryID := range t.entryOrder {
+		segment := strings.TrimSpace(t.translatedByEntry[entryID])
+		if segment == "" {
+			continue
+		}
+		out.WriteString(segment)
+	}
+	return strings.TrimSpace(out.String())
+}
+
+func (t *thinkingTranslationRuntime) rememberEntry(entryID string) {
+	if t == nil {
+		return
+	}
+	entryID = strings.TrimSpace(entryID)
+	if entryID == "" {
+		entryID = "thinking"
+	}
+	if t.translatedByEntry == nil {
+		t.translatedByEntry = map[string]string{}
+	}
+	for _, existing := range t.entryOrder {
+		if existing == entryID {
+			return
+		}
+	}
+	t.entryOrder = append(t.entryOrder, entryID)
+}
+
+func (t *thinkingTranslationRuntime) resetEntry(ctx context.Context, entryID string) {
+	if t == nil || t.spec == nil || t.failed {
+		return
+	}
+	entryID = strings.TrimSpace(entryID)
+	if entryID == "" {
+		return
+	}
+	t.rememberEntry(entryID)
+	if t.translatedByEntry != nil {
+		t.translatedByEntry[entryID] = ""
+	}
+	if t.manager != nil && strings.TrimSpace(t.turnID) != "" {
+		t.manager.persistTurnTranslationWarn(ctx, t.turnID, entryID, "", true)
+	}
 }
 
 func (t *thinkingTranslationRuntime) add(ctx context.Context, entryID, delta string) {
@@ -77,6 +124,9 @@ func (t *thinkingTranslationRuntime) add(ctx context.Context, entryID, delta str
 		return
 	}
 	entryID = strings.TrimSpace(entryID)
+	if entryID == "" {
+		entryID = "thinking"
+	}
 	delta = strings.TrimSpace(delta)
 	if delta == "" {
 		return
@@ -91,6 +141,7 @@ func (t *thinkingTranslationRuntime) add(ctx context.Context, entryID, delta str
 	if t.bufferEntryID == "" {
 		t.bufferEntryID = entryID
 	}
+	t.rememberEntry(t.bufferEntryID)
 	t.buffer += delta
 	t.lastDelta = now
 	t.flush(ctx, false)
@@ -119,6 +170,9 @@ func (t *thinkingTranslationRuntime) flush(ctx context.Context, force bool) {
 			}
 			if entryID != "" {
 				payload["entry_id"] = entryID
+				if t.manager != nil && strings.TrimSpace(t.turnID) != "" {
+					t.manager.persistTurnTranslationFailedWarn(ctx, t.turnID, entryID)
+				}
 			}
 			t.manager.broadcast("chat.turn.thinking.translation.failed", payload)
 			return
@@ -130,7 +184,14 @@ func (t *thinkingTranslationRuntime) flush(ctx context.Context, force bool) {
 			}
 			continue
 		}
-		t.translated.WriteString(translated)
+		t.rememberEntry(entryID)
+		if t.translatedByEntry == nil {
+			t.translatedByEntry = map[string]string{}
+		}
+		t.translatedByEntry[entryID] += translated
+		if t.manager != nil && strings.TrimSpace(t.turnID) != "" {
+			t.manager.persistTurnTranslationWarn(ctx, t.turnID, entryID, translated, false)
+		}
 		payload := map[string]any{
 			"session_id": t.sessionID,
 			"delta":      translated,

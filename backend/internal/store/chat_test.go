@@ -253,7 +253,6 @@ func TestChatStore_ListMessagesHydratesAttachments(t *testing.T) {
 	}
 }
 
-
 func TestMigrate_RepairsMalformedChatAttachmentsSchema(t *testing.T) {
 	t.Parallel()
 
@@ -331,4 +330,128 @@ CREATE TABLE chat_attachments (
 			t.Fatalf("expected repaired column %q in chat_attachments, got %+v", name, cols)
 		}
 	}
+}
+
+func TestChatTurnStoreLifecycle(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate store: %v", err)
+	}
+
+	sess, err := st.CreateChatSession(context.Background(), store.CreateChatSessionParams{
+		Title:         "timeline",
+		ExpertID:      "codex",
+		Provider:      "cli",
+		Model:         "gpt-5-codex",
+		WorkspacePath: ".",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	userMsg, err := st.AppendChatMessage(context.Background(), store.AppendChatMessageParams{
+		SessionID:   sess.ID,
+		Role:        "user",
+		ContentText: "hello timeline",
+	})
+	if err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+
+	turn, err := st.StartChatTurn(context.Background(), store.CreateChatTurnParams{
+		SessionID:     sess.ID,
+		UserMessageID: userMsg.ID,
+		Turn:          userMsg.Turn,
+		ExpertID:      strPtr("codex"),
+		Provider:      strPtr("cli"),
+		Model:         strPtr("gpt-5-codex"),
+		ModelInput:    strPtr("hello timeline"),
+	})
+	if err != nil {
+		t.Fatalf("start chat turn: %v", err)
+	}
+	if _, err := st.UpsertChatTurnItem(context.Background(), store.UpsertChatTurnItemParams{
+		TurnID:  turn.ID,
+		EntryID: "thinking:1",
+		Seq:     1,
+		Kind:    "thinking",
+		Status:  "streaming",
+		Op:      "append",
+		Delta:   "first ",
+	}); err != nil {
+		t.Fatalf("append thinking delta: %v", err)
+	}
+	if _, err := st.UpsertChatTurnItem(context.Background(), store.UpsertChatTurnItemParams{
+		TurnID:  turn.ID,
+		EntryID: "thinking:1",
+		Seq:     99,
+		Kind:    "thinking",
+		Status:  "done",
+		Op:      "replace",
+		Delta:   "summary",
+	}); err != nil {
+		t.Fatalf("replace thinking content: %v", err)
+	}
+	if _, err := st.AppendChatTurnItemTranslatedContent(context.Background(), store.AppendChatTurnItemTranslatedContentParams{
+		TurnID:  turn.ID,
+		EntryID: "thinking:1",
+		Delta:   "摘要",
+		Replace: true,
+	}); err != nil {
+		t.Fatalf("replace translated thinking: %v", err)
+	}
+	assistantMsg, err := st.AppendChatMessage(context.Background(), store.AppendChatMessageParams{
+		SessionID:   sess.ID,
+		Role:        "assistant",
+		ContentText: "done",
+	})
+	if err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	if _, err := st.CompleteChatTurn(context.Background(), store.CompleteChatTurnParams{
+		TurnID:             turn.ID,
+		SessionID:          sess.ID,
+		UserMessageID:      userMsg.ID,
+		AssistantMessageID: assistantMsg.ID,
+		ContextMode:        strPtr("cli_reconstructed"),
+	}); err != nil {
+		t.Fatalf("complete chat turn: %v", err)
+	}
+
+	turns, err := st.ListChatTurns(context.Background(), sess.ID, 20)
+	if err != nil {
+		t.Fatalf("list chat turns: %v", err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(turns))
+	}
+	if turns[0].AssistantMessageID == nil || *turns[0].AssistantMessageID != assistantMsg.ID {
+		t.Fatalf("unexpected assistant linkage: %+v", turns[0])
+	}
+	if turns[0].Status != "completed" {
+		t.Fatalf("expected completed turn, got %+v", turns[0])
+	}
+	if len(turns[0].Items) != 1 {
+		t.Fatalf("expected 1 persisted item, got %+v", turns[0].Items)
+	}
+	if turns[0].Items[0].Seq != 1 {
+		t.Fatalf("expected stable seq=1 after update, got %+v", turns[0].Items[0])
+	}
+	if turns[0].Items[0].ContentText != "summary" {
+		t.Fatalf("expected summary content, got %+v", turns[0].Items[0])
+	}
+	if got, _ := turns[0].Items[0].Meta["translated_content"].(string); got != "摘要" {
+		t.Fatalf("expected translated thinking, got %+v", turns[0].Items[0].Meta)
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
+func pointer(value string) *string {
+	return &value
 }

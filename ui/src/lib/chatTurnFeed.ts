@@ -1,3 +1,5 @@
+import type { ChatTurnTimeline } from '@/lib/daemon'
+
 export type ChatTurnEntryKind = 'progress' | 'thinking' | 'answer' | 'tool' | 'plan' | 'question' | 'system' | 'error'
 
 export type ChatTurnEntryStatus = 'streaming' | 'created' | 'pending_approval' | 'success' | 'failed' | 'done'
@@ -272,4 +274,46 @@ export function hasActiveAnswer(feed: ChatTurnFeed | undefined): boolean {
  */
 export function feedAnswerText(feed: ChatTurnFeed | undefined): string {
   return feed?.entries.find((entry) => entry.kind === 'answer')?.content ?? ''
+}
+
+function normalizePersistedEntryStatus(turnStatus: string, entryStatus: string): string {
+  const turn = turnStatus.trim().toLowerCase()
+  const entry = entryStatus.trim() || 'created'
+  if (turn === 'completed') {
+    if (entry === 'failed' || entry === 'success' || entry === 'pending_approval') return entry
+    return 'done'
+  }
+  if (turn === 'failed' && entry === 'created') {
+    return 'failed'
+  }
+  return entry
+}
+
+/**
+ * 功能：把后端持久化的 turn 快照投影为前端可直接渲染的 ChatTurnFeed。
+ * 参数/返回：接收单个 ChatTurnTimeline；返回排序完成的 ChatTurnFeed。
+ * 失败场景：条目为空时仍返回空 feed，不抛异常。
+ * 副作用：无；仅做数据映射。
+ */
+export function buildTurnFeedFromTimeline(turn: ChatTurnTimeline): ChatTurnFeed {
+  return {
+    session_id: turn.session_id,
+    user_message_id: turn.user_message_id,
+    completed_assistant_message_id: turn.assistant_message_id,
+    turnMeta: {
+      expert_id: turn.expert_id?.trim() || undefined,
+      provider: turn.provider?.trim() || undefined,
+      model: turn.model?.trim() || undefined,
+    },
+    entries: [...(turn.items ?? [])]
+      .map((item) => ({
+        entry_id: item.entry_id,
+        seq: item.seq,
+        kind: item.kind as ChatTurnEntryKind,
+        status: normalizePersistedEntryStatus(turn.status, item.status),
+        content: item.content_text,
+        meta: item.meta,
+      }))
+      .sort((left, right) => left.seq - right.seq),
+  }
 }

@@ -5,6 +5,7 @@ import {
   createChatSession,
   fetchChatMessages,
   fetchChatSessions,
+  fetchChatTurns,
   patchChatSession,
   postChatCompact,
   postChatFork,
@@ -12,10 +13,12 @@ import {
   type ChatAttachment,
   type ChatMessage,
   type ChatSession,
+  type ChatTurnTimeline,
 } from '@/lib/daemon'
 import {
   applyThinkingTranslationDelta,
   applyTurnFeedEvent,
+  buildTurnFeedFromTimeline,
   ensureTurnFeed,
   finalizeTurnFeed,
   type ChatTurnEventPayload,
@@ -110,6 +113,93 @@ function buildOptimisticAttachments(
   }))
 }
 
+function hydrateTurnsIntoState<T extends {
+  messagesBySession: Record<string, ChatMessage[]>
+  streamingBySession: Record<string, string>
+  thinkingBySession: Record<string, string>
+  translatedThinkingBySession: Record<string, string>
+  thinkingTranslationStateBySession: Record<string, ThinkingTranslationState | undefined>
+  turnMetaBySession: Record<string, TurnMeta | null>
+  turnInputByUserMessageId: Record<string, TurnInputMeta | undefined>
+  usageByMessageId: Record<string, UsageMeta | undefined>
+  activeTurnFeedBySession: Record<string, ChatTurnFeed | undefined>
+  completedTurnFeedByAssistantMessageId: Record<string, ChatTurnFeed | undefined>
+}>(state: T, sessionId: string, turns: ChatTurnTimeline[]): T {
+  const sessionMessages = state.messagesBySession[sessionId] ?? []
+  const sessionUserIDs = new Set(sessionMessages.filter((message) => message.role === 'user').map((message) => message.message_id))
+  const sessionAssistantIDs = new Set(sessionMessages.filter((message) => message.role === 'assistant').map((message) => message.message_id))
+  for (const turn of turns) {
+    sessionUserIDs.add(turn.user_message_id)
+    if (typeof turn.assistant_message_id === 'string' && turn.assistant_message_id) {
+      sessionAssistantIDs.add(turn.assistant_message_id)
+    }
+  }
+
+  const nextTurnInputByUserMessageId = { ...state.turnInputByUserMessageId }
+  for (const userMessageId of sessionUserIDs) {
+    delete nextTurnInputByUserMessageId[userMessageId]
+  }
+  const nextUsageByMessageId = { ...state.usageByMessageId }
+  for (const assistantMessageId of sessionAssistantIDs) {
+    delete nextUsageByMessageId[assistantMessageId]
+  }
+  const nextCompleted = Object.fromEntries(
+    Object.entries(state.completedTurnFeedByAssistantMessageId).filter(([, feed]) => feed?.session_id !== sessionId),
+  ) as Record<string, ChatTurnFeed | undefined>
+  const nextActive = { ...state.activeTurnFeedBySession }
+  delete nextActive[sessionId]
+  const nextStreaming = { ...state.streamingBySession, [sessionId]: '' }
+  const nextThinking = { ...state.thinkingBySession, [sessionId]: '' }
+  const nextTranslatedThinking = { ...state.translatedThinkingBySession, [sessionId]: '' }
+  const nextTranslationState = { ...state.thinkingTranslationStateBySession }
+  delete nextTranslationState[sessionId]
+  const nextTurnMeta = { ...state.turnMetaBySession, [sessionId]: null }
+
+  for (const turn of turns) {
+    if (typeof turn.model_input === 'string' && turn.model_input.trim()) {
+      nextTurnInputByUserMessageId[turn.user_message_id] = {
+        model_input: turn.model_input,
+        context_mode: turn.context_mode,
+      }
+    }
+    if (typeof turn.assistant_message_id === 'string' && turn.assistant_message_id) {
+      nextUsageByMessageId[turn.assistant_message_id] = {
+        token_in: turn.token_in,
+        token_out: turn.token_out,
+        cached_input_tokens: turn.cached_input_tokens,
+      }
+    }
+    const feed = buildTurnFeedFromTimeline(turn)
+    if (typeof turn.assistant_message_id === 'string' && turn.assistant_message_id && turn.status === 'completed') {
+      nextCompleted[turn.assistant_message_id] = feed
+      continue
+    }
+    if ((turn.status === 'running' || turn.status === 'failed') && feed.entries.length > 0) {
+      nextActive[sessionId] = feed
+      nextTurnMeta[sessionId] = feed.turnMeta ?? null
+      nextTranslationState[sessionId] = {
+        applied:
+          turn.thinking_translation_applied === true ||
+          feed.entries.some((entry) => typeof entry.meta?.translated_content === 'string' && entry.meta.translated_content.trim()),
+        failed: turn.thinking_translation_failed === true,
+      }
+    }
+  }
+
+  return {
+    ...state,
+    streamingBySession: nextStreaming,
+    thinkingBySession: nextThinking,
+    translatedThinkingBySession: nextTranslatedThinking,
+    thinkingTranslationStateBySession: nextTranslationState,
+    turnMetaBySession: nextTurnMeta,
+    turnInputByUserMessageId: nextTurnInputByUserMessageId,
+    usageByMessageId: nextUsageByMessageId,
+    activeTurnFeedBySession: nextActive,
+    completedTurnFeedByAssistantMessageId: nextCompleted,
+  }
+}
+
 export type ChatStore = {
   sessions: ChatSession[]
   activeSessionId: string | null
@@ -153,6 +243,7 @@ export type ChatStore = {
   clearTurnFeed: (sessionId: string) => void
   refreshSessions: (daemonUrl: string) => Promise<void>
   loadMessages: (daemonUrl: string, sessionId: string) => Promise<void>
+  loadTurns: (daemonUrl: string, sessionId: string) => Promise<void>
   createSession: (
     daemonUrl: string,
     req: { title?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; workspace_path?: string },
@@ -386,6 +477,10 @@ export const useChatStore = create<ChatStore>()(
     const messages = await fetchChatMessages(daemonUrl, sessionId)
     get().setMessages(sessionId, messages)
   },
+  loadTurns: async (daemonUrl, sessionId) => {
+    const turns = await fetchChatTurns(daemonUrl, sessionId)
+    set((state) => hydrateTurnsIntoState(state, sessionId, turns))
+  },
   createSession: async (daemonUrl, req) => {
     const session = await createChatSession(daemonUrl, req)
     get().upsertSession(session)
@@ -414,8 +509,11 @@ export const useChatStore = create<ChatStore>()(
     })
     try {
       await postChatTurn(daemonUrl, sessionId, { input, expert_id: expertId, cli_tool_id: cliToolId, model_id: modelId, files })
-      await get().loadMessages(daemonUrl, sessionId)
-      await get().refreshSessions(daemonUrl)
+      await Promise.all([
+        get().loadMessages(daemonUrl, sessionId),
+        get().loadTurns(daemonUrl, sessionId),
+        get().refreshSessions(daemonUrl),
+      ])
       set((state) => ({
         sending: false,
         streamingBySession: {
@@ -425,7 +523,10 @@ export const useChatStore = create<ChatStore>()(
       }))
       get().setTurnMeta(sessionId, null)
     } catch (err: unknown) {
-      await get().loadMessages(daemonUrl, sessionId).catch(() => undefined)
+      await Promise.all([
+        get().loadMessages(daemonUrl, sessionId).catch(() => undefined),
+        get().loadTurns(daemonUrl, sessionId).catch(() => undefined),
+      ])
       set((state) => ({
         sending: false,
         error: err instanceof Error ? err.message : String(err),
@@ -458,12 +559,6 @@ export const useChatStore = create<ChatStore>()(
       storage: createJSONStorage(() => sessionStorage),
       partialize: (state) => ({
         activeSessionId: state.activeSessionId,
-        streamingBySession: state.streamingBySession,
-        thinkingBySession: state.thinkingBySession,
-        translatedThinkingBySession: state.translatedThinkingBySession,
-        thinkingTranslationStateBySession: state.thinkingTranslationStateBySession,
-        turnMetaBySession: state.turnMetaBySession,
-        activeTurnFeedBySession: state.activeTurnFeedBySession,
       }),
     },
   ),

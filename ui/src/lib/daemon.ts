@@ -620,6 +620,40 @@ export type ChatTurnResult = {
   thinking_translation_applied?: boolean
   thinking_translation_failed?: boolean
 }
+export type ChatTurnTimelineItem = {
+  entry_id: string
+  seq: number
+  kind: string
+  status: string
+  content_text: string
+  meta?: Record<string, unknown>
+  created_at: number
+  updated_at: number
+}
+
+export type ChatTurnTimeline = {
+  turn_id: string
+  session_id: string
+  user_message_id: string
+  assistant_message_id?: string
+  turn: number
+  status: string
+  expert_id?: string
+  provider?: string
+  model?: string
+  model_input?: string
+  context_mode?: string
+  thinking_translation_applied?: boolean
+  thinking_translation_failed?: boolean
+  token_in?: number
+  token_out?: number
+  cached_input_tokens?: number
+  created_at: number
+  updated_at: number
+  completed_at?: number
+  items: ChatTurnTimelineItem[]
+}
+
 
 export async function createChatSession(
   daemonUrl: string,
@@ -665,6 +699,21 @@ export async function fetchChatMessages(
   }
   return (await res.json()) as ChatMessage[]
 }
+export async function fetchChatTurns(
+  daemonUrl: string,
+  sessionId: string,
+  limit = 200,
+): Promise<ChatTurnTimeline[]> {
+  const url = new URL(`${daemonUrl}/api/v1/chat/sessions/${sessionId}/turns`)
+  url.searchParams.set('limit', String(limit))
+  const res = await fetch(url)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as ChatTurnTimeline[]
+}
+
 
 export async function postChatTurn(
   daemonUrl: string,

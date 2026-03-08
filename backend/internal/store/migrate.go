@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const schemaVersion = 9
+const schemaVersion = 10
 
 // Migrate 功能：执行 state DB schema 迁移（MVP：使用 PRAGMA user_version 管理版本）。
 // 参数/返回：ctx 控制超时；成功返回 nil。
@@ -102,6 +102,22 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		}
 		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 9;"); err != nil {
 			return fmt.Errorf("set user_version=9: %w", err)
+		}
+	}
+	if userVersion < 10 {
+		if err := migrateV10(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 10;"); err != nil {
+			return fmt.Errorf("set user_version=10: %w", err)
+		}
+	}
+	if userVersion < 10 {
+		if err := migrateV10(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 10;"); err != nil {
+			return fmt.Errorf("set user_version=10: %w", err)
 		}
 	}
 
@@ -872,7 +888,6 @@ func ensureOrchestrationSchema(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-
 func tableExists(ctx context.Context, tx *sql.Tx, table string) (bool, error) {
 	row := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?;`, table)
 	var count int
@@ -965,6 +980,60 @@ func migrateV9(ctx context.Context, tx *sql.Tx) error {
 		`CREATE INDEX IF NOT EXISTS idx_repo_analysis_runs_runtime_kind ON repo_analysis_runs(runtime_kind, created_at DESC);`,
 	}
 	for _, stmt := range indexStmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("exec migration stmt: %w", err)
+		}
+	}
+	return nil
+}
+
+func migrateV10(ctx context.Context, tx *sql.Tx) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS chat_turns (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  user_message_id TEXT NOT NULL,
+  assistant_message_id TEXT,
+  turn INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  expert_id TEXT,
+  provider TEXT,
+  model TEXT,
+  model_input TEXT,
+  context_mode TEXT,
+  thinking_translation_applied INTEGER NOT NULL DEFAULT 0,
+  thinking_translation_failed INTEGER NOT NULL DEFAULT 0,
+  token_in INTEGER,
+  token_out INTEGER,
+  cached_input_tokens INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  FOREIGN KEY(session_id) REFERENCES chat_sessions(id),
+  FOREIGN KEY(user_message_id) REFERENCES chat_messages(id),
+  FOREIGN KEY(assistant_message_id) REFERENCES chat_messages(id)
+);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_turns_user_message ON chat_turns(user_message_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_turns_session_turn ON chat_turns(session_id, turn, created_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_turns_session_status ON chat_turns(session_id, status, updated_at);`,
+		`CREATE TABLE IF NOT EXISTS chat_turn_items (
+  turn_id TEXT NOT NULL,
+  entry_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL,
+  content_text TEXT NOT NULL,
+  translated_content TEXT,
+  translation_failed INTEGER NOT NULL DEFAULT 0,
+  meta_json TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY(turn_id, entry_id),
+  FOREIGN KEY(turn_id) REFERENCES chat_turns(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_turn_items_turn_seq ON chat_turn_items(turn_id, seq, created_at);`,
+	}
+	for _, stmt := range stmts {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("exec migration stmt: %w", err)
 		}
