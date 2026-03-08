@@ -1,6 +1,6 @@
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Chip, Input, Select, SelectItem, Textarea } from '@heroui/react'
-import { Eye, Paperclip, Trash2, X } from 'lucide-react'
+import { Alert, Button, Chip, Input, Select, SelectItem } from '@heroui/react'
+import { ArrowUp, Eye, Plus, Trash2, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -1188,10 +1188,10 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
               </div>
             </div>
 
-            <div className="shrink-0 border-t bg-background/80 px-4 py-4 backdrop-blur md:px-8">
+            <div className="shrink-0 border-t bg-background/80 px-4 py-2.5 backdrop-blur md:px-8">
               <div className="mx-auto w-full max-w-[880px]">
                 <div
-                  className={`rounded-[28px] border bg-background p-3 shadow-sm transition ${dragActive ? 'border-primary bg-primary/5' : 'border-default-200/80'}`}
+                  className={`rounded-[28px] border bg-background p-2 shadow-sm transition ${dragActive ? 'border-primary bg-primary/5' : 'border-default-200/80'}`}
                   onDragEnter={handleComposerDragEnter}
                   onDragOver={handleComposerDragOver}
                   onDragLeave={handleComposerDragLeave}
@@ -1243,28 +1243,22 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                     </div>
                   ) : null}
 
-                  <Textarea
-                    value={input}
-                    onValueChange={setInput}
-                    placeholder="输入消息或上传附件..."
-                    minRows={3}
-                    isDisabled={!activeSessionId || sending}
-                    className="w-full"
-                  />
+                  <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_220px] md:items-stretch">
+                    <div className="min-w-0 md:flex md:min-h-0 md:self-stretch">
+                      <textarea
+                        value={input}
+                        onChange={(event) => setInput(event.currentTarget.value)}
+                        placeholder="输入消息或上传附件..."
+                        disabled={!activeSessionId || sending}
+                        aria-label="消息输入框"
+                        className="min-h-[112px] w-full resize-none overflow-y-auto rounded-[22px] border border-default-200/80 bg-background px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60 md:h-full md:min-h-0 md:flex-1"
+                      />
+                    </div>
 
-                  <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-                    <div className="flex flex-col gap-2 md:flex-row md:items-end">
-                      <Button
-                        variant="flat"
-                        startContent={<Paperclip className="h-4 w-4" />}
-                        isDisabled={!activeSessionId || sending}
-                        onPress={openFilePicker}
-                      >
-                        上传附件
-                      </Button>
+                    <div className="flex flex-col gap-1.5 md:min-w-[220px]">
                       <Select
-                        aria-label="本条对话方式"
-                        placeholder="选择本条对话方式"
+                        aria-label="本条运行时"
+                        placeholder="选择运行时"
                         selectedKeys={effectiveTurnRuntimeKey ? new Set([effectiveTurnRuntimeKey]) : new Set()}
                         onSelectionChange={(keys) => {
                           if (keys === 'all') return
@@ -1274,14 +1268,16 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                         size="sm"
                         disallowEmptySelection
                         isDisabled={!activeSessionId || sending || runtimeOptions.length === 0}
-                        className="md:min-w-[260px]"
+                        className="w-full"
                       >
                         {runtimeOptions.map((runtime) => (
                           <SelectItem key={runtime.key}>{runtime.label}</SelectItem>
                         ))}
                       </Select>
+
                       <Select
-                        label="模型"
+                        aria-label="本条模型"
+                        placeholder="选择模型"
                         selectedKeys={effectiveTurnModelId ? new Set([effectiveTurnModelId]) : new Set()}
                         renderValue={() => {
                           const selected = modelsForRuntime(effectiveTurnRuntimeKey).find((model) => model.id === effectiveTurnModelId)
@@ -1295,25 +1291,44 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                         size="sm"
                         disallowEmptySelection
                         isDisabled={!activeSessionId || sending || modelsForRuntime(effectiveTurnRuntimeKey).length === 0}
-                        className="md:min-w-[260px]"
+                        className="w-full"
                       >
                         {modelsForRuntime(effectiveTurnRuntimeKey).map((model) => (
                           <SelectItem key={model.id}>{model.label || model.id} · {model.model}</SelectItem>
                         ))}
                       </Select>
-                    </div>
-                    <div className="flex items-center justify-end gap-2">
-                      {dragActive ? <div className="text-xs text-primary">释放鼠标即可添加附件</div> : null}
-                      <Button
-                        color="primary"
-                        className="min-w-[112px]"
-                        isDisabled={!activeSessionId || sending || (!input.trim() && selectedFiles.length === 0)}
-                        onPress={() => void onSend()}
-                      >
-                        {sending ? '发送中…' : '发送'}
-                      </Button>
+
+                      <div className="flex items-center justify-end gap-2 pt-0.5">
+                        <Button
+                          variant="flat"
+                          size="sm"
+                          radius="full"
+                          isIconOnly
+                          aria-label="上传附件"
+                          title="上传附件"
+                          isDisabled={!activeSessionId || sending}
+                          onPress={openFilePicker}
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          color="primary"
+                          size="sm"
+                          radius="full"
+                          isIconOnly
+                          aria-label={sending ? '发送中' : '发送消息'}
+                          title={sending ? '发送中…' : '发送消息'}
+                          isLoading={sending}
+                          isDisabled={!activeSessionId || sending || (!input.trim() && selectedFiles.length === 0)}
+                          onPress={() => void onSend()}
+                        >
+                          <ArrowUp className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
+
+                  {dragActive ? <div className="mt-2 px-1 text-xs text-primary">释放鼠标即可添加附件</div> : null}
                 </div>
               </div>
             </div>
