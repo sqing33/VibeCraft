@@ -23,6 +23,8 @@ import { BasicSettingsTab } from "./BasicSettingsTab";
 import { CLIToolSettingsTab } from "./CLIToolSettingsTab";
 import { LLMSettingsTab } from "./LLMSettingsTab";
 import { ExpertSettingsTab } from "./ExpertSettingsTab";
+import { MCPSettingsTab } from "./MCPSettingsTab";
+import { SkillSettingsTab } from "./SkillSettingsTab";
 
 function normalizeBaseUrl(raw: string): string {
   const url = (raw ?? "").trim();
@@ -159,7 +161,7 @@ export function SettingsDialog() {
                   classNames={{
                     base: "w-full shrink-0",
                     panel: "h-full min-h-0 flex-1 overflow-y-auto pr-1",
-                    tabList: "grid w-full shrink-0 grid-cols-5",
+                    tabList: "grid w-full shrink-0 grid-cols-7",
                   }}
                 >
                   <Tab key="basic" title="基本设置">
@@ -323,6 +325,14 @@ export function SettingsDialog() {
 
                   <Tab key="cli-tools" title="CLI 工具">
                     <CLIToolSettingsTab />
+                  </Tab>
+
+                  <Tab key="mcp" title="MCP">
+                    <MCPSettingsTab />
+                  </Tab>
+
+                  <Tab key="skills" title="技能">
+                    <SkillSettingsTab />
                   </Tab>
 
                   <Tab key="llm" title="模型">

@@ -35,6 +35,7 @@ type codexAppServerThreadRequest struct {
 	Model            string
 	Cwd              string
 	BaseInstructions string
+	Config           map[string]any
 }
 
 type codexAppServerNotification struct {
@@ -70,22 +71,22 @@ var newCodexAppServerClient = func(ctx context.Context, spec runner.RunSpec) (co
 	return startCodexAppServerClient(ctx, spec)
 }
 
-func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
+func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, cliToolID, modelID *string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
 	if runner.NormalizeCLIFamily(spec.Env["VIBE_TREE_CLI_FAMILY"]) == "codex" {
-		result, err := m.runCodexAppServerTurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, thinkingTranslation)
+		result, err := m.runCodexAppServerTurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, cliToolID, modelID, thinkingTranslation)
 		if err == nil {
 			return result, nil
 		}
 		var early *codexAppServerEarlyFailure
 		if errors.As(err, &early) {
-			return m.runLegacyCLITurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, thinkingTranslation)
+			return m.runLegacyCLITurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, cliToolID, modelID, thinkingTranslation)
 		}
 		return TurnResult{}, err
 	}
-	return m.runLegacyCLITurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, thinkingTranslation)
+	return m.runLegacyCLITurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, cliToolID, modelID, thinkingTranslation)
 }
 
-func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
+func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, cliToolID, modelID *string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
 	artifactDir, err := cliruntime.ChatTurnArtifactDir(sess.ID, userMsg.ID)
 	if err != nil {
 		artifactDir = ""
@@ -103,11 +104,9 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 			return TurnResult{}, &codexAppServerEarlyFailure{err: err}
 		}
 
-		threadReq := codexAppServerThreadRequest{
-			ThreadID:         resumeThreadID,
-			Model:            strings.TrimSpace(spec.Env["VIBE_TREE_MODEL"]),
-			Cwd:              firstNonEmptyTrimmed(strings.TrimSpace(spec.Cwd), strings.TrimSpace(sess.WorkspacePath), "."),
-			BaseInstructions: strings.TrimSpace(spec.Env["VIBE_TREE_SYSTEM_PROMPT"]),
+		threadReq, err := m.buildCodexThreadRequest(sess, spec, expertID, cliToolID, resumeThreadID)
+		if err != nil {
+			return TurnResult{}, err
 		}
 
 		threadID := ""
@@ -198,8 +197,8 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 					_, _ = m.store.UpdateChatSessionDefaults(ctx, store.UpdateChatSessionDefaultsParams{
 						SessionID:    sess.ID,
 						ExpertID:     expertID,
-						CLIToolID:    sess.CLIToolID,
-						ModelID:      sess.ModelID,
+						CLIToolID:    resolvedTurnOptionPointer(cliToolID, spec.Env["VIBE_TREE_CLI_TOOL_ID"], sess.CLIToolID),
+						ModelID:      resolvedTurnOptionPointer(modelID, spec.Env["VIBE_TREE_MODEL_ID"], sess.ModelID),
 						CLISessionID: pointerOrNilString(threadID),
 						Provider:     provider,
 						Model:        model,
@@ -650,6 +649,9 @@ func (c *stdioCodexAppServerClient) StartThread(ctx context.Context, req codexAp
 	if strings.TrimSpace(req.BaseInstructions) != "" {
 		params["baseInstructions"] = strings.TrimSpace(req.BaseInstructions)
 	}
+	if req.Config != nil {
+		params["config"] = req.Config
+	}
 	if err := c.call(ctx, "thread/start", params, &result); err != nil {
 		return "", err
 	}
@@ -671,6 +673,9 @@ func (c *stdioCodexAppServerClient) ResumeThread(ctx context.Context, req codexA
 	}
 	if strings.TrimSpace(req.BaseInstructions) != "" {
 		params["baseInstructions"] = strings.TrimSpace(req.BaseInstructions)
+	}
+	if req.Config != nil {
+		params["config"] = req.Config
 	}
 	if err := c.call(ctx, "thread/resume", params, &result); err != nil {
 		return "", err

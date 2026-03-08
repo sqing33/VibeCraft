@@ -1,12 +1,23 @@
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Chip, Input, Select, SelectItem } from '@heroui/react'
+import { Alert, Button, Chip, Input, Select, SelectItem, Switch } from '@heroui/react'
 import { ArrowUp, Eye, Plus, Trash2, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 import { goToChat } from '@/app/routes'
 import { onWsEnvelope } from '@/lib/wsBus'
-import { chatAttachmentContentUrl, fetchCLIToolSettings, type ChatAttachment, type ChatSession, type CLITool, type LLMModelProfile } from '@/lib/daemon'
+import {
+  chatAttachmentContentUrl,
+  fetchCLIToolSettings,
+  fetchMCPSettings,
+  patchChatSession,
+  type ChatAttachment,
+  type ChatSession,
+  type CLITool,
+  type LLMModelProfile,
+  type MCPServerSetting,
+  type MCPSettings,
+} from '@/lib/daemon'
 import { AttachmentPreviewModal, type AttachmentPreviewState } from '@/app/components/AttachmentPreviewModal'
 import { ChatTurnFeed as ChatTurnFeedView } from '@/app/components/chat/ChatTurnFeed'
 import { canPreviewAttachmentTarget, describeAttachmentPreview } from '@/lib/chatAttachmentPreview'
@@ -97,6 +108,47 @@ const sdkRuntimeLabels = {
 
 const sdkRuntimeProviders = ['openai', 'anthropic'] as const
 
+function normalizeIDList(values?: string[]): string[] {
+  const next: string[] = []
+  const seen = new Set<string>()
+  for (const value of values ?? []) {
+    const trimmed = value.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    next.push(trimmed)
+  }
+  return next
+}
+
+function sameIDList(left: string[], right: string[]): boolean {
+  const leftIDs = normalizeIDList(left)
+  const rightIDs = normalizeIDList(right)
+  if (leftIDs.length !== rightIDs.length) return false
+  const rightSet = new Set(rightIDs)
+  return leftIDs.every((item) => rightSet.has(item))
+}
+
+function toggleIDList(values: string[], target: string): string[] {
+  const normalizedTarget = target.trim()
+  if (!normalizedTarget) return normalizeIDList(values)
+  const next = new Set(normalizeIDList(values))
+  if (next.has(normalizedTarget)) next.delete(normalizedTarget)
+  else next.add(normalizedTarget)
+  return Array.from(next)
+}
+
+function summarizeMCPSelection(selectedIDs: string[], servers: MCPServerSetting[]): string {
+  const selectedSet = new Set(normalizeIDList(selectedIDs))
+  if (selectedSet.size === 0) return '未选择 MCP'
+  const labels = servers
+    .filter((server) => selectedSet.has(server.id))
+    .map((server) => server.label?.trim() || server.id)
+    .filter(Boolean)
+  if (labels.length === 0) return `已选 ${selectedSet.size} 个 MCP`
+  if (labels.length <= 2) return labels.join('、')
+  return `${labels[0]}、${labels[1]} 等 ${labels.length} 个 MCP`
+}
+
 export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const requestedSessionId = props.sessionId?.trim() || ''
   const daemonUrl = useDaemonStore((s) => s.daemonUrl)
@@ -140,6 +192,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const loadMessages = useChatStore((s) => s.loadMessages)
   const loadTurns = useChatStore((s) => s.loadTurns)
   const createSession = useChatStore((s) => s.createSession)
+  const upsertSession = useChatStore((s) => s.upsertSession)
   const sendTurn = useChatStore((s) => s.sendTurn)
   const forkSession = useChatStore((s) => s.forkSession)
   const archiveSession = useChatStore((s) => s.archiveSession)
@@ -155,6 +208,12 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const [turnModelId, setTurnModelId] = useState('')
   const [cliTools, setCliTools] = useState<CLITool[]>([])
   const [toolModels, setToolModels] = useState<LLMModelProfile[]>([])
+  const [mcpSettings, setMCPSettings] = useState<MCPSettings | null>(null)
+  const [mcpLoading, setMCPLoading] = useState(true)
+  const [mcpError, setMCPError] = useState<string | null>(null)
+  const [newSessionMCPServerIDs, setNewSessionMCPServerIDs] = useState<string[]>([])
+  const [sessionMCPDraft, setSessionMCPDraft] = useState<string[]>([])
+  const [sessionMCPSaving, setSessionMCPSaving] = useState(false)
   const messageScrollRef = useRef<HTMLDivElement | null>(null)
   const shouldAutoScrollRef = useRef(true)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -256,6 +315,83 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     if (runtime?.defaultModelId && models.some((model) => model.id === runtime.defaultModelId)) return runtime.defaultModelId
     return models[0]?.id ?? ''
   }, [activeSession?.model, activeSession?.model_id, effectiveTurnRuntimeKey, modelsForRuntime, runtimeOptionsByKey, turnModelId])
+  const effectiveNewRuntime = runtimeOptionsByKey.get(effectiveNewRuntimeKey)
+  const effectiveTurnRuntime = runtimeOptionsByKey.get(effectiveTurnRuntimeKey)
+  const newSessionCliToolId =
+    effectiveNewRuntime?.kind === 'cli' ? effectiveNewRuntime.cliToolId?.trim() || '' : ''
+  const activeSessionCliToolId =
+    activeSession?.cli_tool_id?.trim() ||
+    (effectiveTurnRuntime?.kind === 'cli' ? effectiveTurnRuntime.cliToolId?.trim() || '' : '')
+  const newSessionToolLabel = newSessionCliToolId
+    ? toolsById.get(newSessionCliToolId)?.label || newSessionCliToolId
+    : ''
+  const activeSessionToolLabel = activeSessionCliToolId
+    ? toolsById.get(activeSessionCliToolId)?.label || activeSessionCliToolId
+    : ''
+  const selectableMCPServers = useCallback(
+    (cliToolId?: string) => {
+      const targetToolId = cliToolId?.trim() || ''
+      if (!targetToolId) return [] as MCPServerSetting[]
+      return (mcpSettings?.servers ?? []).filter((server) => {
+        if (!server.enabled) return false
+        return (server.enabled_cli_tool_ids ?? []).includes(targetToolId)
+      })
+    },
+    [mcpSettings?.servers],
+  )
+  const defaultMCPServerIDs = useCallback(
+    (cliToolId?: string) => {
+      const targetToolId = cliToolId?.trim() || ''
+      if (!targetToolId) return [] as string[]
+      return selectableMCPServers(targetToolId)
+        .filter((server) => (server.default_enabled_cli_tool_ids ?? []).includes(targetToolId))
+        .map((server) => server.id)
+    },
+    [selectableMCPServers],
+  )
+  const sanitizeMCPSelection = useCallback(
+    (ids: string[] | undefined, cliToolId?: string) => {
+      const allowedIDs = new Set(selectableMCPServers(cliToolId).map((server) => server.id))
+      if (allowedIDs.size === 0) return [] as string[]
+      return normalizeIDList((ids ?? []).filter((id) => allowedIDs.has(id.trim())))
+    },
+    [selectableMCPServers],
+  )
+  const newSessionMCPServers = useMemo(
+    () => selectableMCPServers(newSessionCliToolId),
+    [newSessionCliToolId, selectableMCPServers],
+  )
+  const activeSessionMCPServers = useMemo(
+    () => selectableMCPServers(activeSessionCliToolId),
+    [activeSessionCliToolId, selectableMCPServers],
+  )
+  const normalizedNewSessionMCPServerIDs = useMemo(
+    () => sanitizeMCPSelection(newSessionMCPServerIDs, newSessionCliToolId),
+    [newSessionCliToolId, newSessionMCPServerIDs, sanitizeMCPSelection],
+  )
+  const normalizedSessionMCPDraft = useMemo(
+    () => sanitizeMCPSelection(sessionMCPDraft, activeSessionCliToolId),
+    [activeSessionCliToolId, sanitizeMCPSelection, sessionMCPDraft],
+  )
+  const sessionMCPBase = useMemo(() => {
+    if (!activeSession) return [] as string[]
+    return sanitizeMCPSelection(
+      activeSession.mcp_server_ids ?? defaultMCPServerIDs(activeSessionCliToolId),
+      activeSessionCliToolId,
+    )
+  }, [activeSession, activeSessionCliToolId, defaultMCPServerIDs, sanitizeMCPSelection])
+  const newSessionMCPSummary = useMemo(
+    () => summarizeMCPSelection(normalizedNewSessionMCPServerIDs, newSessionMCPServers),
+    [newSessionMCPServers, normalizedNewSessionMCPServerIDs],
+  )
+  const activeSessionMCPSummary = useMemo(
+    () => summarizeMCPSelection(normalizedSessionMCPDraft, activeSessionMCPServers),
+    [activeSessionMCPServers, normalizedSessionMCPDraft],
+  )
+  const sessionMCPDirty = useMemo(
+    () => !sameIDList(normalizedSessionMCPDraft, sessionMCPBase),
+    [normalizedSessionMCPDraft, sessionMCPBase],
+  )
 
   const formatModelIdentity = useCallback(
     (meta?: { expert_id?: string; provider?: string; model?: string } | null): string => {
@@ -474,6 +610,54 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       cancelled = true
     }
   }, [daemonUrl])
+
+  useEffect(() => {
+    let cancelled = false
+    setMCPLoading(true)
+    setMCPError(null)
+    void fetchMCPSettings(daemonUrl)
+      .then((settings) => {
+        if (cancelled) return
+        setMCPSettings({
+          ...settings,
+          servers: settings.servers ?? [],
+          tools: settings.tools ?? [],
+        })
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setMCPSettings(null)
+        setMCPError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        if (cancelled) return
+        setMCPLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [daemonUrl])
+
+  useEffect(() => {
+    if (!newSessionCliToolId) {
+      setNewSessionMCPServerIDs([])
+      return
+    }
+    setNewSessionMCPServerIDs(defaultMCPServerIDs(newSessionCliToolId))
+  }, [defaultMCPServerIDs, newSessionCliToolId])
+
+  useEffect(() => {
+    if (!activeSession) {
+      setSessionMCPDraft([])
+      return
+    }
+    setSessionMCPDraft(
+      sanitizeMCPSelection(
+        activeSession.mcp_server_ids ?? defaultMCPServerIDs(activeSessionCliToolId),
+        activeSessionCliToolId,
+      ),
+    )
+  }, [activeSession, activeSessionCliToolId, defaultMCPServerIDs, sanitizeMCPSelection])
 
   const messages = useMemo(
     () => (activeSessionId ? messagesBySession[activeSessionId] ?? [] : []),
@@ -741,6 +925,31 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     [runtimeOptionsByKey],
   )
 
+  const onSaveSessionMCP = async () => {
+    if (!activeSession) return
+    setSessionMCPSaving(true)
+    try {
+      const nextMCPServerIDs = sanitizeMCPSelection(sessionMCPDraft, activeSessionCliToolId)
+      const updated = await patchChatSession(daemonUrl, activeSession.session_id, {
+        mcp_server_ids: nextMCPServerIDs,
+      })
+      upsertSession(updated)
+      setSessionMCPDraft(updated.mcp_server_ids ?? nextMCPServerIDs)
+      toast({
+        title: '会话 MCP 已保存',
+        description: nextMCPServerIDs.length > 0 ? `已选择 ${nextMCPServerIDs.length} 个 MCP` : '当前会话未启用 MCP',
+      })
+    } catch (err: unknown) {
+      toast({
+        variant: 'destructive',
+        title: '保存会话 MCP 失败',
+        description: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setSessionMCPSaving(false)
+    }
+  }
+
   const onCreate = async () => {
     try {
       const selection = buildRuntimeRequest(effectiveNewRuntimeKey, effectiveNewModelId)
@@ -749,12 +958,14 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
         expert_id: selection.expertId,
         cli_tool_id: selection.cliToolId,
         model_id: selection.modelId,
+        mcp_server_ids: sanitizeMCPSelection(newSessionMCPServerIDs, newSessionCliToolId),
       })
       setNewTitle('')
       setInput('')
       setSelectedFiles([])
       setTurnExpertId(inferRuntimeKey(created))
       setTurnModelId(created.model_id || created.model || '')
+      setSessionMCPDraft(created.mcp_server_ids ?? sanitizeMCPSelection(newSessionMCPServerIDs, newSessionCliToolId))
       toast({ title: '会话已创建', description: created.session_id })
       await loadMessages(daemonUrl, created.session_id)
     } catch (err: unknown) {
@@ -776,7 +987,20 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     setSelectedFiles([])
     try {
       const selection = buildRuntimeRequest(effectiveTurnRuntimeKey, effectiveTurnModelId)
-      await sendTurn(daemonUrl, activeSessionId, text, selection.expertId, selection.cliToolId, selection.modelId, draftFiles)
+      const turnMCPServerIDs = sanitizeMCPSelection(
+        normalizedSessionMCPDraft,
+        selection.cliToolId || activeSessionCliToolId,
+      )
+      await sendTurn(
+        daemonUrl,
+        activeSessionId,
+        text,
+        selection.expertId,
+        selection.cliToolId,
+        selection.modelId,
+        draftFiles,
+        turnMCPServerIDs,
+      )
     } catch (err: unknown) {
       setInput(draftInput)
       setSelectedFiles(draftFiles)
@@ -928,6 +1152,73 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                 <SelectItem key={model.id}>{model.label || model.id} · {model.model}</SelectItem>
               ))}
             </Select>
+            <div className="rounded-xl border bg-background/40 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-xs font-medium">会话 MCP</div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">
+                    {newSessionCliToolId
+                      ? `将按 ${newSessionToolLabel} 的绑定规则创建当前会话。`
+                      : '当前选择的不是 CLI 对话方式，MCP 不会注入。'}
+                  </div>
+                </div>
+                {newSessionCliToolId ? <Chip size="sm" variant="flat">{newSessionMCPSummary}</Chip> : null}
+              </div>
+
+              {mcpLoading ? (
+                <div className="mt-3 rounded-xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
+                  MCP 设置加载中…
+                </div>
+              ) : mcpError ? (
+                <div className="mt-3 rounded-xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
+                  MCP 接口暂不可用：{mcpError}
+                </div>
+              ) : !newSessionCliToolId ? (
+                <div className="mt-3 rounded-xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
+                  请选择 CLI 工具后再设置会话 MCP。
+                </div>
+              ) : newSessionMCPServers.length === 0 ? (
+                <div className="mt-3 rounded-xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
+                  当前工具没有可用的 MCP。
+                </div>
+              ) : (
+                <>
+                  <div className="mt-3 space-y-2">
+                    {newSessionMCPServers.map((server) => {
+                      const selected = normalizedNewSessionMCPServerIDs.includes(server.id)
+                      return (
+                        <div key={server.id} className="flex items-center justify-between gap-3 rounded-xl border bg-background/70 px-3 py-2">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium">{server.label?.trim() || server.id}</div>
+                            <div className="mt-1 truncate text-[11px] text-muted-foreground">{server.id}</div>
+                          </div>
+                          <Switch
+                            size="sm"
+                            isSelected={selected}
+                            onValueChange={() => {
+                              setNewSessionMCPServerIDs((prev) =>
+                                sanitizeMCPSelection(toggleIDList(prev, server.id), newSessionCliToolId),
+                              )
+                            }}
+                          >
+                            启用
+                          </Switch>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div className="mt-3 flex justify-end">
+                    <Button
+                      size="sm"
+                      variant="light"
+                      onPress={() => setNewSessionMCPServerIDs(defaultMCPServerIDs(newSessionCliToolId))}
+                    >
+                      恢复工具默认
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
             <Button
               color="primary"
               size="sm"
@@ -1013,6 +1304,84 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
               </Button>
             </div>
           </div>
+
+          {activeSession ? (
+            <div className="shrink-0 border-b bg-background/40 px-5 py-3 md:px-6">
+              <div className="rounded-[24px] border bg-background/70 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold">当前会话 MCP</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {activeSessionCliToolId
+                        ? `当前按 ${activeSessionToolLabel} 绑定，会影响后续 CLI 会话启动与恢复。`
+                        : '当前会话没有 CLI 工具上下文，MCP 仅在 CLI 对话方式下生效。'}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {activeSessionCliToolId ? <Chip size="sm" variant="flat">{activeSessionMCPSummary}</Chip> : null}
+                    <Button
+                      size="sm"
+                      variant="light"
+                      isDisabled={!activeSessionCliToolId || mcpLoading || !!mcpError}
+                      onPress={() => setSessionMCPDraft(defaultMCPServerIDs(activeSessionCliToolId))}
+                    >
+                      恢复默认
+                    </Button>
+                    <Button
+                      size="sm"
+                      color="primary"
+                      isLoading={sessionMCPSaving}
+                      isDisabled={!sessionMCPDirty || mcpLoading || !!mcpError}
+                      onPress={() => void onSaveSessionMCP()}
+                    >
+                      保存到会话
+                    </Button>
+                  </div>
+                </div>
+
+                {mcpLoading ? (
+                  <div className="mt-3 rounded-xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
+                    MCP 设置加载中…
+                  </div>
+                ) : mcpError ? (
+                  <Alert className="mt-3" color="warning" title="MCP 接口暂不可用" description={mcpError} />
+                ) : !activeSessionCliToolId ? (
+                  <div className="mt-3 rounded-xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
+                    当前会话未使用 CLI 工具，因此不会注入 MCP。
+                  </div>
+                ) : activeSessionMCPServers.length === 0 ? (
+                  <div className="mt-3 rounded-xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
+                    当前工具下没有可选 MCP。
+                  </div>
+                ) : (
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    {activeSessionMCPServers.map((server) => {
+                      const selected = normalizedSessionMCPDraft.includes(server.id)
+                      return (
+                        <div key={server.id} className="flex items-center justify-between gap-3 rounded-xl border bg-background/70 px-3 py-2">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium">{server.label?.trim() || server.id}</div>
+                            <div className="mt-1 truncate text-[11px] text-muted-foreground">{server.id}</div>
+                          </div>
+                          <Switch
+                            size="sm"
+                            isSelected={selected}
+                            onValueChange={() => {
+                              setSessionMCPDraft((prev) =>
+                                sanitizeMCPSelection(toggleIDList(prev, server.id), activeSessionCliToolId),
+                              )
+                            }}
+                          >
+                            启用
+                          </Switch>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
 
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background/30">
             <div ref={messageScrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8">

@@ -246,7 +246,7 @@ export type ChatStore = {
   loadTurns: (daemonUrl: string, sessionId: string) => Promise<void>
   createSession: (
     daemonUrl: string,
-    req: { title?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; workspace_path?: string },
+    req: { title?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; workspace_path?: string; mcp_server_ids?: string[] },
   ) => Promise<ChatSession>
   sendTurn: (
     daemonUrl: string,
@@ -256,6 +256,7 @@ export type ChatStore = {
     cliToolId?: string,
     modelId?: string,
     files?: File[],
+    mcpServerIDs?: string[],
   ) => Promise<void>
   compactSession: (daemonUrl: string, sessionId: string) => Promise<void>
   forkSession: (daemonUrl: string, sessionId: string) => Promise<ChatSession>
@@ -487,7 +488,7 @@ export const useChatStore = create<ChatStore>()(
     set({ activeSessionId: session.session_id })
     return session
   },
-  sendTurn: async (daemonUrl, sessionId, input, expertId, cliToolId, modelId, files = []) => {
+  sendTurn: async (daemonUrl, sessionId, input, expertId, cliToolId, modelId, files = [], mcpServerIDs) => {
     set({ sending: true, error: null })
     get().clearStreaming(sessionId)
     get().clearThinking(sessionId)
@@ -508,7 +509,14 @@ export const useChatStore = create<ChatStore>()(
       created_at: now,
     })
     try {
-      await postChatTurn(daemonUrl, sessionId, { input, expert_id: expertId, cli_tool_id: cliToolId, model_id: modelId, files })
+      await postChatTurn(daemonUrl, sessionId, {
+        input,
+        expert_id: expertId,
+        cli_tool_id: cliToolId,
+        model_id: modelId,
+        files,
+        mcp_server_ids: mcpServerIDs,
+      })
       await Promise.all([
         get().loadMessages(daemonUrl, sessionId),
         get().loadTurns(daemonUrl, sessionId),

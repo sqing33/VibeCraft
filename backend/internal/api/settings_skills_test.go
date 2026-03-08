@@ -1,0 +1,91 @@
+package api_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"vibe-tree/backend/internal/config"
+)
+
+func TestSkillSettings_GetAndPut(t *testing.T) {
+	xdg := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("HOME", home)
+	skillPath := filepath.Join(home, ".codex", "skills", "my-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(skillPath, []byte("name: my-skill\ndescription: local skill\n"), 0o644); err != nil {
+		t.Fatalf("write skill file: %v", err)
+	}
+	cfg := config.Default()
+	cfg.CLITools = []config.CLIToolConfig{{ID: "codex", Label: "Codex", ProtocolFamily: "openai", CLIFamily: "codex", Enabled: true}}
+	if err := config.NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
+		t.Fatalf("normalize cli tools: %v", err)
+	}
+	cfgPath, err := config.Path()
+	if err != nil {
+		t.Fatalf("config path: %v", err)
+	}
+	if err := config.SaveTo(cfgPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	env := newTestEnv(t, cfg, 2)
+
+	res, err := http.Get(env.httpSrv.URL + "/api/v1/settings/skills")
+	if err != nil {
+		t.Fatalf("get skill settings: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: %s", res.Status)
+	}
+	var got struct {
+		Skills []struct {
+			ID      string `json:"id"`
+			Enabled bool   `json:"enabled"`
+		} `json:"skills"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	found := false
+	for _, item := range got.Skills {
+		if item.ID == "my-skill" {
+			found = true
+			if !item.Enabled {
+				t.Fatalf("expected discovered skill enabled")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected discovered skill in response")
+	}
+
+	body, _ := json.Marshal(map[string]any{"skills": []map[string]any{{
+		"id":                   "my-skill",
+		"description":          "local skill",
+		"path":                 skillPath,
+		"source":               "codex",
+		"enabled":              true,
+		"enabled_cli_tool_ids": []string{"codex"},
+	}}})
+	req, err := http.NewRequest(http.MethodPut, env.httpSrv.URL+"/api/v1/settings/skills", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("new put request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	putRes, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("put skill settings: %v", err)
+	}
+	defer putRes.Body.Close()
+	if putRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected put status: %s", putRes.Status)
+	}
+}

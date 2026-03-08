@@ -79,10 +79,14 @@
 | `backend/internal/chat/codex_appserver.go` | Codex Chat app-server 客户端：JSON-RPC 握手、`thread/start|resume`、细粒度 delta 映射、结构化 `chat.turn.event` 广播、token usage 与 artifact 写入             |
 | `backend/internal/chat/codex_turn_feed.go` | Codex turn feed 归一化：兼容 `item/*` 与 `codex/event/*`，把 answer/thinking/tool/plan/question/system 分层成结构化聊天事件 |
 | `backend/internal/chat/attachments.go`      | Chat 附件能力：附件类型校验、大小限制、文件落盘、provider 多模态 block 构造、调试输入摘要                                               |
+| `backend/internal/chat/codex_runtime_settings.go` | Codex 线程运行时注入：按会话注入 `config.mcp_servers`，并为 baseInstructions 追加 skill allowlist/path index |
 | `backend/internal/chat/provider_input.go`    | Chat 多模态重建：基于本地消息 + 附件重建 OpenAI/Anthropic provider 输入                                                                |
 | `backend/internal/chat/thinking_translation.go` | Chat 思考过程翻译：按分段阈值缓冲 reasoning、调用翻译模型并广播中文 delta / 失败事件                                             |
 | `backend/internal/config/clitools.go`                | CLI 工具配置：维护 `Codex CLI` / `Claude Code` 的协议绑定、默认模型与命令路径 |
+| `backend/internal/config/mcp_skill_settings.go`     | MCP / Skill 配置归一化与运行时筛选：默认启用集合、有效 MCP 映射、Skill 绑定合并与 expert 交集裁剪 |
 | `backend/internal/api/settings_clitools.go`          | CLI 工具设置 API：读取/保存工具配置与默认模型，供设置页 `CLI 工具` Tab 使用 |
+| `backend/internal/api/settings_mcp.go`               | MCP 设置 API：读取/保存 MCP 注册表、按 CLI 工具启用关系与默认启用关系 |
+| `backend/internal/api/settings_skills.go`            | Skill 设置 API：合并 discovered skills 与持久化绑定，供设置页 `技能` Tab 使用 |
 | `backend/internal/openaicompat/compat.go`   | OpenAI 兼容适配：按模型探测/持久化 `responses` 或 `chat/completions`，并提供 endpoint mismatch 分类与 plain-text 调用帮助         |
 | `backend/internal/workspace/manager.go`    | Workspace 策略管理：`read_only/shared_workspace/git_worktree` 解析、worktree 分配、代码变更检查与 artifact 生成                      |
 | `backend/internal/dag/dag.go`              | DAG 解析与校验：从 master 输出提取第一个 JSON 对象并做 MVP 约束校验（无环/引用存在/expert 校验）                                      |
@@ -111,7 +115,7 @@
 | `ui/src/App.tsx`                           | 前端入口：daemon health + WS 连接管理 + 路由（`#/orchestrations` 主入口、`#/chat`、隐藏兼容的 legacy workflow 路由）                 |
 | `ui/src/app/pages/OrchestrationsPage.tsx`  | Orchestrations 首页：顶部 goal 输入区 + orchestration 列表                                                                            |
 | `ui/src/app/pages/OrchestrationDetailPage.tsx` | Orchestration 详情页：按 round 展示并行 agent 卡片、详情面板、日志、artifact、continue/retry/cancel 控制                    |
-| `ui/src/app/pages/ChatSessionsPage.tsx`    | Chat 会话页：会话列表、结构化 turn feed 渲染、消息流式渲染、发送消息/上传附件、拖拽上传、附件预览、手动压缩/分叉/归档                                       |
+| `ui/src/app/pages/ChatSessionsPage.tsx`    | Chat 会话页：会话列表、结构化 turn feed 渲染、消息流式渲染、发送消息/上传附件、拖拽上传、附件预览、手动压缩/分叉/归档，以及新建/当前会话的 MCP 选择与保存 |
 | `ui/src/app/components/chat/ChatTurnFeed.tsx` | Chat turn feed 组件：按 thinking/tool/plan/question/progress/answer 分层渲染 Codex 运行时条目 |
 | `ui/src/lib/chatTurnFeed.ts`                 | Chat turn feed 类型与 reducer：前端运行时结构化事件应用、thinking 翻译合并与 completed feed 收敛 |
 | `ui/src/app/components/AttachmentPreviewModal.tsx` | Chat 附件预览弹窗：图片/PDF 预览、Markdown 渲染、代码高亮与纯文本展示                                                              |
@@ -119,6 +123,8 @@
 | `ui/src/components/DAGView.tsx`            | React Flow DAG 视图：dagre 自动布局 + 节点按状态上色 + 点击节点联动终端                                                               |
 | `ui/src/components/TerminalPane.tsx`       | xterm.js 封装组件（fit + write/reset 接口）                                                                                           |
 | `ui/src/app/components/CLIToolSettingsTab.tsx` | 系统设置「CLI 工具」Tab：管理 `Codex CLI` / `Claude Code` 的启用状态、默认模型与命令路径                                           |
+| `ui/src/app/components/MCPSettingsTab.tsx`     | 系统设置「MCP」Tab：管理 MCP 注册表、按 CLI 工具启用关系与默认启用关系，并编辑原始 MCP config JSON |
+| `ui/src/app/components/SkillSettingsTab.tsx`   | 系统设置「技能」Tab：展示 discovered skills，统一开关并维护按 CLI 工具的启用绑定 |
 | `ui/src/app/components/LLMSettingsTab.tsx` | 系统设置「模型」Tab：编辑 Sources 与 Models 组成的模型池，供 CLI 工具与 helper SDK 复用                                              |
 | `ui/src/app/components/BasicSettingsTab.tsx` | 系统设置「基本设置」Tab：配置思考过程翻译的 API 源、翻译模型与目标 AI 模型列表                                                     |
 | `ui/src/app/components/ExpertSettingsTab.tsx` | 系统设置「专家」Tab：专家列表、AI 生成专家、生成会话历史、快照发布                                                                   |
@@ -148,6 +154,9 @@
 | 基本设置 / 思考过程翻译            | `backend/internal/api/settings_basic.go`, `backend/internal/config/basic_settings.go`, `backend/internal/api/chat.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/thinking_translation.go`, `backend/internal/chat/timeline_persistence.go`, `backend/internal/store/chat_turns.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/BasicSettingsTab.tsx`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/daemon.ts` |
 | OpenAI 兼容接口自动切换            | `backend/internal/openaicompat/compat.go`, `backend/internal/api/settings_llm_test_call.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/thinking_translation.go`, `backend/internal/runner/sdk_runner.go`, `backend/internal/config/openai_api_style.go` |
 | 专家设置 / AI 创建专家             | `backend/internal/api/settings_experts.go`, `backend/internal/api/settings_expert_sessions.go`, `backend/internal/expertbuilder/service.go`, `backend/internal/skillcatalog/catalog.go`, `.codex/skills/expert-creator/SKILL.md`, `ui/src/app/components/ExpertSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
+| MCP / Skill 设置                    | `backend/internal/api/settings_mcp.go`, `backend/internal/api/settings_skills.go`, `backend/internal/config/mcp_skill_settings.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/MCPSettingsTab.tsx`, `ui/src/app/components/SkillSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
+| Codex MCP/Skill 运行时注入          | `backend/internal/chat/codex_appserver.go`, `backend/internal/chat/codex_runtime_settings.go`, `backend/internal/config/mcp_skill_settings.go`, `backend/internal/expert/expert.go`, `backend/internal/api/chat.go` |
+| Chat 会话 MCP 选择                  | `backend/internal/api/chat.go`, `backend/internal/store/chat.go`, `backend/internal/store/migrate.go`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/daemon.ts` |
 | XDG 配置路径                       | `backend/internal/config/config.go`                                                                                                                                                                                                        |
 | XDG 日志路径                       | `backend/internal/paths/paths.go`                                                                                                                                                                                                          |
 | Expert 配置/模板解析               | `backend/internal/config/config.go`, `backend/internal/expert/expert.go`                                                                                                                                                                   |

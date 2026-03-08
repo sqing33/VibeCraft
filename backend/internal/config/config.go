@@ -10,12 +10,32 @@ import (
 )
 
 type Config struct {
-	Server    ServerConfig    `json:"server"`
-	Execution ExecutionConfig `json:"execution"`
-	Experts   []ExpertConfig  `json:"experts"`
-	CLITools  []CLIToolConfig `json:"cli_tools,omitempty"`
-	Basic     *BasicSettings  `json:"basic,omitempty"`
-	LLM       *LLMSettings    `json:"llm,omitempty"`
+	Server        ServerConfig         `json:"server"`
+	Execution     ExecutionConfig      `json:"execution"`
+	Experts       []ExpertConfig       `json:"experts"`
+	CLITools      []CLIToolConfig      `json:"cli_tools,omitempty"`
+	MCPServers    []MCPServerConfig    `json:"mcp_servers,omitempty"`
+	SkillBindings []SkillBindingConfig `json:"skill_bindings,omitempty"`
+	Basic         *BasicSettings       `json:"basic,omitempty"`
+	LLM           *LLMSettings         `json:"llm,omitempty"`
+}
+
+type MCPServerConfig struct {
+	ID                       string         `json:"id"`
+	Label                    string         `json:"label,omitempty"`
+	Enabled                  bool           `json:"enabled"`
+	EnabledCLIToolIDs        []string       `json:"enabled_cli_tool_ids,omitempty"`
+	DefaultEnabledCLIToolIDs []string       `json:"default_enabled_cli_tool_ids,omitempty"`
+	Config                   map[string]any `json:"config,omitempty"`
+}
+
+type SkillBindingConfig struct {
+	ID                string   `json:"id"`
+	Description       string   `json:"description,omitempty"`
+	Path              string   `json:"path,omitempty"`
+	Source            string   `json:"source,omitempty"`
+	Enabled           bool     `json:"enabled"`
+	EnabledCLIToolIDs []string `json:"enabled_cli_tool_ids,omitempty"`
 }
 
 type ServerConfig struct {
@@ -256,6 +276,15 @@ func Load() (Config, string, error) {
 	if b, err := os.ReadFile(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			applyEnvOverrides(&cfg)
+			if err := NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
+				return Config{}, "", err
+			}
+			if err := NormalizeMCPServers(&cfg.MCPServers, cfg.CLITools); err != nil {
+				return Config{}, "", err
+			}
+			if err := NormalizeSkillBindings(&cfg.SkillBindings, cfg.CLITools); err != nil {
+				return Config{}, "", err
+			}
 			if err := RebuildExperts(&cfg); err != nil {
 				return Config{}, "", err
 			}
@@ -272,7 +301,10 @@ func Load() (Config, string, error) {
 	if err := NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
 		return Config{}, "", err
 	}
-	if err := NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
+	if err := NormalizeMCPServers(&cfg.MCPServers, cfg.CLITools); err != nil {
+		return Config{}, "", err
+	}
+	if err := NormalizeSkillBindings(&cfg.SkillBindings, cfg.CLITools); err != nil {
 		return Config{}, "", err
 	}
 	if err := RebuildExperts(&cfg); err != nil {
@@ -296,6 +328,15 @@ func LoadPersisted() (Config, string, error) {
 
 	if b, err := os.ReadFile(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if err := NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
+				return Config{}, "", err
+			}
+			if err := NormalizeMCPServers(&cfg.MCPServers, cfg.CLITools); err != nil {
+				return Config{}, "", err
+			}
+			if err := NormalizeSkillBindings(&cfg.SkillBindings, cfg.CLITools); err != nil {
+				return Config{}, "", err
+			}
 			if err := RebuildExperts(&cfg); err != nil {
 				return Config{}, "", err
 			}
@@ -308,6 +349,15 @@ func LoadPersisted() (Config, string, error) {
 		}
 	}
 
+	if err := NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
+		return Config{}, "", err
+	}
+	if err := NormalizeMCPServers(&cfg.MCPServers, cfg.CLITools); err != nil {
+		return Config{}, "", err
+	}
+	if err := NormalizeSkillBindings(&cfg.SkillBindings, cfg.CLITools); err != nil {
+		return Config{}, "", err
+	}
 	if err := RebuildExperts(&cfg); err != nil {
 		return Config{}, "", err
 	}

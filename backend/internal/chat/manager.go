@@ -255,7 +255,7 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 	})
 
 	if spec.SDK == nil {
-		result, runErr := m.runCLITurn(ctx, params.Session, turnTimeline, userMsg, modelInput, spec, expertID, provider, model, params.ThinkingTranslation)
+		result, runErr := m.runCLITurn(ctx, params.Session, turnTimeline, userMsg, modelInput, spec, expertID, provider, model, params.CLIToolID, params.ModelID, params.ThinkingTranslation)
 		if runErr == nil {
 			turnCompleted = true
 		}
@@ -311,6 +311,8 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 	_, _ = m.store.UpdateChatSessionDefaults(ctx, store.UpdateChatSessionDefaultsParams{
 		SessionID: params.Session.ID,
 		ExpertID:  expertID,
+		CLIToolID: params.CLIToolID,
+		ModelID:   params.ModelID,
 		Provider:  provider,
 		Model:     model,
 	})
@@ -389,7 +391,7 @@ func (m *Manager) callProviderWithAnchorRetry(ctx context.Context, sess store.Ch
 	return "", "", store.ChatAnchor{}, providerCallMeta{}, err
 }
 
-func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
+func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, cliToolID, modelID *string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
 	if m.runtimeRunner == nil {
 		return TurnResult{}, fmt.Errorf("chat runtime runner not configured")
 	}
@@ -575,8 +577,8 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 	_, _ = m.store.UpdateChatSessionDefaults(ctx, store.UpdateChatSessionDefaultsParams{
 		SessionID:    sess.ID,
 		ExpertID:     expertID,
-		CLIToolID:    sess.CLIToolID,
-		ModelID:      sess.ModelID,
+		CLIToolID:    resolvedTurnOptionPointer(cliToolID, spec.Env["VIBE_TREE_CLI_TOOL_ID"], sess.CLIToolID),
+		ModelID:      resolvedTurnOptionPointer(modelID, spec.Env["VIBE_TREE_MODEL_ID"], sess.ModelID),
 		CLISessionID: pointerOrNilString(cliSessionID),
 		Provider:     provider,
 		Model:        model,
@@ -1737,6 +1739,10 @@ func pointerOrNilString(v string) *string {
 		return nil
 	}
 	return &v
+}
+
+func resolvedTurnOptionPointer(explicit *string, envValue string, fallback *string) *string {
+	return pointerOrNilString(firstNonEmptyTrimmed(pointerStringValue(explicit), envValue, pointerStringValue(fallback)))
 }
 
 func buildCLIIncrementalPrompt(currentUser store.ChatMessage, modelInput string) string {

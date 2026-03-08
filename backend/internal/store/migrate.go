@@ -224,6 +224,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
   cli_tool_id TEXT,
   model_id TEXT,
   cli_session_id TEXT,
+  mcp_server_ids_json TEXT,
   provider TEXT NOT NULL,
   model TEXT NOT NULL,
   workspace_path TEXT NOT NULL,
@@ -948,6 +949,11 @@ func migrateV8(ctx context.Context, tx *sql.Tx) error {
 			return fmt.Errorf("add chat_sessions.cli_session_id: %w", err)
 		}
 	}
+	if !cols["mcp_server_ids_json"] {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE chat_sessions ADD COLUMN mcp_server_ids_json TEXT;`); err != nil {
+			return fmt.Errorf("add chat_sessions.mcp_server_ids_json: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -1054,9 +1060,10 @@ func ensureChatSessionCLIColumns(ctx context.Context, tx *sql.Tx) error {
 		return err
 	}
 	needed := map[string]string{
-		"cli_tool_id":    `ALTER TABLE chat_sessions ADD COLUMN cli_tool_id TEXT;`,
-		"model_id":       `ALTER TABLE chat_sessions ADD COLUMN model_id TEXT;`,
-		"cli_session_id": `ALTER TABLE chat_sessions ADD COLUMN cli_session_id TEXT;`,
+		"cli_tool_id":         `ALTER TABLE chat_sessions ADD COLUMN cli_tool_id TEXT;`,
+		"model_id":            `ALTER TABLE chat_sessions ADD COLUMN model_id TEXT;`,
+		"cli_session_id":      `ALTER TABLE chat_sessions ADD COLUMN cli_session_id TEXT;`,
+		"mcp_server_ids_json": `ALTER TABLE chat_sessions ADD COLUMN mcp_server_ids_json TEXT;`,
 	}
 	for key, stmt := range needed {
 		if cols[key] {

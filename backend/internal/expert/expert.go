@@ -345,6 +345,9 @@ func (r *Registry) ResolveWithOptions(expertID, prompt, cwd string, opts Resolve
 			env["VIBE_TREE_SYSTEM_PROMPT"] = strings.TrimSpace(e.SystemPrompt)
 		}
 		env["VIBE_TREE_MODEL"] = model
+		if strings.TrimSpace(toolID) != "" {
+			env["VIBE_TREE_CLI_TOOL_ID"] = strings.TrimSpace(toolID)
+		}
 		if strings.TrimSpace(e.PrimaryModelID) != "" {
 			env["VIBE_TREE_MODEL_ID"] = strings.TrimSpace(e.PrimaryModelID)
 		}

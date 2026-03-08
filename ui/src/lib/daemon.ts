@@ -157,6 +157,92 @@ export async function putCLIToolSettings(daemonUrl: string, req: CLIToolSettings
   return (await res.json()) as CLIToolSettings
 }
 
+export type MCPServerSetting = {
+  id: string
+  label?: string
+  enabled: boolean
+  enabled_cli_tool_ids: string[]
+  default_enabled_cli_tool_ids: string[]
+  config?: Record<string, unknown>
+}
+
+export type MCPSettings = {
+  servers: MCPServerSetting[]
+  tools: CLITool[]
+}
+
+export type PutMCPSettingsRequest = {
+  servers: MCPServerSetting[]
+}
+
+export async function fetchMCPSettings(daemonUrl: string): Promise<MCPSettings> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/mcp`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as MCPSettings
+}
+
+export async function putMCPSettings(
+  daemonUrl: string,
+  req: PutMCPSettingsRequest,
+): Promise<MCPSettings> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/mcp`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as MCPSettings
+}
+
+export type SkillBindingSetting = {
+  id: string
+  description?: string
+  path?: string
+  source?: string
+  enabled: boolean
+  enabled_cli_tool_ids: string[]
+}
+
+export type SkillSettings = {
+  skills: SkillBindingSetting[]
+  tools: CLITool[]
+}
+
+export type PutSkillSettingsRequest = {
+  skills: SkillBindingSetting[]
+}
+
+export async function fetchSkillSettings(daemonUrl: string): Promise<SkillSettings> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/skills`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as SkillSettings
+}
+
+export async function putSkillSettings(
+  daemonUrl: string,
+  req: PutSkillSettingsRequest,
+): Promise<SkillSettings> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/skills`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as SkillSettings
+}
+
 export type LLMSettings = {
   sources: LLMSource[]
   models: LLMModelProfile[]
@@ -572,6 +658,7 @@ export type ChatSession = {
   cli_tool_id?: string
   model_id?: string
   cli_session_id?: string
+  mcp_server_ids?: string[]
   provider: string
   model: string
   workspace_path: string
@@ -657,7 +744,7 @@ export type ChatTurnTimeline = {
 
 export async function createChatSession(
   daemonUrl: string,
-  req: { title?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; workspace_path?: string },
+  req: { title?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; workspace_path?: string; mcp_server_ids?: string[] },
 ): Promise<ChatSession> {
   const res = await fetch(`${daemonUrl}/api/v1/chat/sessions`, {
     method: 'POST',
@@ -718,7 +805,7 @@ export async function fetchChatTurns(
 export async function postChatTurn(
   daemonUrl: string,
   sessionId: string,
-  req: { input?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; files?: File[] },
+  req: { input?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; files?: File[]; mcp_server_ids?: string[] },
 ): Promise<ChatTurnResult> {
   const hasFiles = Array.isArray(req.files) && req.files.length > 0
   const init: RequestInit = { method: 'POST' }
@@ -734,13 +821,22 @@ export async function postChatTurn(
     if (typeof req.model_id === 'string' && req.model_id.trim()) {
       form.set('model_id', req.model_id)
     }
+    if (Array.isArray(req.mcp_server_ids)) {
+      form.set('mcp_server_ids', JSON.stringify(req.mcp_server_ids))
+    }
     for (const file of req.files ?? []) {
       form.append('files', file)
     }
     init.body = form
   } else {
     init.headers = { 'Content-Type': 'application/json' }
-    init.body = JSON.stringify({ input: req.input ?? '', expert_id: req.expert_id, cli_tool_id: req.cli_tool_id, model_id: req.model_id })
+    init.body = JSON.stringify({
+      input: req.input ?? '',
+      expert_id: req.expert_id,
+      cli_tool_id: req.cli_tool_id,
+      model_id: req.model_id,
+      mcp_server_ids: req.mcp_server_ids,
+    })
   }
   const res = await fetch(`${daemonUrl}/api/v1/chat/sessions/${sessionId}/turns`, init)
   if (!res.ok) {
@@ -793,7 +889,7 @@ export async function postChatFork(
 export async function patchChatSession(
   daemonUrl: string,
   sessionId: string,
-  req: { title?: string; status?: string },
+  req: { title?: string; status?: string; mcp_server_ids?: string[] },
 ): Promise<ChatSession> {
   const res = await fetch(`${daemonUrl}/api/v1/chat/sessions/${sessionId}`, {
     method: 'PATCH',

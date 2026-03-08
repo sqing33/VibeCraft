@@ -25,11 +25,12 @@ import (
 )
 
 type createChatSessionRequest struct {
-	Title         string `json:"title"`
-	ExpertID      string `json:"expert_id"`
-	CLIToolID     string `json:"cli_tool_id"`
-	ModelID       string `json:"model_id"`
-	WorkspacePath string `json:"workspace_path"`
+	Title         string   `json:"title"`
+	ExpertID      string   `json:"expert_id"`
+	CLIToolID     string   `json:"cli_tool_id"`
+	ModelID       string   `json:"model_id"`
+	MCPServerIDs  []string `json:"mcp_server_ids,omitempty"`
+	WorkspacePath string   `json:"workspace_path"`
 }
 
 type llmModelRuntime struct {
@@ -95,11 +96,22 @@ func createChatSessionHandler(deps Deps) gin.HandlerFunc {
 			return
 		}
 
+		cfg, _, err := config.LoadPersisted()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		selectedMCPs := normalizeSelectedMCPServerIDs(req.MCPServerIDs)
+		if selectedMCPs == nil {
+			selectedMCPs = config.DefaultEnabledMCPServerIDs(cfg, firstNonEmptyTrimmed(strings.TrimSpace(req.CLIToolID), resolved.ToolID, expertID))
+		}
+
 		sess, err := deps.Store.CreateChatSession(c.Request.Context(), store.CreateChatSessionParams{
 			Title:         req.Title,
 			ExpertID:      firstNonEmptyTrimmed(resolved.ExpertID, expertID),
 			CLIToolID:     pointerOrNilString(strings.TrimSpace(req.CLIToolID)),
 			ModelID:       pointerOrNilString(strings.TrimSpace(req.ModelID)),
+			MCPServerIDs:  selectedMCPs,
 			Provider:      firstNonEmptyTrimmed(resolved.ProtocolFamily, resolved.Provider),
 			Model:         resolved.Model,
 			WorkspacePath: workspace,
@@ -210,8 +222,9 @@ func listChatTurnsHandler(deps Deps) gin.HandlerFunc {
 }
 
 type patchChatSessionRequest struct {
-	Title  *string `json:"title"`
-	Status *string `json:"status"`
+	Title        *string   `json:"title"`
+	Status       *string   `json:"status"`
+	MCPServerIDs *[]string `json:"mcp_server_ids,omitempty"`
 }
 
 func patchChatSessionHandler(deps Deps) gin.HandlerFunc {
@@ -229,8 +242,9 @@ func patchChatSessionHandler(deps Deps) gin.HandlerFunc {
 			return
 		}
 		sess, err := deps.Store.PatchChatSession(c.Request.Context(), c.Param("id"), store.PatchChatSessionParams{
-			Title:  req.Title,
-			Status: req.Status,
+			Title:        req.Title,
+			Status:       req.Status,
+			MCPServerIDs: normalizeSelectedMCPServerIDPointer(req.MCPServerIDs),
 		})
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -251,10 +265,11 @@ func patchChatSessionHandler(deps Deps) gin.HandlerFunc {
 const maxChatTurnBodyBytes int64 = 24 << 20
 
 type postChatTurnRequest struct {
-	Input     string `json:"input"`
-	ExpertID  string `json:"expert_id"`
-	CLIToolID string `json:"cli_tool_id"`
-	ModelID   string `json:"model_id"`
+	Input        string   `json:"input"`
+	ExpertID     string   `json:"expert_id"`
+	CLIToolID    string   `json:"cli_tool_id"`
+	ModelID      string   `json:"model_id"`
+	MCPServerIDs []string `json:"mcp_server_ids,omitempty"`
 }
 
 func parsePostChatTurnRequest(c *gin.Context) (postChatTurnRequest, []chat.UploadedAttachment, int, error) {
@@ -276,6 +291,9 @@ func parsePostChatTurnRequest(c *gin.Context) (postChatTurnRequest, []chat.Uploa
 		req.ExpertID = c.Request.FormValue("expert_id")
 		req.CLIToolID = c.Request.FormValue("cli_tool_id")
 		req.ModelID = c.Request.FormValue("model_id")
+		if raw := c.Request.FormValue("mcp_server_ids"); strings.TrimSpace(raw) != "" {
+			_ = json.Unmarshal([]byte(raw), &req.MCPServerIDs)
+		}
 		uploads := make([]chat.UploadedAttachment, 0)
 		if c.Request.MultipartForm != nil {
 			for _, header := range c.Request.MultipartForm.File["files"] {
@@ -338,6 +356,21 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
+		}
+		if selectedMCPs := normalizeSelectedMCPServerIDs(req.MCPServerIDs); selectedMCPs != nil {
+			sess, err = deps.Store.PatchChatSession(c.Request.Context(), sessionID, store.PatchChatSessionParams{MCPServerIDs: &selectedMCPs})
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+					return
+				}
+				if errors.Is(err, store.ErrValidation) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		expertID := strings.TrimSpace(req.ExpertID)
 		if strings.TrimSpace(req.CLIToolID) != "" {
@@ -668,4 +701,32 @@ func pointerOrNilString(v string) *string {
 		return nil
 	}
 	return &v
+}
+
+func normalizeSelectedMCPServerIDs(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func normalizeSelectedMCPServerIDPointer(values *[]string) *[]string {
+	if values == nil {
+		return nil
+	}
+	normalized := normalizeSelectedMCPServerIDs(*values)
+	return &normalized
 }
