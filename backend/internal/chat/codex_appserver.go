@@ -24,7 +24,7 @@ type codexAppServerClient interface {
 	Initialize(ctx context.Context) error
 	StartThread(ctx context.Context, req codexAppServerThreadRequest) (string, error)
 	ResumeThread(ctx context.Context, req codexAppServerThreadRequest) (string, error)
-	StartTurn(ctx context.Context, threadID string, prompt string) (string, error)
+	StartTurn(ctx context.Context, threadID string, prompt string, reasoningEffort *string) (string, error)
 	Notifications() <-chan codexAppServerNotification
 	Wait() error
 	Close() error
@@ -71,22 +71,22 @@ var newCodexAppServerClient = func(ctx context.Context, spec runner.RunSpec) (co
 	return startCodexAppServerClient(ctx, spec)
 }
 
-func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, cliToolID, modelID *string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
+func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, cliToolID, modelID, reasoningEffort *string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
 	if runner.NormalizeCLIFamily(spec.Env["VIBE_TREE_CLI_FAMILY"]) == "codex" {
-		result, err := m.runCodexAppServerTurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, cliToolID, modelID, thinkingTranslation)
+		result, err := m.runCodexAppServerTurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, cliToolID, modelID, reasoningEffort, thinkingTranslation)
 		if err == nil {
 			return result, nil
 		}
 		var early *codexAppServerEarlyFailure
 		if errors.As(err, &early) {
-			return m.runLegacyCLITurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, cliToolID, modelID, thinkingTranslation)
+			return m.runLegacyCLITurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, cliToolID, modelID, reasoningEffort, thinkingTranslation)
 		}
 		return TurnResult{}, err
 	}
-	return m.runLegacyCLITurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, cliToolID, modelID, thinkingTranslation)
+	return m.runLegacyCLITurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, cliToolID, modelID, reasoningEffort, thinkingTranslation)
 }
 
-func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, cliToolID, modelID *string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
+func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, cliToolID, modelID, reasoningEffort *string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
 	artifactDir, err := cliruntime.ChatTurnArtifactDir(sess.ID, userMsg.ID)
 	if err != nil {
 		artifactDir = ""
@@ -119,7 +119,7 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 			return TurnResult{}, &codexAppServerEarlyFailure{err: err}
 		}
 
-		if _, err := client.StartTurn(ctx, threadID, prompt); err != nil {
+		if _, err := client.StartTurn(ctx, threadID, prompt, reasoningEffort); err != nil {
 			return TurnResult{}, &codexAppServerEarlyFailure{err: err}
 		}
 
@@ -195,13 +195,14 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 						return TurnResult{}, err
 					}
 					_, _ = m.store.UpdateChatSessionDefaults(ctx, store.UpdateChatSessionDefaultsParams{
-						SessionID:    sess.ID,
-						ExpertID:     expertID,
-						CLIToolID:    resolvedTurnOptionPointer(cliToolID, spec.Env["VIBE_TREE_CLI_TOOL_ID"], sess.CLIToolID),
-						ModelID:      resolvedTurnOptionPointer(modelID, spec.Env["VIBE_TREE_MODEL_ID"], sess.ModelID),
-						CLISessionID: pointerOrNilString(threadID),
-						Provider:     provider,
-						Model:        model,
+						SessionID:       sess.ID,
+						ExpertID:        expertID,
+						CLIToolID:       resolvedTurnOptionPointer(cliToolID, spec.Env["VIBE_TREE_CLI_TOOL_ID"], sess.CLIToolID),
+						ModelID:         resolvedTurnOptionPointer(modelID, spec.Env["VIBE_TREE_MODEL_ID"], sess.ModelID),
+						ReasoningEffort: reasoningEffort,
+						CLISessionID:    pointerOrNilString(threadID),
+						Provider:        provider,
+						Model:           model,
 					})
 					if err := m.completeTurnEntry(ctx, turn.ID, "answer", "answer", finalText, nil); err != nil {
 						return TurnResult{}, err
@@ -683,7 +684,7 @@ func (c *stdioCodexAppServerClient) ResumeThread(ctx context.Context, req codexA
 	return firstNonEmptyTrimmed(result.Thread.ID, req.ThreadID), nil
 }
 
-func (c *stdioCodexAppServerClient) StartTurn(ctx context.Context, threadID string, prompt string) (string, error) {
+func (c *stdioCodexAppServerClient) StartTurn(ctx context.Context, threadID string, prompt string, reasoningEffort *string) (string, error) {
 	var result struct {
 		Turn struct {
 			ID string `json:"id"`
@@ -696,6 +697,9 @@ func (c *stdioCodexAppServerClient) StartTurn(ctx context.Context, threadID stri
 			"text":         prompt,
 			"textElements": []any{},
 		}},
+	}
+	if reasoningEffort != nil && strings.TrimSpace(*reasoningEffort) != "" {
+		params["effort"] = strings.TrimSpace(*reasoningEffort)
 	}
 	if err := c.call(ctx, "turn/start", params, &result); err != nil {
 		return "", err

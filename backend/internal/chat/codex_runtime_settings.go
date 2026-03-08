@@ -45,6 +45,9 @@ func resolveCodexRuntimeSettings(sess store.ChatSession, spec runner.RunSpec, ex
 	if effectiveMCPs != nil {
 		runtimeConfig["mcp_servers"] = effectiveMCPs
 	}
+	if sess.ReasoningEffort != nil && strings.TrimSpace(*sess.ReasoningEffort) != "" {
+		runtimeConfig["model_reasoning_effort"] = strings.TrimSpace(*sess.ReasoningEffort)
+	}
 	effectiveSkills := config.EffectiveSkillCatalogEntries(cfg, cliToolID, expertEnabledSkillIDs(cfg, expertID), skillcatalog.Discover())
 	return codexRuntimeSettings{
 		BaseInstructions: appendCodexSkillInstructions(baseInstructions, effectiveSkills),

@@ -42,7 +42,7 @@ func TestResolveCodexRuntimeSettings_InjectsSelectedMCPsAndSkills(t *testing.T) 
 		t.Fatalf("save config: %v", err)
 	}
 
-	sess := store.ChatSession{WorkspacePath: ".", MCPServerIDs: []string{"filesystem"}}
+	sess := store.ChatSession{WorkspacePath: ".", MCPServerIDs: []string{"filesystem"}, ReasoningEffort: strPtr("high")}
 	spec := runner.RunSpec{Cwd: ".", Env: map[string]string{"VIBE_TREE_SYSTEM_PROMPT": "You are Codex.", "VIBE_TREE_CLI_TOOL_ID": "codex"}}
 	runtime, err := resolveCodexRuntimeSettings(sess, spec, "ui-expert", "codex")
 	if err != nil {
@@ -55,7 +55,12 @@ func TestResolveCodexRuntimeSettings_InjectsSelectedMCPsAndSkills(t *testing.T) 
 	if len(mcp) != 1 || mcp["filesystem"] == nil {
 		t.Fatalf("unexpected mcp config: %#v", mcp)
 	}
+	if runtime.Config["model_reasoning_effort"] != "high" {
+		t.Fatalf("unexpected reasoning effort: %#v", runtime.Config["model_reasoning_effort"])
+	}
 	if !strings.Contains(runtime.BaseInstructions, "[Enabled Skills]") || !strings.Contains(runtime.BaseInstructions, "ui-ux-pro-max") || !strings.Contains(runtime.BaseInstructions, "path=") {
 		t.Fatalf("unexpected base instructions: %s", runtime.BaseInstructions)
 	}
 }
+
+func strPtr(s string) *string { return &s }

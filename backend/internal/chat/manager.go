@@ -69,6 +69,7 @@ type TurnParams struct {
 	ExpertID            string
 	CLIToolID           *string
 	ModelID             *string
+	ReasoningEffort     *string
 	UserInput           string
 	ModelInput          string
 	Attachments         []UploadedAttachment
@@ -215,6 +216,7 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 	if model == "" && spec.SDK != nil {
 		model = strings.TrimSpace(spec.SDK.Model)
 	}
+	reasoningEffort := resolvedTurnOptionPointer(params.ReasoningEffort, "", params.Session.ReasoningEffort)
 
 	userMsg, err := m.store.AppendChatMessage(ctx, store.AppendChatMessageParams{
 		SessionID:   params.Session.ID,
@@ -255,7 +257,7 @@ func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, e
 	})
 
 	if spec.SDK == nil {
-		result, runErr := m.runCLITurn(ctx, params.Session, turnTimeline, userMsg, modelInput, spec, expertID, provider, model, params.CLIToolID, params.ModelID, params.ThinkingTranslation)
+		result, runErr := m.runCLITurn(ctx, params.Session, turnTimeline, userMsg, modelInput, spec, expertID, provider, model, params.CLIToolID, params.ModelID, reasoningEffort, params.ThinkingTranslation)
 		if runErr == nil {
 			turnCompleted = true
 		}
@@ -391,7 +393,7 @@ func (m *Manager) callProviderWithAnchorRetry(ctx context.Context, sess store.Ch
 	return "", "", store.ChatAnchor{}, providerCallMeta{}, err
 }
 
-func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, cliToolID, modelID *string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
+func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, cliToolID, modelID, reasoningEffort *string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
 	if m.runtimeRunner == nil {
 		return TurnResult{}, fmt.Errorf("chat runtime runner not configured")
 	}
@@ -575,13 +577,14 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 		return TurnResult{}, err
 	}
 	_, _ = m.store.UpdateChatSessionDefaults(ctx, store.UpdateChatSessionDefaultsParams{
-		SessionID:    sess.ID,
-		ExpertID:     expertID,
-		CLIToolID:    resolvedTurnOptionPointer(cliToolID, spec.Env["VIBE_TREE_CLI_TOOL_ID"], sess.CLIToolID),
-		ModelID:      resolvedTurnOptionPointer(modelID, spec.Env["VIBE_TREE_MODEL_ID"], sess.ModelID),
-		CLISessionID: pointerOrNilString(cliSessionID),
-		Provider:     provider,
-		Model:        model,
+		SessionID:       sess.ID,
+		ExpertID:        expertID,
+		CLIToolID:       resolvedTurnOptionPointer(cliToolID, spec.Env["VIBE_TREE_CLI_TOOL_ID"], sess.CLIToolID),
+		ModelID:         resolvedTurnOptionPointer(modelID, spec.Env["VIBE_TREE_MODEL_ID"], sess.ModelID),
+		ReasoningEffort: reasoningEffort,
+		CLISessionID:    pointerOrNilString(cliSessionID),
+		Provider:        provider,
+		Model:           model,
 	})
 	if err := m.completeTurnEntry(ctx, turn.ID, "answer", "answer", finalText, nil); err != nil {
 		return TurnResult{}, err

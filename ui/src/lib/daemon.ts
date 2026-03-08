@@ -632,6 +632,7 @@ export type ChatSession = {
   expert_id: string
   cli_tool_id?: string
   model_id?: string
+  reasoning_effort?: string
   cli_session_id?: string
   mcp_server_ids?: string[]
   provider: string
@@ -719,7 +720,7 @@ export type ChatTurnTimeline = {
 
 export async function createChatSession(
   daemonUrl: string,
-  req: { title?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; workspace_path?: string; mcp_server_ids?: string[] },
+  req: { title?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; reasoning_effort?: string; workspace_path?: string; mcp_server_ids?: string[] },
 ): Promise<ChatSession> {
   const res = await fetch(`${daemonUrl}/api/v1/chat/sessions`, {
     method: 'POST',
@@ -780,7 +781,7 @@ export async function fetchChatTurns(
 export async function postChatTurn(
   daemonUrl: string,
   sessionId: string,
-  req: { input?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; files?: File[]; mcp_server_ids?: string[] },
+  req: { input?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; reasoning_effort?: string; files?: File[]; mcp_server_ids?: string[] },
 ): Promise<ChatTurnResult> {
   const hasFiles = Array.isArray(req.files) && req.files.length > 0
   const init: RequestInit = { method: 'POST' }
@@ -796,6 +797,9 @@ export async function postChatTurn(
     if (typeof req.model_id === 'string' && req.model_id.trim()) {
       form.set('model_id', req.model_id)
     }
+    if (typeof req.reasoning_effort === 'string' && req.reasoning_effort.trim()) {
+      form.set('reasoning_effort', req.reasoning_effort)
+    }
     if (Array.isArray(req.mcp_server_ids)) {
       form.set('mcp_server_ids', JSON.stringify(req.mcp_server_ids))
     }
@@ -810,6 +814,7 @@ export async function postChatTurn(
       expert_id: req.expert_id,
       cli_tool_id: req.cli_tool_id,
       model_id: req.model_id,
+      reasoning_effort: req.reasoning_effort,
       mcp_server_ids: req.mcp_server_ids,
     })
   }

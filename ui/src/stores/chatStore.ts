@@ -246,7 +246,7 @@ export type ChatStore = {
   loadTurns: (daemonUrl: string, sessionId: string) => Promise<void>
   createSession: (
     daemonUrl: string,
-    req: { title?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; workspace_path?: string; mcp_server_ids?: string[] },
+    req: { title?: string; expert_id?: string; cli_tool_id?: string; model_id?: string; reasoning_effort?: string; workspace_path?: string; mcp_server_ids?: string[] },
   ) => Promise<ChatSession>
   sendTurn: (
     daemonUrl: string,
@@ -257,6 +257,7 @@ export type ChatStore = {
     modelId?: string,
     files?: File[],
     mcpServerIDs?: string[],
+    reasoningEffort?: string,
   ) => Promise<void>
   compactSession: (daemonUrl: string, sessionId: string) => Promise<void>
   forkSession: (daemonUrl: string, sessionId: string) => Promise<ChatSession>
@@ -488,7 +489,7 @@ export const useChatStore = create<ChatStore>()(
     set({ activeSessionId: session.session_id })
     return session
   },
-  sendTurn: async (daemonUrl, sessionId, input, expertId, cliToolId, modelId, files = [], mcpServerIDs) => {
+  sendTurn: async (daemonUrl, sessionId, input, expertId, cliToolId, modelId, files = [], mcpServerIDs, reasoningEffort) => {
     set({ sending: true, error: null })
     get().clearStreaming(sessionId)
     get().clearThinking(sessionId)
@@ -514,6 +515,7 @@ export const useChatStore = create<ChatStore>()(
         expert_id: expertId,
         cli_tool_id: cliToolId,
         model_id: modelId,
+        reasoning_effort: reasoningEffort,
         files,
         mcp_server_ids: mcpServerIDs,
       })

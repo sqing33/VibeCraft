@@ -182,6 +182,57 @@ func TestChatStoreLifecycle(t *testing.T) {
 	}
 }
 
+func TestChatSessionReasoningEffortPersists(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate store: %v", err)
+	}
+
+	sess, err := st.CreateChatSession(context.Background(), store.CreateChatSessionParams{
+		Title:           "codex-effort",
+		ExpertID:        "codex",
+		Provider:        "cli",
+		Model:           "gpt-5-codex",
+		ReasoningEffort: strPtr("high"),
+		WorkspacePath:   ".",
+	})
+	if err != nil {
+		t.Fatalf("create chat session: %v", err)
+	}
+	if sess.ReasoningEffort == nil || *sess.ReasoningEffort != "high" {
+		t.Fatalf("unexpected create reasoning_effort: %+v", sess)
+	}
+
+	updated, err := st.UpdateChatSessionDefaults(context.Background(), store.UpdateChatSessionDefaultsParams{
+		SessionID:       sess.ID,
+		ExpertID:        sess.ExpertID,
+		Provider:        sess.Provider,
+		Model:           sess.Model,
+		ReasoningEffort: strPtr("xhigh"),
+	})
+	if err != nil {
+		t.Fatalf("update chat session defaults: %v", err)
+	}
+	if updated.ReasoningEffort == nil || *updated.ReasoningEffort != "xhigh" {
+		t.Fatalf("unexpected updated reasoning_effort: %+v", updated)
+	}
+
+	forked, err := st.ForkChatSession(context.Background(), sess.ID, "")
+	if err != nil {
+		t.Fatalf("fork session: %v", err)
+	}
+	if forked.ReasoningEffort == nil || *forked.ReasoningEffort != "xhigh" {
+		t.Fatalf("unexpected forked reasoning_effort: %+v", forked)
+	}
+}
+
 func TestChatStore_ListMessagesHydratesAttachments(t *testing.T) {
 	t.Parallel()
 

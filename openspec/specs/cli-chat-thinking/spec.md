@@ -3,7 +3,6 @@
 ## Purpose
 
 Define how CLI-backed chat turns expose reasoning, planning, tool progress, and other non-final process signals to the user.
-
 ## Requirements
 ### Requirement: CLI chat SHOULD expose available thinking or progress events
 When a CLI tool exposes reasoning, thinking, plan, or tool-progress events during a chat turn, the system MUST map them into user-visible intermediate chat events.
@@ -65,3 +64,15 @@ If no readable summary content exists for that reasoning item, the system MAY us
 #### Scenario: Raw reasoning is used when no summary exists
 - **WHEN** a Codex reasoning item emits raw `item/reasoning/textDelta` content but no readable summary deltas
 - **THEN** the system persists that raw reasoning as the visible thinking content for the timeline
+
+### Requirement: Codex CLI chat MUST support selectable reasoning effort
+When the active chat runtime is Codex CLI, the system MUST allow the user to select a reasoning effort level for the next turn.
+
+The selected effort MUST be persisted as the session's default effort after a successful turn.
+
+#### Scenario: Send Codex turn with selected effort
+- **WHEN** the user selects `xhigh` for a Codex CLI turn
+- **AND** sends a message
+- **THEN** the daemon sends `effort=xhigh` to Codex app-server `turn/start`
+- **AND** the session stores `reasoning_effort=xhigh` for later turns
+

@@ -1,5 +1,9 @@
-## MODIFIED Requirements
+# chat-cli-session-resume Specification
 
+## Purpose
+
+Define how CLI-backed chat sessions persist and reuse native CLI session or thread references across turns, including Codex app-server thread resume behavior.
+## Requirements
 ### Requirement: Chat CLI turns MUST persist and reuse CLI session references
 When a chat turn is executed through a primary CLI tool, the system MUST persist the CLI session/thread reference produced by that tool.
 
@@ -29,3 +33,12 @@ If the native resume attempt fails, the system MUST retry once using locally rec
 #### Scenario: Codex thread resume fails
 - **WHEN** a Codex turn attempts app-server `thread/resume` and the server rejects the thread id
 - **THEN** the system starts a new thread and retries using locally reconstructed prompt input
+
+### Requirement: Codex CLI session resume MUST restore reasoning effort defaults
+When a chat session stores a Codex thread id and a last-used `reasoning_effort`, the system MUST include that effort as `config.model_reasoning_effort` during Codex thread start or resume.
+
+#### Scenario: Codex resume restores reasoning effort default
+- **WHEN** a chat session already stores a Codex thread id and `reasoning_effort`
+- **THEN** the next Codex thread start or resume includes `config.model_reasoning_effort`
+- **AND** only the current turn input is sent in `turn/start`
+

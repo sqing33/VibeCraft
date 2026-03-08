@@ -107,6 +107,15 @@ const sdkRuntimeLabels = {
 } as const
 
 const sdkRuntimeProviders = ['openai', 'anthropic'] as const
+const codexReasoningEffortOptions = ['low', 'medium', 'high', 'xhigh'] as const
+const defaultCodexReasoningEffort = 'medium'
+
+function normalizeCodexReasoningEffort(value?: string): string {
+  const normalized = (value ?? '').trim().toLowerCase()
+  return codexReasoningEffortOptions.includes(normalized as (typeof codexReasoningEffortOptions)[number])
+    ? normalized
+    : defaultCodexReasoningEffort
+}
 
 function normalizeIDList(values?: string[]): string[] {
   const next: string[] = []
@@ -206,6 +215,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const [preview, setPreview] = useState<AttachmentPreviewState | null>(null)
   const [newModelId, setNewModelId] = useState('')
   const [turnModelId, setTurnModelId] = useState('')
+  const [turnReasoningEffort, setTurnReasoningEffort] = useState('')
   const [cliTools, setCliTools] = useState<CLITool[]>([])
   const [toolModels, setToolModels] = useState<LLMModelProfile[]>([])
   const [mcpSettings, setMCPSettings] = useState<MCPSettings | null>(null)
@@ -234,6 +244,14 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     for (const tool of selectableTools) map.set(tool.id, tool)
     return map
   }, [selectableTools])
+  const isCodexToolId = useCallback(
+    (toolId?: string) => {
+      const normalized = toolId?.trim() || ''
+      if (!normalized) return false
+      return (toolsById.get(normalized)?.cli_family || '').trim() === 'codex'
+    },
+    [toolsById],
+  )
   const runtimeOptions = useMemo(() => {
     const options: ChatRuntimeOption[] = selectableTools.map((tool) => ({
       key: `cli:${tool.id}`,
@@ -328,6 +346,13 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const activeSessionToolLabel = activeSessionCliToolId
     ? toolsById.get(activeSessionCliToolId)?.label || activeSessionCliToolId
     : ''
+  const effectiveTurnReasoningEffort = useMemo(
+    () => normalizeCodexReasoningEffort(turnReasoningEffort || activeSession?.reasoning_effort),
+    [activeSession?.reasoning_effort, turnReasoningEffort],
+  )
+  const isTurnCodexRuntime = Boolean(
+    effectiveTurnRuntime?.kind === 'cli' && isCodexToolId(effectiveTurnRuntime.cliToolId),
+  )
   const selectableMCPServers = useCallback(
     (cliToolId?: string) => {
       const targetToolId = cliToolId?.trim() || ''
@@ -416,6 +441,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       setActiveSession(nextSessionId)
       setTurnExpertId(session ? inferRuntimeKey(session) : '')
       setTurnModelId(session?.model_id || session?.model || '')
+      setTurnReasoningEffort(session?.reasoning_effort || '')
       setSelectedFiles([])
       if (options?.updateHash !== false) {
         goToChat(nextSessionId ?? undefined)
@@ -955,6 +981,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
         expert_id: selection.expertId,
         cli_tool_id: selection.cliToolId,
         model_id: selection.modelId,
+        reasoning_effort: selection.cliToolId && isCodexToolId(selection.cliToolId) ? defaultCodexReasoningEffort : undefined,
         mcp_server_ids: sanitizeMCPSelection(newSessionMCPServerIDs, newSessionCliToolId),
       })
       setNewTitle('')
@@ -962,6 +989,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       setSelectedFiles([])
       setTurnExpertId(inferRuntimeKey(created))
       setTurnModelId(created.model_id || created.model || '')
+      setTurnReasoningEffort(created.reasoning_effort || '')
       setSessionMCPDraft(created.mcp_server_ids ?? sanitizeMCPSelection(newSessionMCPServerIDs, newSessionCliToolId))
       toast({ title: '会话已创建', description: created.session_id })
       await loadMessages(daemonUrl, created.session_id)
@@ -997,6 +1025,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
         selection.modelId,
         draftFiles,
         turnMCPServerIDs,
+        selection.cliToolId && isCodexToolId(selection.cliToolId) ? effectiveTurnReasoningEffort : undefined,
       )
     } catch (err: unknown) {
       setInput(draftInput)
@@ -1613,19 +1642,19 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                     </div>
                   ) : null}
 
-                  <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_220px] md:items-stretch">
-                    <div className="min-w-0 md:flex md:min-h-0 md:self-stretch">
+                  <div className="grid items-stretch gap-2 md:grid-cols-[minmax(0,1fr)_156px]">
+                    <div className="min-w-0 md:flex md:min-h-0 md:h-full md:self-stretch">
                       <textarea
                         value={input}
                         onChange={(event) => setInput(event.currentTarget.value)}
                         placeholder="输入消息或上传附件..."
                         disabled={!activeSessionId || sending}
                         aria-label="消息输入框"
-                        className="min-h-[112px] w-full resize-none overflow-y-auto rounded-[22px] border border-default-200/80 bg-background px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60 md:h-full md:min-h-0 md:flex-1"
+                        className="min-h-[96px] w-full resize-none overflow-y-auto rounded-[22px] border border-default-200/80 bg-background px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60 md:h-full md:min-h-0 md:flex-1"
                       />
                     </div>
 
-                    <div className="flex flex-col gap-1.5 md:min-w-[220px]">
+                    <div className="flex flex-col gap-1.5 md:min-w-[156px]">
                       <Select
                         aria-label="本条运行时"
                         placeholder="选择运行时"
@@ -1668,12 +1697,32 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                         ))}
                       </Select>
 
-                      <div className="flex items-center justify-end gap-2 pt-0.5">
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1.5">
+                        <Select
+                          aria-label="思考程度"
+                          placeholder="思考"
+                          selectedKeys={new Set([effectiveTurnReasoningEffort])}
+                          onSelectionChange={(keys) => {
+                            if (keys === 'all') return
+                            const first = keys.values().next().value
+                            if (typeof first === 'string') setTurnReasoningEffort(first)
+                          }}
+                          size="sm"
+                          disallowEmptySelection
+                          isDisabled={!activeSessionId || sending || !isTurnCodexRuntime}
+                          title={isTurnCodexRuntime ? '思考程度' : '仅 Codex CLI 支持思考程度'}
+                          className="min-w-0"
+                        >
+                          {codexReasoningEffortOptions.map((effort) => (
+                            <SelectItem key={effort}>{effort}</SelectItem>
+                          ))}
+                        </Select>
                         <Button
                           variant="flat"
                           size="sm"
                           radius="full"
                           isIconOnly
+                          className="h-8 min-w-8"
                           aria-label="上传附件"
                           title="上传附件"
                           isDisabled={!activeSessionId || sending}
@@ -1686,6 +1735,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                           size="sm"
                           radius="full"
                           isIconOnly
+                          className="h-8 min-w-8"
                           aria-label={sending ? '发送中' : '发送消息'}
                           title={sending ? '发送中…' : '发送消息'}
                           isLoading={sending}

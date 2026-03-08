@@ -22,21 +22,22 @@ const (
 )
 
 type ChatSession struct {
-	ID            string   `json:"session_id"`
-	Title         string   `json:"title"`
-	ExpertID      string   `json:"expert_id"`
-	CLIToolID     *string  `json:"cli_tool_id,omitempty"`
-	ModelID       *string  `json:"model_id,omitempty"`
-	CLISessionID  *string  `json:"cli_session_id,omitempty"`
-	MCPServerIDs  []string `json:"mcp_server_ids,omitempty"`
-	Provider      string   `json:"provider"`
-	Model         string   `json:"model"`
-	WorkspacePath string   `json:"workspace_path"`
-	Status        string   `json:"status"`
-	Summary       *string  `json:"summary,omitempty"`
-	CreatedAt     int64    `json:"created_at"`
-	UpdatedAt     int64    `json:"updated_at"`
-	LastTurn      int64    `json:"last_turn"`
+	ID              string   `json:"session_id"`
+	Title           string   `json:"title"`
+	ExpertID        string   `json:"expert_id"`
+	CLIToolID       *string  `json:"cli_tool_id,omitempty"`
+	ModelID         *string  `json:"model_id,omitempty"`
+	ReasoningEffort *string  `json:"reasoning_effort,omitempty"`
+	CLISessionID    *string  `json:"cli_session_id,omitempty"`
+	MCPServerIDs    []string `json:"mcp_server_ids,omitempty"`
+	Provider        string   `json:"provider"`
+	Model           string   `json:"model"`
+	WorkspacePath   string   `json:"workspace_path"`
+	Status          string   `json:"status"`
+	Summary         *string  `json:"summary,omitempty"`
+	CreatedAt       int64    `json:"created_at"`
+	UpdatedAt       int64    `json:"updated_at"`
+	LastTurn        int64    `json:"last_turn"`
 }
 
 type ChatMessage struct {
@@ -88,15 +89,16 @@ type ChatCompaction struct {
 }
 
 type CreateChatSessionParams struct {
-	Title         string
-	ExpertID      string
-	CLIToolID     *string
-	ModelID       *string
-	CLISessionID  *string
-	MCPServerIDs  []string
-	Provider      string
-	Model         string
-	WorkspacePath string
+	Title           string
+	ExpertID        string
+	CLIToolID       *string
+	ModelID         *string
+	ReasoningEffort *string
+	CLISessionID    *string
+	MCPServerIDs    []string
+	Provider        string
+	Model           string
+	WorkspacePath   string
 }
 
 func (s *Store) CreateChatSession(ctx context.Context, params CreateChatSessionParams) (ChatSession, error) {
@@ -126,33 +128,39 @@ func (s *Store) CreateChatSession(ctx context.Context, params CreateChatSessionP
 	if workspace == "" {
 		workspace = "."
 	}
+	reasoningEffort, err := normalizeChatSessionReasoningEffort(params.ReasoningEffort)
+	if err != nil {
+		return ChatSession{}, err
+	}
 
 	now := time.Now().UnixMilli()
 	session := ChatSession{
-		ID:            id.New("cs_"),
-		Title:         title,
-		ExpertID:      expertID,
-		CLIToolID:     params.CLIToolID,
-		ModelID:       params.ModelID,
-		CLISessionID:  params.CLISessionID,
-		MCPServerIDs:  cloneStringSlice(params.MCPServerIDs),
-		Provider:      provider,
-		Model:         model,
-		WorkspacePath: workspace,
-		Status:        "active",
-		CreatedAt:     now,
-		UpdatedAt:     now,
-		LastTurn:      0,
+		ID:              id.New("cs_"),
+		Title:           title,
+		ExpertID:        expertID,
+		CLIToolID:       params.CLIToolID,
+		ModelID:         params.ModelID,
+		ReasoningEffort: reasoningEffort,
+		CLISessionID:    params.CLISessionID,
+		MCPServerIDs:    cloneStringSlice(params.MCPServerIDs),
+		Provider:        provider,
+		Model:           model,
+		WorkspacePath:   workspace,
+		Status:          "active",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		LastTurn:        0,
 	}
-	_, err := s.db.ExecContext(
+	_, err = s.db.ExecContext(
 		ctx,
-		`INSERT INTO chat_sessions (id, title, expert_id, cli_tool_id, model_id, cli_session_id, mcp_server_ids_json, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0);`,
+		`INSERT INTO chat_sessions (id, title, expert_id, cli_tool_id, model_id, reasoning_effort, cli_session_id, mcp_server_ids_json, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0);`,
 		session.ID,
 		session.Title,
 		session.ExpertID,
 		session.CLIToolID,
 		session.ModelID,
+		session.ReasoningEffort,
 		session.CLISessionID,
 		encodeStringSliceJSON(session.MCPServerIDs),
 		session.Provider,
@@ -177,7 +185,7 @@ func (s *Store) ListChatSessions(ctx context.Context, limit int) ([]ChatSession,
 	}
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT id, title, expert_id, cli_tool_id, model_id, cli_session_id, mcp_server_ids_json, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn
+		`SELECT id, title, expert_id, cli_tool_id, model_id, reasoning_effort, cli_session_id, mcp_server_ids_json, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn
 		   FROM chat_sessions
 		  ORDER BY updated_at DESC
 		  LIMIT ?;`,
@@ -211,7 +219,7 @@ func (s *Store) GetChatSession(ctx context.Context, sessionID string) (ChatSessi
 	}
 	row := s.db.QueryRowContext(
 		ctx,
-		`SELECT id, title, expert_id, cli_tool_id, model_id, cli_session_id, mcp_server_ids_json, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn
+		`SELECT id, title, expert_id, cli_tool_id, model_id, reasoning_effort, cli_session_id, mcp_server_ids_json, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn
 		   FROM chat_sessions
 		  WHERE id = ?
 		  LIMIT 1;`,
@@ -248,7 +256,7 @@ func (s *Store) PatchChatSession(ctx context.Context, sessionID string, patch Pa
 
 	row := tx.QueryRowContext(
 		ctx,
-		`SELECT id, title, expert_id, cli_tool_id, model_id, cli_session_id, mcp_server_ids_json, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn
+		`SELECT id, title, expert_id, cli_tool_id, model_id, reasoning_effort, cli_session_id, mcp_server_ids_json, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn
 		   FROM chat_sessions
 		  WHERE id = ?
 		  LIMIT 1;`,
@@ -302,14 +310,15 @@ func (s *Store) PatchChatSession(ctx context.Context, sessionID string, patch Pa
 }
 
 type UpdateChatSessionDefaultsParams struct {
-	SessionID    string
-	ExpertID     string
-	CLIToolID    *string
-	ModelID      *string
-	CLISessionID *string
-	MCPServerIDs *[]string
-	Provider     string
-	Model        string
+	SessionID       string
+	ExpertID        string
+	CLIToolID       *string
+	ModelID         *string
+	ReasoningEffort *string
+	CLISessionID    *string
+	MCPServerIDs    *[]string
+	Provider        string
+	Model           string
 }
 
 func (s *Store) UpdateChatSessionDefaults(ctx context.Context, params UpdateChatSessionDefaultsParams) (ChatSession, error) {
@@ -335,16 +344,21 @@ func (s *Store) UpdateChatSessionDefaults(ctx context.Context, params UpdateChat
 	if model == "" {
 		return ChatSession{}, fmt.Errorf("%w: model is required", ErrValidation)
 	}
+	reasoningEffort, err := normalizeChatSessionReasoningEffort(params.ReasoningEffort)
+	if err != nil {
+		return ChatSession{}, err
+	}
 
 	now := time.Now().UnixMilli()
 	res, err := s.db.ExecContext(
 		ctx,
 		`UPDATE chat_sessions
-		    SET expert_id = ?, cli_tool_id = ?, model_id = ?, cli_session_id = COALESCE(?, cli_session_id), mcp_server_ids_json = COALESCE(?, mcp_server_ids_json), provider = ?, model = ?, updated_at = ?
+		    SET expert_id = ?, cli_tool_id = ?, model_id = ?, reasoning_effort = COALESCE(?, reasoning_effort), cli_session_id = COALESCE(?, cli_session_id), mcp_server_ids_json = COALESCE(?, mcp_server_ids_json), provider = ?, model = ?, updated_at = ?
 		  WHERE id = ?;`,
 		expertID,
 		params.CLIToolID,
 		params.ModelID,
+		reasoningEffort,
 		params.CLISessionID,
 		encodeStringSliceJSONPointer(params.MCPServerIDs),
 		provider,
@@ -837,21 +851,22 @@ func (s *Store) ForkChatSession(ctx context.Context, sessionID string, title str
 	}
 	now := time.Now().UnixMilli()
 	fork := ChatSession{
-		ID:            id.New("cs_"),
-		Title:         nextTitle,
-		ExpertID:      source.ExpertID,
-		CLIToolID:     source.CLIToolID,
-		ModelID:       source.ModelID,
-		CLISessionID:  nil,
-		MCPServerIDs:  cloneStringSlice(source.MCPServerIDs),
-		Provider:      source.Provider,
-		Model:         source.Model,
-		WorkspacePath: source.WorkspacePath,
-		Status:        "active",
-		Summary:       source.Summary,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-		LastTurn:      0,
+		ID:              id.New("cs_"),
+		Title:           nextTitle,
+		ExpertID:        source.ExpertID,
+		CLIToolID:       source.CLIToolID,
+		ModelID:         source.ModelID,
+		ReasoningEffort: source.ReasoningEffort,
+		CLISessionID:    nil,
+		MCPServerIDs:    cloneStringSlice(source.MCPServerIDs),
+		Provider:        source.Provider,
+		Model:           source.Model,
+		WorkspacePath:   source.WorkspacePath,
+		Status:          "active",
+		Summary:         source.Summary,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		LastTurn:        0,
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -860,13 +875,14 @@ func (s *Store) ForkChatSession(ctx context.Context, sessionID string, title str
 	defer tx.Rollback()
 	_, err = tx.ExecContext(
 		ctx,
-		`INSERT INTO chat_sessions (id, title, expert_id, cli_tool_id, model_id, cli_session_id, mcp_server_ids_json, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO chat_sessions (id, title, expert_id, cli_tool_id, model_id, reasoning_effort, cli_session_id, mcp_server_ids_json, provider, model, workspace_path, status, summary, created_at, updated_at, last_turn)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		fork.ID,
 		fork.Title,
 		fork.ExpertID,
 		fork.CLIToolID,
 		fork.ModelID,
+		fork.ReasoningEffort,
 		fork.CLISessionID,
 		encodeStringSliceJSON(fork.MCPServerIDs),
 		fork.Provider,
@@ -947,6 +963,7 @@ func scanChatSession(s scanner) (ChatSession, error) {
 		&session.ExpertID,
 		&session.CLIToolID,
 		&session.ModelID,
+		&session.ReasoningEffort,
 		&session.CLISessionID,
 		&rawMCPServerIDs,
 		&session.Provider,
@@ -1000,6 +1017,22 @@ func encodeStringSliceJSONPointer(values *[]string) *string {
 		return nil
 	}
 	return encodeStringSliceJSON(*values)
+}
+
+func normalizeChatSessionReasoningEffort(value *string) (*string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	effort := strings.ToLower(strings.TrimSpace(*value))
+	if effort == "" {
+		return nil, nil
+	}
+	switch effort {
+	case "none", "minimal", "low", "medium", "high", "xhigh":
+		return &effort, nil
+	default:
+		return nil, fmt.Errorf("%w: invalid reasoning_effort %q", ErrValidation, *value)
+	}
 }
 
 func scanChatMessage(s scanner) (ChatMessage, error) {

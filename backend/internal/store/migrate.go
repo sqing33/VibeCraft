@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const schemaVersion = 10
+const schemaVersion = 11
 
 // Migrate 功能：执行 state DB schema 迁移（MVP：使用 PRAGMA user_version 管理版本）。
 // 参数/返回：ctx 控制超时；成功返回 nil。
@@ -112,12 +112,12 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("set user_version=10: %w", err)
 		}
 	}
-	if userVersion < 10 {
-		if err := migrateV10(ctx, tx); err != nil {
+	if userVersion < 11 {
+		if err := migrateV11(ctx, tx); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 10;"); err != nil {
-			return fmt.Errorf("set user_version=10: %w", err)
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 11;"); err != nil {
+			return fmt.Errorf("set user_version=11: %w", err)
 		}
 	}
 
@@ -223,6 +223,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
   expert_id TEXT NOT NULL,
   cli_tool_id TEXT,
   model_id TEXT,
+  reasoning_effort TEXT,
   cli_session_id TEXT,
   mcp_server_ids_json TEXT,
   provider TEXT NOT NULL,
@@ -1047,6 +1048,27 @@ func migrateV10(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
+func migrateV11(ctx context.Context, tx *sql.Tx) error {
+	exists, err := tableExists(ctx, tx, "chat_sessions")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	cols, err := tableColumns(ctx, tx, "chat_sessions")
+	if err != nil {
+		return err
+	}
+	if cols["reasoning_effort"] {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE chat_sessions ADD COLUMN reasoning_effort TEXT;`); err != nil {
+		return fmt.Errorf("add chat_sessions.reasoning_effort: %w", err)
+	}
+	return nil
+}
+
 func ensureChatSessionCLIColumns(ctx context.Context, tx *sql.Tx) error {
 	exists, err := tableExists(ctx, tx, "chat_sessions")
 	if err != nil {
@@ -1064,6 +1086,7 @@ func ensureChatSessionCLIColumns(ctx context.Context, tx *sql.Tx) error {
 		"model_id":            `ALTER TABLE chat_sessions ADD COLUMN model_id TEXT;`,
 		"cli_session_id":      `ALTER TABLE chat_sessions ADD COLUMN cli_session_id TEXT;`,
 		"mcp_server_ids_json": `ALTER TABLE chat_sessions ADD COLUMN mcp_server_ids_json TEXT;`,
+		"reasoning_effort":    `ALTER TABLE chat_sessions ADD COLUMN reasoning_effort TEXT;`,
 	}
 	for key, stmt := range needed {
 		if cols[key] {

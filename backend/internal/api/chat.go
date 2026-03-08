@@ -25,12 +25,13 @@ import (
 )
 
 type createChatSessionRequest struct {
-	Title         string   `json:"title"`
-	ExpertID      string   `json:"expert_id"`
-	CLIToolID     string   `json:"cli_tool_id"`
-	ModelID       string   `json:"model_id"`
-	MCPServerIDs  []string `json:"mcp_server_ids,omitempty"`
-	WorkspacePath string   `json:"workspace_path"`
+	Title           string   `json:"title"`
+	ExpertID        string   `json:"expert_id"`
+	CLIToolID       string   `json:"cli_tool_id"`
+	ModelID         string   `json:"model_id"`
+	ReasoningEffort string   `json:"reasoning_effort"`
+	MCPServerIDs    []string `json:"mcp_server_ids,omitempty"`
+	WorkspacePath   string   `json:"workspace_path"`
 }
 
 type llmModelRuntime struct {
@@ -80,6 +81,11 @@ func createChatSessionHandler(deps Deps) gin.HandlerFunc {
 		if workspace == "" {
 			workspace = "."
 		}
+		reasoningEffort, err := normalizeReasoningEffortValue(req.ReasoningEffort)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 
 		resolved, err := deps.Experts.ResolveWithOptions(expertID, "", workspace, expert.ResolveOptions{CLIToolID: strings.TrimSpace(req.CLIToolID), ModelID: strings.TrimSpace(req.ModelID)})
 		if err != nil {
@@ -107,14 +113,15 @@ func createChatSessionHandler(deps Deps) gin.HandlerFunc {
 		}
 
 		sess, err := deps.Store.CreateChatSession(c.Request.Context(), store.CreateChatSessionParams{
-			Title:         req.Title,
-			ExpertID:      firstNonEmptyTrimmed(resolved.ExpertID, expertID),
-			CLIToolID:     pointerOrNilString(strings.TrimSpace(req.CLIToolID)),
-			ModelID:       pointerOrNilString(strings.TrimSpace(req.ModelID)),
-			MCPServerIDs:  selectedMCPs,
-			Provider:      firstNonEmptyTrimmed(resolved.ProtocolFamily, resolved.Provider),
-			Model:         resolved.Model,
-			WorkspacePath: workspace,
+			Title:           req.Title,
+			ExpertID:        firstNonEmptyTrimmed(resolved.ExpertID, expertID),
+			CLIToolID:       pointerOrNilString(strings.TrimSpace(req.CLIToolID)),
+			ModelID:         pointerOrNilString(strings.TrimSpace(req.ModelID)),
+			ReasoningEffort: pointerOrNilString(reasoningEffort),
+			MCPServerIDs:    selectedMCPs,
+			Provider:        firstNonEmptyTrimmed(resolved.ProtocolFamily, resolved.Provider),
+			Model:           resolved.Model,
+			WorkspacePath:   workspace,
 		})
 		if err != nil {
 			if errors.Is(err, store.ErrValidation) {
@@ -265,11 +272,12 @@ func patchChatSessionHandler(deps Deps) gin.HandlerFunc {
 const maxChatTurnBodyBytes int64 = 24 << 20
 
 type postChatTurnRequest struct {
-	Input        string   `json:"input"`
-	ExpertID     string   `json:"expert_id"`
-	CLIToolID    string   `json:"cli_tool_id"`
-	ModelID      string   `json:"model_id"`
-	MCPServerIDs []string `json:"mcp_server_ids,omitempty"`
+	Input           string   `json:"input"`
+	ExpertID        string   `json:"expert_id"`
+	CLIToolID       string   `json:"cli_tool_id"`
+	ModelID         string   `json:"model_id"`
+	ReasoningEffort string   `json:"reasoning_effort"`
+	MCPServerIDs    []string `json:"mcp_server_ids,omitempty"`
 }
 
 func parsePostChatTurnRequest(c *gin.Context) (postChatTurnRequest, []chat.UploadedAttachment, int, error) {
@@ -291,6 +299,7 @@ func parsePostChatTurnRequest(c *gin.Context) (postChatTurnRequest, []chat.Uploa
 		req.ExpertID = c.Request.FormValue("expert_id")
 		req.CLIToolID = c.Request.FormValue("cli_tool_id")
 		req.ModelID = c.Request.FormValue("model_id")
+		req.ReasoningEffort = c.Request.FormValue("reasoning_effort")
 		if raw := c.Request.FormValue("mcp_server_ids"); strings.TrimSpace(raw) != "" {
 			_ = json.Unmarshal([]byte(raw), &req.MCPServerIDs)
 		}
@@ -340,6 +349,11 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 		req, uploads, status, err := parsePostChatTurnRequest(c)
 		if err != nil {
 			c.JSON(status, gin.H{"error": err.Error()})
+			return
+		}
+		reasoningEffort, err := normalizeReasoningEffortValue(req.ReasoningEffort)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		userText, providerInput := chat.PrepareTurnInputs(req.Input, len(uploads))
@@ -403,6 +417,7 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 			ExpertID:            firstNonEmptyTrimmed(resolved.ExpertID, expertID),
 			CLIToolID:           pointerOrNilString(firstNonEmptyTrimmed(strings.TrimSpace(req.CLIToolID), resolved.ToolID)),
 			ModelID:             pointerOrNilString(strings.TrimSpace(req.ModelID)),
+			ReasoningEffort:     pointerOrNilString(reasoningEffort),
 			UserInput:           userText,
 			ModelInput:          modelInput,
 			Attachments:         uploads,
@@ -701,6 +716,19 @@ func pointerOrNilString(v string) *string {
 		return nil
 	}
 	return &v
+}
+
+func normalizeReasoningEffortValue(value string) (string, error) {
+	effort := strings.ToLower(strings.TrimSpace(value))
+	if effort == "" {
+		return "", nil
+	}
+	switch effort {
+	case "none", "minimal", "low", "medium", "high", "xhigh":
+		return effort, nil
+	default:
+		return "", fmt.Errorf("%w: invalid reasoning_effort %q", store.ErrValidation, value)
+	}
 }
 
 func normalizeSelectedMCPServerIDs(values []string) []string {
