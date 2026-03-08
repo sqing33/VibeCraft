@@ -73,6 +73,28 @@ type ChatSessionsPageProps = {
   sessionId?: string
 }
 
+type RuntimeSelectionMeta = {
+  expert_id?: string
+  provider?: string
+  cli_tool_id?: string
+} | null | undefined
+
+type ChatRuntimeOption = {
+  key: string
+  label: string
+  kind: 'cli' | 'sdk'
+  provider: string
+  cliToolId?: string
+  defaultModelId?: string
+}
+
+const sdkRuntimeLabels = {
+  openai: 'OpenAI SDK',
+  anthropic: 'Anthropic SDK',
+} as const
+
+const sdkRuntimeProviders = ['openai', 'anthropic'] as const
+
 export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const requestedSessionId = props.sessionId?.trim() || ''
   const daemonUrl = useDaemonStore((s) => s.daemonUrl)
@@ -144,62 +166,98 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     for (const tool of selectableTools) map.set(tool.id, tool)
     return map
   }, [selectableTools])
-  const defaultSelectableExpertId = selectableTools[0]?.id ?? ''
-  const inferToolId = useCallback(
-    (meta?: { expert_id?: string; provider?: string } | null) => {
+  const runtimeOptions = useMemo(() => {
+    const options: ChatRuntimeOption[] = selectableTools.map((tool) => ({
+      key: `cli:${tool.id}`,
+      label: tool.label,
+      kind: 'cli',
+      provider: (tool.protocol_family || '').trim(),
+      cliToolId: tool.id,
+      defaultModelId: tool.default_model_id,
+    }))
+    for (const provider of sdkRuntimeProviders) {
+      if (!toolModels.some((model) => (model.provider || '').trim() === provider)) continue
+      options.push({
+        key: `sdk:${provider}`,
+        label: sdkRuntimeLabels[provider],
+        kind: 'sdk',
+        provider,
+      })
+    }
+    return options
+  }, [selectableTools, toolModels])
+  const runtimeOptionsByKey = useMemo(() => {
+    const map = new Map<string, ChatRuntimeOption>()
+    for (const option of runtimeOptions) map.set(option.key, option)
+    return map
+  }, [runtimeOptions])
+  const defaultSelectableRuntimeKey = runtimeOptions[0]?.key ?? ''
+  const inferRuntimeKey = useCallback(
+    (meta?: RuntimeSelectionMeta) => {
+      const cliToolId = meta?.cli_tool_id?.trim() || ''
+      if (cliToolId && runtimeOptionsByKey.has(`cli:${cliToolId}`)) return `cli:${cliToolId}`
       const explicit = meta?.expert_id?.trim() || ''
-      if (explicit && toolsById.has(explicit)) return explicit
+      if (explicit && runtimeOptionsByKey.has(`cli:${explicit}`)) return `cli:${explicit}`
       const expert = explicit ? expertsById.get(explicit) : undefined
-      if (expert?.cli_family === 'claude') return 'claude'
-      if (expert?.cli_family === 'codex') return 'codex'
-      const provider = (meta?.provider?.trim() || '').toLowerCase()
-      if (provider === 'anthropic') return 'claude'
-      if (provider === 'openai') return 'codex'
-      return defaultSelectableExpertId
+      if (expert?.cli_family === 'claude' && runtimeOptionsByKey.has('cli:claude')) return 'cli:claude'
+      if (expert?.cli_family === 'codex' && runtimeOptionsByKey.has('cli:codex')) return 'cli:codex'
+      const provider = (meta?.provider?.trim() || expert?.provider || '').toLowerCase()
+      if ((provider === 'openai' || provider === 'anthropic') && runtimeOptionsByKey.has(`sdk:${provider}`)) {
+        return `sdk:${provider}`
+      }
+      if (provider === 'anthropic' && runtimeOptionsByKey.has('cli:claude')) return 'cli:claude'
+      if (provider === 'openai' && runtimeOptionsByKey.has('cli:codex')) return 'cli:codex'
+      return defaultSelectableRuntimeKey
     },
-    [defaultSelectableExpertId, expertsById, toolsById],
+    [defaultSelectableRuntimeKey, expertsById, runtimeOptionsByKey],
   )
-  const effectiveNewExpertId =
-    newExpertId && selectableTools.some((tool) => tool.id === newExpertId)
+  const effectiveNewRuntimeKey =
+    newExpertId && runtimeOptionsByKey.has(newExpertId)
       ? newExpertId
-      : defaultSelectableExpertId
-  const effectiveTurnExpertId =
-    turnExpertId && selectableTools.some((tool) => tool.id === turnExpertId)
+      : defaultSelectableRuntimeKey
+  const effectiveTurnRuntimeKey =
+    turnExpertId && runtimeOptionsByKey.has(turnExpertId)
       ? turnExpertId
-      : inferToolId(activeSession)
-  const modelsForTool = useCallback(
-    (toolId: string) => {
-      const tool = toolsById.get(toolId)
-      if (!tool) return [] as LLMModelProfile[]
-      return toolModels.filter((model) => (model.provider || '').trim() === tool.protocol_family)
+      : inferRuntimeKey(activeSession)
+  const modelsForRuntime = useCallback(
+    (runtimeKey: string) => {
+      const runtime = runtimeOptionsByKey.get(runtimeKey)
+      if (!runtime) return [] as LLMModelProfile[]
+      return toolModels.filter((model) => (model.provider || '').trim() === runtime.provider)
     },
-    [toolModels, toolsById],
+    [runtimeOptionsByKey, toolModels],
   )
   const effectiveNewModelId = useMemo(() => {
-    const models = modelsForTool(effectiveNewExpertId)
+    const models = modelsForRuntime(effectiveNewRuntimeKey)
     if (newModelId && models.some((model) => model.id === newModelId)) return newModelId
-    const tool = toolsById.get(effectiveNewExpertId)
-    if (tool?.default_model_id && models.some((model) => model.id === tool.default_model_id)) return tool.default_model_id
+    const runtime = runtimeOptionsByKey.get(effectiveNewRuntimeKey)
+    if (runtime?.defaultModelId && models.some((model) => model.id === runtime.defaultModelId)) return runtime.defaultModelId
     return models[0]?.id ?? ''
-  }, [effectiveNewExpertId, modelsForTool, newModelId, toolsById])
+  }, [effectiveNewRuntimeKey, modelsForRuntime, newModelId, runtimeOptionsByKey])
   const effectiveTurnModelId = useMemo(() => {
-    const models = modelsForTool(effectiveTurnExpertId)
+    const models = modelsForRuntime(effectiveTurnRuntimeKey)
     if (turnModelId && models.some((model) => model.id === turnModelId)) return turnModelId
+    if (activeSession?.model_id && models.some((model) => model.id === activeSession.model_id)) {
+      return activeSession.model_id
+    }
     if (activeSession?.model && models.some((model) => model.model === activeSession.model || model.id === activeSession.model)) {
       return models.find((model) => model.model === activeSession.model || model.id === activeSession.model)?.id ?? ''
     }
-    const tool = toolsById.get(effectiveTurnExpertId)
-    if (tool?.default_model_id && models.some((model) => model.id === tool.default_model_id)) return tool.default_model_id
+    const runtime = runtimeOptionsByKey.get(effectiveTurnRuntimeKey)
+    if (runtime?.defaultModelId && models.some((model) => model.id === runtime.defaultModelId)) return runtime.defaultModelId
     return models[0]?.id ?? ''
-  }, [activeSession?.model, effectiveTurnExpertId, modelsForTool, toolsById, turnModelId])
+  }, [activeSession?.model, activeSession?.model_id, effectiveTurnRuntimeKey, modelsForRuntime, runtimeOptionsByKey, turnModelId])
 
   const formatModelIdentity = useCallback(
     (meta?: { expert_id?: string; provider?: string; model?: string } | null): string => {
       if (!meta) return ''
       const expertId = meta.expert_id?.trim() || ''
+      const runtime = runtimeOptionsByKey.get(inferRuntimeKey(meta))
       const tool = expertId ? toolsById.get(expertId) : undefined
       const expert = expertId ? expertsById.get(expertId) : undefined
-      const label = tool?.label || expert?.label || expertId
+      const label = runtime?.kind === 'cli'
+        ? tool?.label || runtime.label || expert?.label || expertId
+        : expert?.label || runtime?.label || tool?.label || expertId
       const provider = (meta.provider?.trim() || tool?.protocol_family || expert?.provider || '').trim()
       const model = (meta.model?.trim() || expert?.model || '').trim()
       const parts: string[] = []
@@ -207,21 +265,21 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       if (provider && model) parts.push(`${provider}/${model}`)
       return parts.join(' · ')
     },
-    [expertsById, toolsById],
+    [expertsById, inferRuntimeKey, runtimeOptionsByKey, toolsById],
   )
 
   const selectSession = useCallback(
     (session: ChatSession | null, options?: { updateHash?: boolean }) => {
       const nextSessionId = session?.session_id ?? null
       setActiveSession(nextSessionId)
-      setTurnExpertId(session ? inferToolId(session) : '')
+      setTurnExpertId(session ? inferRuntimeKey(session) : '')
       setTurnModelId(session?.model_id || session?.model || '')
       setSelectedFiles([])
       if (options?.updateHash !== false) {
         goToChat(nextSessionId ?? undefined)
       }
     },
-    [inferToolId, setActiveSession],
+    [inferRuntimeKey, setActiveSession],
   )
 
   const appendSelectedFiles = useCallback((files: FileList | null) => {
@@ -622,17 +680,42 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     refreshSessions,
   ])
 
+  const buildRuntimeRequest = useCallback(
+    (runtimeKey: string, modelId: string) => {
+      const runtime = runtimeOptionsByKey.get(runtimeKey)
+      const resolvedModelId = modelId.trim() || undefined
+      if (!runtime) {
+        return { expertId: undefined, cliToolId: undefined, modelId: resolvedModelId }
+      }
+      if (runtime.kind === 'cli') {
+        return {
+          expertId: undefined,
+          cliToolId: runtime.cliToolId?.trim() || undefined,
+          modelId: resolvedModelId,
+        }
+      }
+      return {
+        expertId: resolvedModelId,
+        cliToolId: undefined,
+        modelId: resolvedModelId,
+      }
+    },
+    [runtimeOptionsByKey],
+  )
+
   const onCreate = async () => {
     try {
+      const selection = buildRuntimeRequest(effectiveNewRuntimeKey, effectiveNewModelId)
       const created = await createSession(daemonUrl, {
         title: newTitle.trim() || undefined,
-        cli_tool_id: effectiveNewExpertId.trim() || undefined,
-        model_id: effectiveNewModelId.trim() || undefined,
+        expert_id: selection.expertId,
+        cli_tool_id: selection.cliToolId,
+        model_id: selection.modelId,
       })
       setNewTitle('')
       setInput('')
       setSelectedFiles([])
-      setTurnExpertId(inferToolId(created))
+      setTurnExpertId(inferRuntimeKey(created))
       setTurnModelId(created.model_id || created.model || '')
       toast({ title: '会话已创建', description: created.session_id })
       await loadMessages(daemonUrl, created.session_id)
@@ -654,7 +737,8 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     setInput('')
     setSelectedFiles([])
     try {
-      await sendTurn(daemonUrl, activeSessionId, text, undefined, effectiveTurnExpertId.trim() || undefined, effectiveTurnModelId.trim() || undefined, draftFiles)
+      const selection = buildRuntimeRequest(effectiveTurnRuntimeKey, effectiveTurnModelId)
+      await sendTurn(daemonUrl, activeSessionId, text, selection.expertId, selection.cliToolId, selection.modelId, draftFiles)
     } catch (err: unknown) {
       setInput(draftInput)
       setSelectedFiles(draftFiles)
@@ -714,9 +798,14 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       const id = formatModelIdentity(pendingMeta)
       if (id) return id
     }
-    if (effectiveTurnExpertId.trim()) {
-      const model = modelsForTool(effectiveTurnExpertId).find((item) => item.id === effectiveTurnModelId)?.model || ''
-      const id = formatModelIdentity({ expert_id: effectiveTurnExpertId.trim(), provider: toolsById.get(effectiveTurnExpertId)?.protocol_family, model })
+    if (effectiveTurnRuntimeKey.trim()) {
+      const runtime = runtimeOptionsByKey.get(effectiveTurnRuntimeKey)
+      const model = modelsForRuntime(effectiveTurnRuntimeKey).find((item) => item.id === effectiveTurnModelId)?.model || ''
+      const id = formatModelIdentity({
+        expert_id: runtime?.kind === 'sdk' ? effectiveTurnModelId.trim() : runtime?.cliToolId?.trim(),
+        provider: runtime?.provider,
+        model,
+      })
       if (id) return id
     }
     if (activeSession) {
@@ -728,7 +817,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       if (id) return id
     }
     return ''
-  }, [activeSession, effectiveTurnExpertId, effectiveTurnModelId, formatModelIdentity, modelsForTool, pendingMeta, toolsById])
+  }, [activeSession, effectiveTurnModelId, effectiveTurnRuntimeKey, formatModelIdentity, modelsForRuntime, pendingMeta, runtimeOptionsByKey])
 
   const activeSessionIdentity = useMemo(() => {
     if (!activeSession) return ''
@@ -766,8 +855,8 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
               size="sm"
             />
             <Select
-              label="CLI 工具"
-              selectedKeys={effectiveNewExpertId ? new Set([effectiveNewExpertId]) : new Set()}
+              label="对话方式"
+              selectedKeys={effectiveNewRuntimeKey ? new Set([effectiveNewRuntimeKey]) : new Set()}
               onSelectionChange={(keys) => {
                 if (keys === 'all') return
                 const first = keys.values().next().value
@@ -775,17 +864,17 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
               }}
               size="sm"
               disallowEmptySelection
-              isDisabled={selectableTools.length === 0}
+              isDisabled={runtimeOptions.length === 0}
             >
-              {selectableTools.map((tool) => (
-                <SelectItem key={tool.id}>{tool.label}</SelectItem>
+              {runtimeOptions.map((runtime) => (
+                <SelectItem key={runtime.key}>{runtime.label}</SelectItem>
               ))}
             </Select>
             <Select
               label="模型"
               selectedKeys={effectiveNewModelId ? new Set([effectiveNewModelId]) : new Set()}
               renderValue={() => {
-                const selected = modelsForTool(effectiveNewExpertId).find((model) => model.id === effectiveNewModelId)
+                const selected = modelsForRuntime(effectiveNewRuntimeKey).find((model) => model.id === effectiveNewModelId)
                 return selected ? `${selected.label || selected.id} · ${selected.model}` : ''
               }}
               onSelectionChange={(keys) => {
@@ -795,9 +884,9 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
               }}
               size="sm"
               disallowEmptySelection
-              isDisabled={modelsForTool(effectiveNewExpertId).length === 0}
+              isDisabled={modelsForRuntime(effectiveNewRuntimeKey).length === 0}
             >
-              {modelsForTool(effectiveNewExpertId).map((model) => (
+              {modelsForRuntime(effectiveNewRuntimeKey).map((model) => (
                 <SelectItem key={model.id}>{model.label || model.id} · {model.model}</SelectItem>
               ))}
             </Select>
@@ -805,7 +894,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
               color="primary"
               size="sm"
               className="w-full"
-              isDisabled={selectableTools.length === 0}
+              isDisabled={runtimeOptions.length === 0}
               onPress={() => void onCreate()}
             >
               新建会话
@@ -1122,9 +1211,9 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                         上传附件
                       </Button>
                       <Select
-                        aria-label="本条 Expert"
-                        placeholder="选择本条 Expert"
-                        selectedKeys={effectiveTurnExpertId ? new Set([effectiveTurnExpertId]) : new Set()}
+                        aria-label="本条对话方式"
+                        placeholder="选择本条对话方式"
+                        selectedKeys={effectiveTurnRuntimeKey ? new Set([effectiveTurnRuntimeKey]) : new Set()}
                         onSelectionChange={(keys) => {
                           if (keys === 'all') return
                           const first = keys.values().next().value
@@ -1132,18 +1221,18 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                         }}
                         size="sm"
                         disallowEmptySelection
-                        isDisabled={!activeSessionId || sending || selectableTools.length === 0}
+                        isDisabled={!activeSessionId || sending || runtimeOptions.length === 0}
                         className="md:min-w-[260px]"
                       >
-                        {selectableTools.map((tool) => (
-                          <SelectItem key={tool.id}>{tool.label}</SelectItem>
+                        {runtimeOptions.map((runtime) => (
+                          <SelectItem key={runtime.key}>{runtime.label}</SelectItem>
                         ))}
                       </Select>
                       <Select
                         label="模型"
                         selectedKeys={effectiveTurnModelId ? new Set([effectiveTurnModelId]) : new Set()}
                         renderValue={() => {
-                          const selected = modelsForTool(effectiveTurnExpertId).find((model) => model.id === effectiveTurnModelId)
+                          const selected = modelsForRuntime(effectiveTurnRuntimeKey).find((model) => model.id === effectiveTurnModelId)
                           return selected ? `${selected.label || selected.id} · ${selected.model}` : ''
                         }}
                         onSelectionChange={(keys) => {
@@ -1153,10 +1242,10 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                         }}
                         size="sm"
                         disallowEmptySelection
-                        isDisabled={!activeSessionId || sending || modelsForTool(effectiveTurnExpertId).length === 0}
+                        isDisabled={!activeSessionId || sending || modelsForRuntime(effectiveTurnRuntimeKey).length === 0}
                         className="md:min-w-[260px]"
                       >
-                        {modelsForTool(effectiveTurnExpertId).map((model) => (
+                        {modelsForRuntime(effectiveTurnRuntimeKey).map((model) => (
                           <SelectItem key={model.id}>{model.label || model.id} · {model.model}</SelectItem>
                         ))}
                       </Select>

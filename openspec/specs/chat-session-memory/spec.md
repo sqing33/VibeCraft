@@ -2,12 +2,14 @@
 
 ## Purpose
 
-Provide persistent and resumable chat sessions whose default turn execution path is CLI-backed, while preserving local summaries, attachments, fork/manual compact controls, and helper-only thinking translation.
+Provide persistent and resumable chat sessions that support both CLI-backed and SDK-backed turn execution, while preserving local summaries, attachments, fork/manual compact controls, and helper-only thinking translation.
 ## Requirements
 ### Requirement: Chat sessions SHALL be persistent and resumable
-The system MUST provide persistent chat sessions stored in the local state database. A session MUST have a stable `session_id` and metadata including title, selected expert/runtime identity, status, and timestamps. Sessions MUST remain available after daemon restart.
+The system MUST provide persistent chat sessions stored in the local state database. A session MUST have a stable `session_id` and metadata including title, selected runtime identity, status, and timestamps. Sessions MUST remain available after daemon restart.
 
 When the active chat runtime uses CLI execution, the session MUST remain resumable even if no provider-specific anchor exists.
+
+When the active chat runtime uses SDK execution, the session MUST remain resumable through persisted messages, summary, and provider/model metadata.
 
 #### Scenario: Create and list sessions
 - **WHEN** client calls `POST /api/v1/chat/sessions` and then `GET /api/v1/chat/sessions`
@@ -18,6 +20,11 @@ When the active chat runtime uses CLI execution, the session MUST remain resumab
 - **WHEN** a session has prior turns and daemon restarts
 - **THEN** `GET /api/v1/chat/sessions/:id/messages` returns previously stored messages
 - **AND** the user can continue the same session id without requiring provider-specific anchor recovery
+
+#### Scenario: Create and list an SDK-backed session
+- **WHEN** client calls `POST /api/v1/chat/sessions` with an SDK-backed `expert_id`
+- **THEN** the new session is created successfully
+- **AND** `GET /api/v1/chat/sessions` returns the session with persisted `expert_id`, `provider`, and `model`
 
 ### Requirement: Chat turns SHALL support streaming output events
 The system MUST provide a turn API that appends a user message, invokes chat generation, and streams assistant deltas through WebSocket. The system MUST emit `chat.turn.started`, `chat.turn.delta`, and `chat.turn.completed` events.
@@ -77,12 +84,27 @@ The system MUST provide APIs to fork a session and to trigger compaction manuall
 - **THEN** compaction executes using current policy
 - **AND** a `chat.session.compacted` event is emitted
 
-### Requirement: Chat selection MUST support CLI tool and model as first-class inputs
-The chat create-session and turn APIs MUST support `cli_tool_id` and `model_id`, allowing the client to choose a CLI tool first and then a model from that tool's compatible protocol family.
+### Requirement: Chat selection MUST support CLI tool and SDK expert as first-class inputs
+The chat create-session and turn APIs MUST support both of the following input modes:
+
+- `cli_tool_id` + compatible `model_id` for CLI-backed chat
+- `expert_id` referencing a chat-capable SDK expert, optionally together with `model_id` for client-side model bookkeeping
+
+For SDK-backed chat, the system MUST allow helper-only SDK experts when the resolved runtime is an SDK provider chat runtime. The system MUST continue rejecting non chat-capable runtimes such as `process` experts.
 
 #### Scenario: Create session with codex tool and openai model
 - **WHEN** client creates a session with `cli_tool_id="codex"` and an OpenAI-compatible `model_id`
 - **THEN** the session is created successfully and uses that tool/model by default
+
+#### Scenario: Create session with SDK helper expert
+- **WHEN** client creates a session with `expert_id` set to an OpenAI- or Anthropic-backed helper expert
+- **THEN** the session is created successfully
+- **AND** subsequent turns run through the SDK provider path instead of CLI runtime
+
+#### Scenario: Send turn with SDK helper expert
+- **WHEN** client posts `POST /api/v1/chat/sessions/:id/turns` with `expert_id` set to a chat-capable SDK helper expert
+- **THEN** the turn is accepted
+- **AND** the assistant response is generated through the resolved SDK provider
 
 ### Requirement: System-created analysis sessions SHALL behave like normal resumable chat sessions
 The system MUST allow background product flows to create chat sessions that are later visible and resumable in the normal Chat UI.
@@ -123,4 +145,3 @@ The strict structured-report instruction MUST apply only to the automated final-
 - **WHEN** the automated analysis has completed and the user sends a normal follow-up message in the same session
 - **THEN** the assistant may answer naturally without being forced into the original full report template
 - **AND** that reply does not become the official Repo Library report unless sync is explicitly triggered
-

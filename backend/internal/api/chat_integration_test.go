@@ -113,6 +113,90 @@ func TestChatSessionLifecycle_DemoExpert(t *testing.T) {
 	}
 }
 
+func TestChatSessionLifecycle_HelperSDKExpert(t *testing.T) {
+	cfg := config.Default()
+	cfg.Experts = append(cfg.Experts, config.ExpertConfig{
+		ID:         "demo_helper",
+		Label:      "Demo Helper",
+		Provider:   "demo",
+		Model:      "demo-helper",
+		HelperOnly: true,
+		Env:        map[string]string{},
+		TimeoutMs:  30 * 1000,
+	})
+
+	env := newTestEnv(t, cfg, 2)
+	baseURL := env.httpSrv.URL
+
+	createBody, _ := json.Marshal(map[string]any{
+		"title":          "chat-helper-sdk",
+		"expert_id":      "demo_helper",
+		"workspace_path": ".",
+	})
+	createRes, err := http.Post(baseURL+"/api/v1/chat/sessions", "application/json", bytes.NewReader(createBody))
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer createRes.Body.Close()
+	if createRes.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(createRes.Body)
+		t.Fatalf("unexpected create status: %s body=%s", createRes.Status, strings.TrimSpace(string(body)))
+	}
+
+	var sess store.ChatSession
+	if err := json.NewDecoder(createRes.Body).Decode(&sess); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if sess.ExpertID != "demo_helper" {
+		t.Fatalf("expected demo_helper expert, got %q", sess.ExpertID)
+	}
+	if sess.Provider != "demo" || sess.Model != "demo-helper" {
+		t.Fatalf("unexpected session model: provider=%q model=%q", sess.Provider, sess.Model)
+	}
+
+	turnBody, _ := json.Marshal(map[string]any{"input": "hello helper sdk"})
+	turnRes, err := http.Post(baseURL+"/api/v1/chat/sessions/"+sess.ID+"/turns", "application/json", bytes.NewReader(turnBody))
+	if err != nil {
+		t.Fatalf("post turn: %v", err)
+	}
+	defer turnRes.Body.Close()
+	if turnRes.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(turnRes.Body)
+		t.Fatalf("unexpected turn status: %s body=%s", turnRes.Status, strings.TrimSpace(string(body)))
+	}
+
+	var turnResult map[string]any
+	if err := json.NewDecoder(turnRes.Body).Decode(&turnResult); err != nil {
+		t.Fatalf("decode turn response: %v", err)
+	}
+
+	msgsRes, err := http.Get(baseURL + "/api/v1/chat/sessions/" + sess.ID + "/messages")
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	defer msgsRes.Body.Close()
+	if msgsRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected messages status: %s", msgsRes.Status)
+	}
+	var messages []store.ChatMessage
+	if err := json.NewDecoder(msgsRes.Body).Decode(&messages); err != nil {
+		t.Fatalf("decode messages response: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages after one helper-sdk turn, got %d", len(messages))
+	}
+	if got := strings.TrimSpace(pointerValue(messages[0].ExpertID)); got != "demo_helper" {
+		t.Fatalf("expected user message expert_id demo_helper, got %q", got)
+	}
+}
+
+func pointerValue(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
+}
+
 func TestChatSession_PerTurnExpertOverride_UpdatesSessionDefaults(t *testing.T) {
 	cfg := config.Default()
 	for i := range cfg.Experts {

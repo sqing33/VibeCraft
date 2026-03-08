@@ -31,6 +31,24 @@ type createChatSessionRequest struct {
 	WorkspacePath string `json:"workspace_path"`
 }
 
+type llmModelRuntime struct {
+	ModelID  string
+	Provider string
+	Model    string
+	BaseURL  string
+	APIKey   string
+}
+
+func isChatCapableResolved(resolved expert.Resolved) bool {
+	if resolved.Provider == "process" {
+		return false
+	}
+	if resolved.Spec.SDK != nil {
+		return true
+	}
+	return !resolved.HelperOnly
+}
+
 func createChatSessionHandler(deps Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.Store == nil {
@@ -66,7 +84,12 @@ func createChatSessionHandler(deps Deps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if resolved.HelperOnly || resolved.Provider == "process" {
+		resolved, status, err := applyLLMModelRuntime(resolved, strings.TrimSpace(req.ModelID))
+		if err != nil {
+			c.JSON(status, gin.H{"error": err.Error()})
+			return
+		}
+		if !isChatCapableResolved(resolved) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "expert is not chat-capable"})
 			return
 		}
@@ -289,7 +312,12 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if resolved.HelperOnly || resolved.Provider == "process" {
+		resolved, status, err = applyLLMModelRuntime(resolved, strings.TrimSpace(req.ModelID))
+		if err != nil {
+			c.JSON(status, gin.H{"error": err.Error()})
+			return
+		}
+		if !isChatCapableResolved(resolved) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "session expert is not chat-capable"})
 			return
 		}
@@ -324,6 +352,98 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, result)
 	}
+}
+
+func applyLLMModelRuntime(resolved expert.Resolved, requestedModelID string) (expert.Resolved, int, error) {
+	if resolved.Spec.SDK == nil {
+		return resolved, 0, nil
+	}
+	modelID := firstNonEmptyTrimmed(strings.TrimSpace(requestedModelID), strings.TrimSpace(resolved.PrimaryModelID))
+	if modelID == "" {
+		return resolved, 0, nil
+	}
+	runtime, found, err := resolveLLMModelRuntime(modelID)
+	if err != nil {
+		return resolved, http.StatusInternalServerError, err
+	}
+	if !found {
+		if strings.TrimSpace(requestedModelID) == "" {
+			return resolved, 0, nil
+		}
+		return resolved, http.StatusBadRequest, fmt.Errorf("model_id %q does not exist", modelID)
+	}
+	provider := strings.ToLower(strings.TrimSpace(resolved.Provider))
+	if provider != "" && provider != strings.ToLower(strings.TrimSpace(runtime.Provider)) {
+		return resolved, http.StatusBadRequest, fmt.Errorf("model_id %q is incompatible with sdk provider %q", modelID, resolved.Provider)
+	}
+	sdkCopy := *resolved.Spec.SDK
+	sdkCopy.Provider = strings.TrimSpace(runtime.Provider)
+	sdkCopy.Model = strings.TrimSpace(runtime.Model)
+	sdkCopy.LLMModelID = strings.TrimSpace(runtime.ModelID)
+	sdkCopy.BaseURL = strings.TrimSpace(runtime.BaseURL)
+	env := cloneStringMap(resolved.Spec.Env)
+	delete(env, "OPENAI_API_KEY")
+	delete(env, "ANTHROPIC_API_KEY")
+	delete(env, "OPENAI_BASE_URL")
+	delete(env, "ANTHROPIC_BASE_URL")
+	switch strings.ToLower(strings.TrimSpace(runtime.Provider)) {
+	case "openai":
+		if strings.TrimSpace(runtime.APIKey) != "" {
+			env["OPENAI_API_KEY"] = strings.TrimSpace(runtime.APIKey)
+		}
+		if strings.TrimSpace(runtime.BaseURL) != "" {
+			env["OPENAI_BASE_URL"] = strings.TrimSpace(runtime.BaseURL)
+		}
+	case "anthropic":
+		if strings.TrimSpace(runtime.APIKey) != "" {
+			env["ANTHROPIC_API_KEY"] = strings.TrimSpace(runtime.APIKey)
+		}
+		if strings.TrimSpace(runtime.BaseURL) != "" {
+			env["ANTHROPIC_BASE_URL"] = strings.TrimSpace(runtime.BaseURL)
+		}
+	}
+	specCopy := resolved.Spec
+	specCopy.SDK = &sdkCopy
+	specCopy.Env = env
+	resolved.Spec = specCopy
+	resolved.Provider = strings.TrimSpace(runtime.Provider)
+	resolved.ProtocolFamily = strings.TrimSpace(runtime.Provider)
+	resolved.Model = strings.TrimSpace(runtime.Model)
+	resolved.PrimaryModelID = strings.TrimSpace(runtime.ModelID)
+	return resolved, 0, nil
+}
+
+func resolveLLMModelRuntime(modelID string) (*llmModelRuntime, bool, error) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return nil, false, nil
+	}
+	cfg, _, err := config.LoadPersisted()
+	if err != nil {
+		return nil, false, fmt.Errorf("load persisted llm settings: %w", err)
+	}
+	modelCfg, sourceCfg, _, ok := config.FindLLMModelByID(cfg.LLM, modelID)
+	if !ok {
+		return nil, false, nil
+	}
+	return &llmModelRuntime{
+		ModelID:  strings.TrimSpace(modelCfg.ID),
+		Provider: strings.ToLower(strings.TrimSpace(modelCfg.Provider)),
+		Model:    strings.TrimSpace(modelCfg.Model),
+		BaseURL:  strings.TrimSpace(sourceCfg.BaseURL),
+		APIKey:   strings.TrimSpace(sourceCfg.APIKey),
+	}, true, nil
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func buildThinkingTranslationSpec(primaryModelID string) *chat.ThinkingTranslationSpec {
