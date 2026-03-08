@@ -125,7 +125,7 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 		}
 
 		translationRuntime := newThinkingTranslationRuntime(m, sess.ID, thinkingTranslation)
-		feedEmitter := newCodexTurnFeedEmitter(m, sess.ID, userMsg.ID)
+		feedEmitter := newCodexTurnFeedEmitter(m, sess.ID, userMsg.ID, translationRuntime)
 		var assistantBuf strings.Builder
 		var reasoningSummaryBuf strings.Builder
 		var reasoningContentBuf strings.Builder
@@ -246,7 +246,7 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 					}
 				}
 
-				feedEmitter.consume(note.Method, note.Params)
+				feedEmitter.consume(ctx, note.Method, note.Params)
 				events := parseCodexAppServerNotification(note.Method, note.Params)
 				for _, event := range events {
 					switch event.Type {
@@ -276,9 +276,6 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 							progressBuf.WriteString(event.Delta)
 						}
 						m.broadcast("chat.turn.thinking.delta", map[string]any{"session_id": sess.ID, "delta": event.Delta})
-						if translationRuntime != nil && (note.Method == "item/reasoning/summaryTextDelta" || note.Method == "item/reasoning/textDelta") {
-							translationRuntime.add(ctx, event.Delta)
-						}
 					case "progress_delta":
 						if event.Delta == "" {
 							continue

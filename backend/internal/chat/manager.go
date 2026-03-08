@@ -431,7 +431,7 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 						thinkingBuf.WriteString(event.Delta)
 						m.broadcast("chat.turn.thinking.delta", map[string]any{"session_id": sess.ID, "delta": event.Delta})
 						if translationRuntime != nil {
-							translationRuntime.add(ctx, event.Delta)
+							translationRuntime.add(ctx, "", event.Delta)
 						}
 					case "progress_delta":
 						if event.Delta == "" {
@@ -1291,7 +1291,7 @@ func (m *Manager) callOpenAIResponses(ctx context.Context, sess store.ChatSessio
 				"session_id": sess.ID,
 				"delta":      delta,
 			})
-			translationRuntime.add(ctx, delta)
+			translationRuntime.add(ctx, "", delta)
 		case "response.reasoning_summary_text.done":
 			done := ev.AsResponseReasoningSummaryTextDone().Text
 			if done == "" || sawReasoningDelta {
@@ -1302,7 +1302,7 @@ func (m *Manager) callOpenAIResponses(ctx context.Context, sess store.ChatSessio
 				"session_id": sess.ID,
 				"delta":      done,
 			})
-			translationRuntime.add(ctx, done)
+			translationRuntime.add(ctx, "", done)
 		case "error":
 			msg := strings.TrimSpace(ev.AsError().Message)
 			if msg != "" {
@@ -1516,7 +1516,7 @@ func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, cur
 				"session_id": sess.ID,
 				"delta":      delta,
 			})
-			translationRuntime.add(ctx, delta)
+			translationRuntime.add(ctx, "", delta)
 		case "content_block_delta":
 			de := ev.AsContentBlockDelta()
 			switch strings.TrimSpace(de.Delta.Type) {
@@ -1550,7 +1550,7 @@ func (m *Manager) callAnthropic(ctx context.Context, sess store.ChatSession, cur
 					"session_id": sess.ID,
 					"delta":      delta,
 				})
-				translationRuntime.add(ctx, delta)
+				translationRuntime.add(ctx, "", delta)
 			}
 		}
 	}

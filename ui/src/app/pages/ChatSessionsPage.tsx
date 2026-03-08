@@ -593,10 +593,10 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
         return
       }
       if (env.type === 'chat.turn.thinking.translation.delta') {
-        const payload = env.payload as { session_id?: string; delta?: string } | undefined
+        const payload = env.payload as { session_id?: string; delta?: string; entry_id?: string } | undefined
         if (!payload?.session_id || typeof payload.delta !== 'string') return
         setThinkingTranslationState(payload.session_id, { applied: true, failed: false })
-        appendTranslatedThinkingDelta(payload.session_id, payload.delta)
+        appendTranslatedThinkingDelta(payload.session_id, payload.delta, payload.entry_id)
         return
       }
       if (env.type === 'chat.turn.thinking.translation.failed') {

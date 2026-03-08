@@ -450,6 +450,23 @@ The chat page MUST support sending turns with text, with attachments, or with bo
 - **THEN** the UI submits the turn request including the selected attachments
 - **AND** the message history refresh shows the attachments on the user message
 
+### Requirement: Chat process timeline MUST preserve runtime order and collapse heavy command output
+When the chat page renders Codex runtime activity, it MUST present thinking, tool, plan, question, progress, system, and answer entries in chronological timeline order.
+
+The UI MUST NOT merge all thinking into one visual block when those thinking events are separated by other runtime activity.
+
+Tool entries MUST show the executed command immediately, but their `stdout/stderr` content MUST remain collapsed by default until the user explicitly expands that entry. This default-collapsed behavior MUST also apply to failed commands.
+
+#### Scenario: Thinking, tool, and thinking render as separate timeline cards
+- **WHEN** one turn contains `thinking → tool → thinking`
+- **THEN** the UI renders two separate thinking cards with the tool card between them
+- **AND** the answer card keeps its own highlighted style without being forcibly moved ahead of the timeline
+
+#### Scenario: Tool output is collapsed by default
+- **WHEN** a tool entry contains captured `stdout` or `stderr`
+- **THEN** the timeline initially shows only the command summary and output metadata
+- **AND** the raw output is shown only after the user clicks to expand that tool entry
+
 ### Requirement: UI SHALL expose compaction and session management actions
 The chat page MUST provide actions for manual compaction and session fork. The UI MUST show result feedback for these actions.
 
@@ -539,4 +556,3 @@ The UI MUST support distinct presentation for progress/system messages, thinking
 - **WHEN** a Codex turn completes and the final assistant message appears in the transcript
 - **THEN** the frontend keeps the structured runtime feed as a collapsible detail block below that assistant message
 - **AND** historical messages without feed data continue to render normally
-

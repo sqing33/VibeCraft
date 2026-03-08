@@ -31,13 +31,14 @@ type ThinkingTranslationSpec struct {
 type ThinkingTranslatorFunc func(ctx context.Context, spec ThinkingTranslationSpec, text string) (string, error)
 
 type thinkingTranslationRuntime struct {
-	manager    *Manager
-	sessionID  string
-	spec       *ThinkingTranslationSpec
-	buffer     string
-	lastDelta  time.Time
-	failed     bool
-	translated strings.Builder
+	manager       *Manager
+	sessionID     string
+	spec          *ThinkingTranslationSpec
+	buffer        string
+	bufferEntryID string
+	lastDelta     time.Time
+	failed        bool
+	translated    strings.Builder
 }
 
 func newThinkingTranslationRuntime(manager *Manager, sessionID string, spec *ThinkingTranslationSpec) *thinkingTranslationRuntime {
@@ -71,10 +72,11 @@ func (t *thinkingTranslationRuntime) translatedText() string {
 	return strings.TrimSpace(t.translated.String())
 }
 
-func (t *thinkingTranslationRuntime) add(ctx context.Context, delta string) {
+func (t *thinkingTranslationRuntime) add(ctx context.Context, entryID, delta string) {
 	if t == nil || t.spec == nil || t.failed {
 		return
 	}
+	entryID = strings.TrimSpace(entryID)
 	delta = strings.TrimSpace(delta)
 	if delta == "" {
 		return
@@ -82,6 +84,12 @@ func (t *thinkingTranslationRuntime) add(ctx context.Context, delta string) {
 	now := time.Now()
 	if !t.lastDelta.IsZero() && now.Sub(t.lastDelta) >= t.manager.thinkingTranslationIdle && strings.TrimSpace(t.buffer) != "" {
 		t.flush(ctx, true)
+	}
+	if entryID != "" && t.bufferEntryID != "" && entryID != t.bufferEntryID && strings.TrimSpace(t.buffer) != "" {
+		t.flush(ctx, true)
+	}
+	if t.bufferEntryID == "" {
+		t.bufferEntryID = entryID
 	}
 	t.buffer += delta
 	t.lastDelta = now
@@ -97,6 +105,7 @@ func (t *thinkingTranslationRuntime) complete(ctx context.Context) {
 
 func (t *thinkingTranslationRuntime) flush(ctx context.Context, force bool) {
 	for {
+		entryID := strings.TrimSpace(t.bufferEntryID)
 		segment := t.nextSegment(force)
 		if segment == "" {
 			return
@@ -104,21 +113,35 @@ func (t *thinkingTranslationRuntime) flush(ctx context.Context, force bool) {
 		translated, err := t.manager.translateThinking(ctx, *t.spec, segment)
 		if err != nil {
 			t.failed = true
-			t.manager.broadcast("chat.turn.thinking.translation.failed", map[string]any{
+			payload := map[string]any{
 				"session_id": t.sessionID,
 				"error":      err.Error(),
-			})
+			}
+			if entryID != "" {
+				payload["entry_id"] = entryID
+			}
+			t.manager.broadcast("chat.turn.thinking.translation.failed", payload)
 			return
 		}
 		translated = strings.TrimSpace(translated)
 		if translated == "" {
+			if strings.TrimSpace(t.buffer) == "" {
+				t.bufferEntryID = ""
+			}
 			continue
 		}
 		t.translated.WriteString(translated)
-		t.manager.broadcast("chat.turn.thinking.translation.delta", map[string]any{
+		payload := map[string]any{
 			"session_id": t.sessionID,
 			"delta":      translated,
-		})
+		}
+		if entryID != "" {
+			payload["entry_id"] = entryID
+		}
+		t.manager.broadcast("chat.turn.thinking.translation.delta", payload)
+		if strings.TrimSpace(t.buffer) == "" {
+			t.bufferEntryID = ""
+		}
 		if force {
 			continue
 		}

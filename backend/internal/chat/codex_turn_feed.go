@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,6 +11,7 @@ type chatTurnEventPayload struct {
 	SessionID     string         `json:"session_id"`
 	UserMessageID string         `json:"user_message_id"`
 	EntryID       string         `json:"entry_id"`
+	Seq           int            `json:"seq,omitempty"`
 	Kind          string         `json:"kind"`
 	Op            string         `json:"op"`
 	Status        string         `json:"status,omitempty"`
@@ -28,6 +30,13 @@ type codexToolFeedState struct {
 	Succeeded *bool
 }
 
+func (s *codexToolFeedState) visible() bool {
+	if s == nil {
+		return false
+	}
+	return strings.TrimSpace(s.Command) != ""
+}
+
 func (s *codexToolFeedState) meta() map[string]any {
 	meta := map[string]any{
 		"command": s.Command,
@@ -44,25 +53,33 @@ func (s *codexToolFeedState) meta() map[string]any {
 }
 
 type codexTurnFeedEmitter struct {
-	manager       *Manager
-	sessionID     string
-	userMessageID string
-	toolStates    map[string]*codexToolFeedState
-	planText      map[string]*strings.Builder
+	manager               *Manager
+	sessionID             string
+	userMessageID         string
+	translation           *thinkingTranslationRuntime
+	toolStates            map[string]*codexToolFeedState
+	planText              map[string]*strings.Builder
+	entrySeq              map[string]int
+	nextSeq               int
+	thinkingIndex         int
+	activeThinkingEntryID string
+	sink                  func(chatTurnEventPayload)
 }
 
-func newCodexTurnFeedEmitter(manager *Manager, sessionID, userMessageID string) *codexTurnFeedEmitter {
+func newCodexTurnFeedEmitter(manager *Manager, sessionID, userMessageID string, translation *thinkingTranslationRuntime) *codexTurnFeedEmitter {
 	return &codexTurnFeedEmitter{
 		manager:       manager,
 		sessionID:     strings.TrimSpace(sessionID),
 		userMessageID: strings.TrimSpace(userMessageID),
+		translation:   translation,
 		toolStates:    make(map[string]*codexToolFeedState),
 		planText:      make(map[string]*strings.Builder),
+		entrySeq:      make(map[string]int),
 	}
 }
 
 func (e *codexTurnFeedEmitter) emit(payload chatTurnEventPayload) {
-	if e == nil || e.manager == nil {
+	if e == nil {
 		return
 	}
 	payload.SessionID = firstNonEmptyTrimmed(payload.SessionID, e.sessionID)
@@ -73,13 +90,21 @@ func (e *codexTurnFeedEmitter) emit(payload chatTurnEventPayload) {
 	if payload.SessionID == "" || payload.UserMessageID == "" || payload.EntryID == "" || payload.Kind == "" || payload.Op == "" {
 		return
 	}
+	payload.Seq = e.sequenceForEntry(payload.EntryID, payload.Seq)
 	if payload.Meta != nil && len(payload.Meta) == 0 {
 		payload.Meta = nil
+	}
+	if e.sink != nil {
+		e.sink(payload)
+		return
+	}
+	if e.manager == nil {
+		return
 	}
 	e.manager.broadcast("chat.turn.event", payload)
 }
 
-func (e *codexTurnFeedEmitter) consume(method string, params json.RawMessage) {
+func (e *codexTurnFeedEmitter) consume(ctx context.Context, method string, params json.RawMessage) {
 	if e == nil {
 		return
 	}
@@ -94,6 +119,7 @@ func (e *codexTurnFeedEmitter) consume(method string, params json.RawMessage) {
 	suffix := codexEventSuffix(method)
 	switch suffix {
 	case "agent_message_content_delta":
+		e.closeThinkingSegment(ctx)
 		delta := extractDeltaText(raw)
 		if delta != "" {
 			e.emit(chatTurnEventPayload{EntryID: "answer", Kind: "answer", Op: "append", Status: "streaming", Delta: delta})
@@ -101,9 +127,14 @@ func (e *codexTurnFeedEmitter) consume(method string, params json.RawMessage) {
 	case "reasoning_content_delta", "reasoning_summary_text_delta", "reasoning_text_delta":
 		delta := extractDeltaText(raw)
 		if delta != "" {
-			e.emit(chatTurnEventPayload{EntryID: "thinking", Kind: "thinking", Op: "append", Status: "streaming", Delta: delta})
+			entryID := e.ensureThinkingEntry()
+			e.emit(chatTurnEventPayload{EntryID: entryID, Kind: "thinking", Op: "append", Status: "streaming", Delta: delta})
+			if e.translation != nil {
+				e.translation.add(ctx, entryID, delta)
+			}
 		}
 	case "plan_delta":
+		e.closeThinkingSegment(ctx)
 		planID := firstNonEmptyTrimmed(nestedString(raw, "itemId"), nestedString(raw, "item_id"), "plan")
 		delta := extractDeltaText(raw)
 		if delta == "" {
@@ -117,6 +148,7 @@ func (e *codexTurnFeedEmitter) consume(method string, params json.RawMessage) {
 		buf.WriteString(delta)
 		e.emit(chatTurnEventPayload{EntryID: "plan:" + planID, Kind: "plan", Op: "upsert", Status: "streaming", Content: strings.TrimSpace(buf.String())})
 	case "task_started":
+		e.closeThinkingSegment(ctx)
 		content := firstNonEmptyTrimmed(
 			stringValue(raw["title"]),
 			stringValue(raw["message"]),
@@ -125,25 +157,31 @@ func (e *codexTurnFeedEmitter) consume(method string, params json.RawMessage) {
 		)
 		e.emit(chatTurnEventPayload{EntryID: "progress:task", Kind: "progress", Op: "upsert", Status: "pending_approval", Content: content})
 	case "mcp_startup_update":
+		e.closeThinkingSegment(ctx)
 		phase := firstNonEmptyTrimmed(stringValue(raw["phase"]), stringValue(raw["status"]), stringValue(raw["state"]), "starting")
 		content := firstNonEmptyTrimmed(stringValue(raw["message"]), fmt.Sprintf("MCP 启动：%s", phase))
 		e.emit(chatTurnEventPayload{EntryID: "system:mcp", Kind: "system", Op: "upsert", Status: normalizeFeedStatus(phase), Content: content, Meta: map[string]any{"phase": phase}})
 	case "mcp_startup_complete":
+		e.closeThinkingSegment(ctx)
 		e.emit(chatTurnEventPayload{EntryID: "system:mcp", Kind: "system", Op: "upsert", Status: "done", Content: "MCP 已就绪"})
 	case "item_started":
+		e.closeThinkingSegment(ctx)
 		e.consumeItemSnapshot(method, raw)
 	case "item_completed":
+		e.closeThinkingSegment(ctx)
 		e.consumeItemSnapshot(method, raw)
 	case "exec_command_begin":
+		e.closeThinkingSegment(ctx)
 		callID := firstNonEmptyTrimmed(stringValue(raw["callId"]), stringValue(raw["call_id"]), stringValue(raw["itemId"]), stringValue(raw["item_id"]))
 		if callID == "" {
 			callID = "command"
 		}
-		command := firstNonEmptyTrimmed(commandText(raw["command"]), commandText(raw["cmd"]), "command execution")
+		command := strings.TrimSpace(firstNonEmptyTrimmed(commandText(raw["command"]), commandText(raw["cmd"])))
 		state := &codexToolFeedState{EntryID: "tool:" + callID, Command: command, Status: "created"}
 		e.toolStates[callID] = state
-		e.emit(chatTurnEventPayload{EntryID: state.EntryID, Kind: "tool", Op: "upsert", Status: state.Status, Content: command, Meta: state.meta()})
+		e.emitToolState(state)
 	case "exec_command_output_delta":
+		e.closeThinkingSegment(ctx)
 		callID := firstNonEmptyTrimmed(stringValue(raw["callId"]), stringValue(raw["call_id"]), stringValue(raw["itemId"]), stringValue(raw["item_id"]))
 		state := e.ensureToolState(callID, commandText(raw["command"]))
 		if state == nil {
@@ -160,8 +198,9 @@ func (e *codexTurnFeedEmitter) consume(method string, params json.RawMessage) {
 			state.Stdout.WriteString(chunk)
 		}
 		state.Status = "streaming"
-		e.emit(chatTurnEventPayload{EntryID: state.EntryID, Kind: "tool", Op: "upsert", Status: state.Status, Content: state.Command, Meta: state.meta()})
+		e.emitToolState(state)
 	case "exec_command_end":
+		e.closeThinkingSegment(ctx)
 		callID := firstNonEmptyTrimmed(stringValue(raw["callId"]), stringValue(raw["call_id"]), stringValue(raw["itemId"]), stringValue(raw["item_id"]))
 		state := e.ensureToolState(callID, commandText(raw["command"]))
 		if state == nil {
@@ -186,18 +225,64 @@ func (e *codexTurnFeedEmitter) consume(method string, params json.RawMessage) {
 		if success != nil && !*success {
 			state.Status = "failed"
 		}
-		e.emit(chatTurnEventPayload{EntryID: state.EntryID, Kind: "tool", Op: "upsert", Status: state.Status, Content: state.Command, Meta: state.meta()})
+		e.emitToolState(state)
 	case "request_user_input":
+		e.closeThinkingSegment(ctx)
 		entryID := firstNonEmptyTrimmed(stringValue(raw["callId"]), stringValue(raw["call_id"]), "question")
 		content, meta := extractQuestionContent(raw)
 		e.emit(chatTurnEventPayload{EntryID: "question:" + entryID, Kind: "question", Op: "upsert", Status: "pending_approval", Content: content, Meta: meta})
 	case "warning":
+		e.closeThinkingSegment(ctx)
 		content := firstNonEmptyTrimmed(stringValue(raw["message"]), "warning")
 		e.emit(chatTurnEventPayload{EntryID: "system:warning", Kind: "system", Op: "upsert", Status: "created", Content: content})
 	case "error":
+		e.closeThinkingSegment(ctx)
 		content := firstNonEmptyTrimmed(stringValue(raw["message"]), "Codex CLI error")
 		e.emit(chatTurnEventPayload{EntryID: "error:codex", Kind: "error", Op: "upsert", Status: "failed", Content: content})
 	}
+}
+
+func (e *codexTurnFeedEmitter) sequenceForEntry(entryID string, seq int) int {
+	if e == nil {
+		return seq
+	}
+	if seq > 0 {
+		if current := e.entrySeq[entryID]; current == 0 {
+			e.entrySeq[entryID] = seq
+			if seq > e.nextSeq {
+				e.nextSeq = seq
+			}
+		}
+		return seq
+	}
+	if current := e.entrySeq[entryID]; current > 0 {
+		return current
+	}
+	e.nextSeq++
+	e.entrySeq[entryID] = e.nextSeq
+	return e.nextSeq
+}
+
+func (e *codexTurnFeedEmitter) ensureThinkingEntry() string {
+	if e == nil {
+		return "thinking:1"
+	}
+	if strings.TrimSpace(e.activeThinkingEntryID) != "" {
+		return e.activeThinkingEntryID
+	}
+	e.thinkingIndex++
+	e.activeThinkingEntryID = fmt.Sprintf("thinking:%d", e.thinkingIndex)
+	return e.activeThinkingEntryID
+}
+
+func (e *codexTurnFeedEmitter) closeThinkingSegment(ctx context.Context) {
+	if e == nil || strings.TrimSpace(e.activeThinkingEntryID) == "" {
+		return
+	}
+	if e.translation != nil {
+		e.translation.flush(ctx, true)
+	}
+	e.activeThinkingEntryID = ""
 }
 
 func (e *codexTurnFeedEmitter) ensureToolState(callID, command string) *codexToolFeedState {
@@ -211,10 +296,16 @@ func (e *codexTurnFeedEmitter) ensureToolState(callID, command string) *codexToo
 		}
 		return existing
 	}
-	command = firstNonEmptyTrimmed(strings.TrimSpace(command), "command execution")
-	state := &codexToolFeedState{EntryID: "tool:" + callID, Command: command, Status: "created"}
+	state := &codexToolFeedState{EntryID: "tool:" + callID, Command: strings.TrimSpace(command), Status: "created"}
 	e.toolStates[callID] = state
 	return state
+}
+
+func (e *codexTurnFeedEmitter) emitToolState(state *codexToolFeedState) {
+	if e == nil || !state.visible() {
+		return
+	}
+	e.emit(chatTurnEventPayload{EntryID: state.EntryID, Kind: "tool", Op: "upsert", Status: state.Status, Content: state.Command, Meta: state.meta()})
 }
 
 func (e *codexTurnFeedEmitter) consumeItemSnapshot(method string, raw map[string]any) {
@@ -235,7 +326,7 @@ func (e *codexTurnFeedEmitter) consumeItemSnapshot(method string, raw map[string
 		} else {
 			state.Status = "created"
 		}
-		e.emit(chatTurnEventPayload{EntryID: state.EntryID, Kind: "tool", Op: "upsert", Status: state.Status, Content: state.Command, Meta: state.meta()})
+		e.emitToolState(state)
 	case "plan":
 		entryID := "plan:" + firstNonEmptyTrimmed(snapshot.ItemID, "plan")
 		content := firstNonEmptyTrimmed(snapshot.Text, strings.Join(snapshot.Content, "\n"), strings.Join(snapshot.Summary, "\n"))

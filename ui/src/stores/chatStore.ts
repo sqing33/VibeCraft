@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { createJSONStorage, persist } from 'zustand/middleware'
 
 import {
   createChatSession,
@@ -41,6 +42,46 @@ type UsageMeta = {
 type ThinkingTranslationState = {
   applied: boolean
   failed: boolean
+}
+
+const chatRuntimeStorageKey = 'vibe-tree-chat-runtime'
+
+function clearLiveTurnStateShape<T extends {
+  streamingBySession: Record<string, string>
+  thinkingBySession: Record<string, string>
+  translatedThinkingBySession: Record<string, string>
+  thinkingTranslationStateBySession: Record<string, ThinkingTranslationState | undefined>
+  turnMetaBySession: Record<string, TurnMeta | null>
+  activeTurnFeedBySession: Record<string, ChatTurnFeed | undefined>
+}>(state: T, sessionId: string): T {
+  const nextStreaming = { ...state.streamingBySession }
+  const nextThinking = { ...state.thinkingBySession }
+  const nextTranslated = { ...state.translatedThinkingBySession }
+  const nextTranslationState = { ...state.thinkingTranslationStateBySession }
+  const nextTurnMeta = { ...state.turnMetaBySession }
+  const nextActiveFeed = { ...state.activeTurnFeedBySession }
+  delete nextStreaming[sessionId]
+  delete nextThinking[sessionId]
+  delete nextTranslated[sessionId]
+  delete nextTranslationState[sessionId]
+  delete nextTurnMeta[sessionId]
+  delete nextActiveFeed[sessionId]
+  return {
+    ...state,
+    streamingBySession: nextStreaming,
+    thinkingBySession: nextThinking,
+    translatedThinkingBySession: nextTranslated,
+    thinkingTranslationStateBySession: nextTranslationState,
+    turnMetaBySession: nextTurnMeta,
+    activeTurnFeedBySession: nextActiveFeed,
+  }
+}
+
+function shouldClearActiveTurnFeed(feed: ChatTurnFeed | undefined, messages: ChatMessage[]): boolean {
+  if (!feed || messages.length === 0) return false
+  const userMessage = messages.find((message) => message.message_id === feed.user_message_id && message.role === 'user')
+  if (!userMessage) return false
+  return messages.some((message) => message.role === 'assistant' && message.turn === userMessage.turn)
 }
 
 function guessAttachmentKind(file: File): string {
@@ -92,7 +133,7 @@ export type ChatStore = {
   appendMessage: (sessionId: string, msg: ChatMessage) => void
   appendStreamingDelta: (sessionId: string, delta: string) => void
   appendThinkingDelta: (sessionId: string, delta: string) => void
-  appendTranslatedThinkingDelta: (sessionId: string, delta: string) => void
+  appendTranslatedThinkingDelta: (sessionId: string, delta: string, entryId?: string) => void
   setThinking: (sessionId: string, thinking: string) => void
   setTranslatedThinking: (sessionId: string, thinking: string) => void
   clearStreaming: (sessionId: string) => void
@@ -130,7 +171,9 @@ export type ChatStore = {
   archiveSession: (daemonUrl: string, sessionId: string) => Promise<void>
 }
 
-export const useChatStore = create<ChatStore>((set, get) => ({
+export const useChatStore = create<ChatStore>()(
+  persist(
+    (set, get) => ({
   sessions: [],
   activeSessionId: null,
   messagesBySession: {},
@@ -158,12 +201,19 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       return { sessions: next }
     }),
   setMessages: (sessionId, messages) =>
-    set((state) => ({
-      messagesBySession: {
-        ...state.messagesBySession,
-        [sessionId]: messages,
-      },
-    })),
+    set((state) => {
+      const nextState = {
+        ...state,
+        messagesBySession: {
+          ...state.messagesBySession,
+          [sessionId]: messages,
+        },
+      }
+      if (!shouldClearActiveTurnFeed(state.activeTurnFeedBySession[sessionId], messages)) {
+        return nextState
+      }
+      return clearLiveTurnStateShape(nextState, sessionId)
+    }),
   appendMessage: (sessionId, msg) =>
     set((state) => {
       const prev = state.messagesBySession[sessionId] ?? []
@@ -191,7 +241,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         [sessionId]: (state.thinkingBySession[sessionId] ?? '') + delta,
       },
     })),
-  appendTranslatedThinkingDelta: (sessionId, delta) =>
+  appendTranslatedThinkingDelta: (sessionId, delta, entryId) =>
     set((state) => ({
       translatedThinkingBySession: {
         ...state.translatedThinkingBySession,
@@ -199,7 +249,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       },
       activeTurnFeedBySession: {
         ...state.activeTurnFeedBySession,
-        [sessionId]: applyThinkingTranslationDelta(state.activeTurnFeedBySession[sessionId], delta),
+        [sessionId]: applyThinkingTranslationDelta(state.activeTurnFeedBySession[sessionId], delta, entryId),
       },
     })),
   setThinking: (sessionId, thinking) =>
@@ -286,39 +336,44 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   completeTurnFeed: (sessionId, assistantMessageId, opts) =>
     set((state) => {
       const activeFeed = finalizeTurnFeed(state.activeTurnFeedBySession[sessionId], assistantMessageId, opts)
-      const nextActive = { ...state.activeTurnFeedBySession }
-      delete nextActive[sessionId]
+      const clearedState = clearLiveTurnStateShape(state, sessionId)
       if (!activeFeed) {
-        return { activeTurnFeedBySession: nextActive }
+        return clearedState
       }
       return {
-        activeTurnFeedBySession: nextActive,
+        ...clearedState,
         completedTurnFeedByAssistantMessageId: {
-          ...state.completedTurnFeedByAssistantMessageId,
+          ...clearedState.completedTurnFeedByAssistantMessageId,
           [assistantMessageId]: activeFeed,
         },
       }
     }),
   clearTurnFeed: (sessionId) =>
-    set((state) => {
-      const next = { ...state.activeTurnFeedBySession }
-      delete next[sessionId]
-      return { activeTurnFeedBySession: next }
-    }),
+    set((state) => clearLiveTurnStateShape(state, sessionId)),
   refreshSessions: async (daemonUrl) => {
     set({ loading: true, error: null })
     try {
       const sessions = await fetchChatSessions(daemonUrl)
       const activeSessions = sessions.filter((s) => s.status === 'active')
       const fallbackSessionId = activeSessions[0]?.session_id ?? sessions[0]?.session_id ?? null
-      set((state) => ({
-        sessions,
-        loading: false,
-        activeSessionId:
-          state.activeSessionId && sessions.some((s) => s.session_id === state.activeSessionId)
-            ? state.activeSessionId
-            : fallbackSessionId,
-      }))
+      set((state) => {
+        const validSessionIDs = new Set(sessions.map((session) => session.session_id))
+        let nextState = {
+          ...state,
+          sessions,
+          loading: false,
+          activeSessionId:
+            state.activeSessionId && sessions.some((s) => s.session_id === state.activeSessionId)
+              ? state.activeSessionId
+              : fallbackSessionId,
+        }
+        for (const sessionId of Object.keys(state.activeTurnFeedBySession)) {
+          if (!validSessionIDs.has(sessionId)) {
+            nextState = clearLiveTurnStateShape(nextState, sessionId)
+          }
+        }
+        return nextState
+      })
     } catch (err: unknown) {
       set({
         loading: false,
@@ -397,4 +452,19 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     await patchChatSession(daemonUrl, sessionId, { status: 'archived' })
     await get().refreshSessions(daemonUrl)
   },
-}))
+}),
+    {
+      name: chatRuntimeStorageKey,
+      storage: createJSONStorage(() => sessionStorage),
+      partialize: (state) => ({
+        activeSessionId: state.activeSessionId,
+        streamingBySession: state.streamingBySession,
+        thinkingBySession: state.thinkingBySession,
+        translatedThinkingBySession: state.translatedThinkingBySession,
+        thinkingTranslationStateBySession: state.thinkingTranslationStateBySession,
+        turnMetaBySession: state.turnMetaBySession,
+        activeTurnFeedBySession: state.activeTurnFeedBySession,
+      }),
+    },
+  ),
+)

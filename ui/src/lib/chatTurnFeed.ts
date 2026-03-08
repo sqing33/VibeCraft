@@ -6,6 +6,7 @@ export type ChatTurnEventPayload = {
   session_id: string
   user_message_id: string
   entry_id: string
+  seq?: number
   kind: ChatTurnEntryKind
   op: 'append' | 'replace' | 'upsert' | 'complete'
   status?: ChatTurnEntryStatus | string
@@ -16,6 +17,7 @@ export type ChatTurnEventPayload = {
 
 export type ChatTurnFeedEntry = {
   entry_id: string
+  seq: number
   kind: ChatTurnEntryKind
   status: string
   content: string
@@ -45,6 +47,31 @@ function mergeMeta(
 function normalizeStatus(status: string | undefined, fallback: string): string {
   const value = (status ?? '').trim()
   return value || fallback
+}
+
+function normalizeSeq(seq: number | undefined, fallback: number): number {
+  return typeof seq === 'number' && Number.isFinite(seq) && seq > 0 ? seq : fallback
+}
+
+function nextFeedSeq(entries: ChatTurnFeedEntry[]): number {
+  return entries.reduce((max, entry) => Math.max(max, entry.seq), 0) + 1
+}
+
+function sortEntries(entries: ChatTurnFeedEntry[]): ChatTurnFeedEntry[] {
+  return [...entries].sort((left, right) => left.seq - right.seq)
+}
+
+function findThinkingEntryIndex(entries: ChatTurnFeedEntry[], entryId?: string): number {
+  if (entryId) {
+    const exactIdx = entries.findIndex((entry) => entry.entry_id === entryId && entry.kind === 'thinking')
+    if (exactIdx >= 0) return exactIdx
+  }
+  for (let idx = entries.length - 1; idx >= 0; idx -= 1) {
+    if (entries[idx]?.kind === 'thinking') {
+      return idx
+    }
+  }
+  return -1
 }
 
 /**
@@ -88,11 +115,13 @@ export function applyTurnFeedEvent(
     ? { ...prev }
     : {
         entry_id: event.entry_id,
+        seq: normalizeSeq(event.seq, nextFeedSeq(entries)),
         kind: event.kind,
         status: normalizeStatus(event.status, 'created'),
         content: '',
       }
 
+  entry.seq = prev?.seq ?? normalizeSeq(event.seq, nextFeedSeq(entries))
   entry.kind = event.kind
   entry.status = normalizeStatus(event.status, entry.status)
   if (event.op === 'append') {
@@ -118,7 +147,7 @@ export function applyTurnFeedEvent(
   }
   return {
     ...feed,
-    entries,
+    entries: sortEntries(entries),
   }
 }
 
@@ -131,10 +160,11 @@ export function applyTurnFeedEvent(
 export function applyThinkingTranslationDelta(
   current: ChatTurnFeed | undefined,
   delta: string,
+  entryId?: string,
 ): ChatTurnFeed | undefined {
   if (!current || !delta) return current
   const entries = [...current.entries]
-  const idx = entries.findIndex((entry) => entry.kind === 'thinking')
+  const idx = findThinkingEntryIndex(entries, entryId)
   if (idx < 0) return current
   const entry = { ...entries[idx] }
   const meta = { ...(entry.meta ?? {}) }
@@ -162,22 +192,46 @@ export function finalizeTurnFeed(
 ): ChatTurnFeed | undefined {
   if (!current) return current
   let entries = [...current.entries]
-  const thinkingIndex = entries.findIndex((entry) => entry.kind === 'thinking')
-  if (thinkingIndex >= 0) {
-    const entry = { ...entries[thinkingIndex] }
-    if (!entry.content.trim() && opts?.thinking?.trim()) {
-      entry.content = opts.thinking.trim()
-    }
-    if (opts?.translatedThinking?.trim()) {
-      entry.meta = mergeMeta(entry.meta, {
-        translated_content: opts.translatedThinking.trim(),
-        translation_failed: opts.translationFailed === true,
-      })
-    } else if (opts?.translationFailed) {
-      entry.meta = mergeMeta(entry.meta, { translation_failed: true })
-    }
-    entry.status = entry.status === 'failed' ? 'failed' : 'done'
-    entries[thinkingIndex] = entry
+  const thinkingIndexes = entries
+    .map((entry, idx) => (entry.kind === 'thinking' ? idx : -1))
+    .filter((idx) => idx >= 0)
+  if (thinkingIndexes.length === 0 && opts?.thinking?.trim()) {
+    entries.push({
+      entry_id: 'thinking:1',
+      seq: nextFeedSeq(entries),
+      kind: 'thinking',
+      status: 'done',
+      content: opts.thinking.trim(),
+      meta: opts?.translatedThinking?.trim()
+        ? {
+            translated_content: opts.translatedThinking.trim(),
+            translation_failed: opts.translationFailed === true,
+          }
+        : opts?.translationFailed
+          ? { translation_failed: true }
+          : undefined,
+    })
+  } else {
+    thinkingIndexes.forEach((thinkingIndex) => {
+      const entry = { ...entries[thinkingIndex] }
+      if (!entry.content.trim() && thinkingIndexes.length === 1 && opts?.thinking?.trim()) {
+        entry.content = opts.thinking.trim()
+      }
+      if (
+        thinkingIndexes.length === 1 &&
+        opts?.translatedThinking?.trim() &&
+        typeof entry.meta?.translated_content !== 'string'
+      ) {
+        entry.meta = mergeMeta(entry.meta, {
+          translated_content: opts.translatedThinking.trim(),
+          translation_failed: opts.translationFailed === true,
+        })
+      } else if (opts?.translationFailed) {
+        entry.meta = mergeMeta(entry.meta, { translation_failed: true })
+      }
+      entry.status = entry.status === 'failed' ? 'failed' : 'done'
+      entries[thinkingIndex] = entry
+    })
   }
   entries = entries.map((entry) => ({
     ...entry,
@@ -185,7 +239,7 @@ export function finalizeTurnFeed(
   }))
   return {
     ...current,
-    entries,
+    entries: sortEntries(entries),
     completed_assistant_message_id: assistantMessageId,
   }
 }
