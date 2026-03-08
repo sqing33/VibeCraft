@@ -1,10 +1,4 @@
-# mcp-skill-settings Specification
-
-## Purpose
-
-MCP / Skill settings define how `vibe-tree` persists Codex-facing MCP registries, exposes them in the settings UI, discovers skills from project/user directories, and applies both to chat sessions without mutating the user's global Codex configuration.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: System MUST expose MCP settings as a JSON-native registry with per-tool defaults
 The system MUST provide settings APIs and UI for a global MCP registry.

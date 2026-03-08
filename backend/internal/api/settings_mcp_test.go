@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"vibe-tree/backend/internal/config"
@@ -36,12 +37,8 @@ func TestMCPSettings_GetAndPut(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(map[string]any{"servers": []map[string]any{{
-		"id":                           "filesystem",
-		"label":                        "Filesystem",
-		"enabled":                      true,
-		"enabled_cli_tool_ids":         []string{"codex"},
+		"raw_json":                     `{"mcpServers":{"filesystem":{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem"]}}}`,
 		"default_enabled_cli_tool_ids": []string{"codex"},
-		"config":                       map[string]any{"command": "npx", "args": []string{"-y", "@modelcontextprotocol/server-filesystem"}},
 	}}})
 	req, err := http.NewRequest(http.MethodPut, env.httpSrv.URL+"/api/v1/settings/mcp", bytes.NewReader(body))
 	if err != nil {
@@ -59,6 +56,7 @@ func TestMCPSettings_GetAndPut(t *testing.T) {
 	var updated struct {
 		Servers []struct {
 			ID                       string   `json:"id"`
+			RawJSON                  string   `json:"raw_json"`
 			DefaultEnabledCLIToolIDs []string `json:"default_enabled_cli_tool_ids"`
 		} `json:"servers"`
 	}
@@ -67,5 +65,8 @@ func TestMCPSettings_GetAndPut(t *testing.T) {
 	}
 	if len(updated.Servers) != 1 || updated.Servers[0].ID != "filesystem" || len(updated.Servers[0].DefaultEnabledCLIToolIDs) != 1 {
 		t.Fatalf("unexpected mcp response: %#v", updated.Servers)
+	}
+	if !strings.Contains(updated.Servers[0].RawJSON, "filesystem") {
+		t.Fatalf("expected normalized raw_json, got %q", updated.Servers[0].RawJSON)
 	}
 }

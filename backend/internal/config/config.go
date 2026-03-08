@@ -22,11 +22,14 @@ type Config struct {
 
 type MCPServerConfig struct {
 	ID                       string         `json:"id"`
-	Label                    string         `json:"label,omitempty"`
-	Enabled                  bool           `json:"enabled"`
-	EnabledCLIToolIDs        []string       `json:"enabled_cli_tool_ids,omitempty"`
 	DefaultEnabledCLIToolIDs []string       `json:"default_enabled_cli_tool_ids,omitempty"`
 	Config                   map[string]any `json:"config,omitempty"`
+	RawJSON                  string         `json:"raw_json,omitempty"`
+
+	// Legacy fields kept for backward-compatible config decoding. New logic ignores them.
+	Label             string   `json:"label,omitempty"`
+	Enabled           bool     `json:"enabled,omitempty"`
+	EnabledCLIToolIDs []string `json:"enabled_cli_tool_ids,omitempty"`
 }
 
 type SkillBindingConfig struct {

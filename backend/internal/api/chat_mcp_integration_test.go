@@ -15,7 +15,7 @@ func TestChatSession_CreateUsesDefaultMCPSelectionAndPatchPersists(t *testing.T)
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 	cfg := config.Default()
 	cfg.CLITools = []config.CLIToolConfig{{ID: "codex", Label: "Codex", ProtocolFamily: "openai", CLIFamily: "codex", Enabled: true}}
-	cfg.MCPServers = []config.MCPServerConfig{{ID: "filesystem", Label: "Filesystem", Enabled: true, EnabledCLIToolIDs: []string{"codex"}, DefaultEnabledCLIToolIDs: []string{"codex"}, Config: map[string]any{"command": "npx"}}}
+	cfg.MCPServers = []config.MCPServerConfig{{ID: "filesystem", DefaultEnabledCLIToolIDs: []string{"codex"}, Config: map[string]any{"command": "npx"}}}
 	if err := config.NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
 		t.Fatalf("normalize cli tools: %v", err)
 	}

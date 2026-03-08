@@ -142,7 +142,7 @@ function summarizeMCPSelection(selectedIDs: string[], servers: MCPServerSetting[
   if (selectedSet.size === 0) return '未选择 MCP'
   const labels = servers
     .filter((server) => selectedSet.has(server.id))
-    .map((server) => server.label?.trim() || server.id)
+    .map((server) => server.id)
     .filter(Boolean)
   if (labels.length === 0) return `已选 ${selectedSet.size} 个 MCP`
   if (labels.length <= 2) return labels.join('、')
@@ -332,10 +332,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     (cliToolId?: string) => {
       const targetToolId = cliToolId?.trim() || ''
       if (!targetToolId) return [] as MCPServerSetting[]
-      return (mcpSettings?.servers ?? []).filter((server) => {
-        if (!server.enabled) return false
-        return (server.enabled_cli_tool_ids ?? []).includes(targetToolId)
-      })
+      return mcpSettings?.servers ?? []
     },
     [mcpSettings?.servers],
   )
@@ -1189,7 +1186,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                       return (
                         <div key={server.id} className="flex items-center justify-between gap-3 rounded-xl border bg-background/70 px-3 py-2">
                           <div className="min-w-0">
-                            <div className="truncate text-sm font-medium">{server.label?.trim() || server.id}</div>
+                            <div className="truncate text-sm font-medium">{server.id}</div>
                             <div className="mt-1 truncate text-[11px] text-muted-foreground">{server.id}</div>
                           </div>
                           <Switch
@@ -1360,7 +1357,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                       return (
                         <div key={server.id} className="flex items-center justify-between gap-3 rounded-xl border bg-background/70 px-3 py-2">
                           <div className="min-w-0">
-                            <div className="truncate text-sm font-medium">{server.label?.trim() || server.id}</div>
+                            <div className="truncate text-sm font-medium">{server.id}</div>
                             <div className="mt-1 truncate text-[11px] text-muted-foreground">{server.id}</div>
                           </div>
                           <Switch

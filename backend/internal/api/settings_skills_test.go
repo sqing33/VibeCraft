@@ -1,7 +1,6 @@
 package api_test
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -11,7 +10,7 @@ import (
 	"vibe-tree/backend/internal/config"
 )
 
-func TestSkillSettings_GetAndPut(t *testing.T) {
+func TestSkillSettings_GetReturnsDiscoveredCatalog(t *testing.T) {
 	xdg := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
@@ -47,8 +46,10 @@ func TestSkillSettings_GetAndPut(t *testing.T) {
 	}
 	var got struct {
 		Skills []struct {
-			ID      string `json:"id"`
-			Enabled bool   `json:"enabled"`
+			ID          string `json:"id"`
+			Description string `json:"description"`
+			Path        string `json:"path"`
+			Source      string `json:"source"`
 		} `json:"skills"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
@@ -56,36 +57,15 @@ func TestSkillSettings_GetAndPut(t *testing.T) {
 	}
 	found := false
 	for _, item := range got.Skills {
-		if item.ID == "my-skill" {
-			found = true
-			if !item.Enabled {
-				t.Fatalf("expected discovered skill enabled")
-			}
+		if item.ID != "my-skill" {
+			continue
+		}
+		found = true
+		if item.Source == "" || item.Path == "" {
+			t.Fatalf("expected source/path in response: %#v", item)
 		}
 	}
 	if !found {
-		t.Fatalf("expected discovered skill in response")
-	}
-
-	body, _ := json.Marshal(map[string]any{"skills": []map[string]any{{
-		"id":                   "my-skill",
-		"description":          "local skill",
-		"path":                 skillPath,
-		"source":               "codex",
-		"enabled":              true,
-		"enabled_cli_tool_ids": []string{"codex"},
-	}}})
-	req, err := http.NewRequest(http.MethodPut, env.httpSrv.URL+"/api/v1/settings/skills", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("new put request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	putRes, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("put skill settings: %v", err)
-	}
-	defer putRes.Body.Close()
-	if putRes.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected put status: %s", putRes.Status)
+		t.Fatalf("expected my-skill in response: %#v", got.Skills)
 	}
 }

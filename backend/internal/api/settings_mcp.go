@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -18,9 +20,7 @@ type mcpSettingsResponse struct {
 
 type mcpServerPublic struct {
 	ID                       string         `json:"id"`
-	Label                    string         `json:"label,omitempty"`
-	Enabled                  bool           `json:"enabled"`
-	EnabledCLIToolIDs        []string       `json:"enabled_cli_tool_ids,omitempty"`
+	RawJSON                  string         `json:"raw_json"`
 	DefaultEnabledCLIToolIDs []string       `json:"default_enabled_cli_tool_ids,omitempty"`
 	Config                   map[string]any `json:"config,omitempty"`
 }
@@ -55,15 +55,17 @@ func putMCPSettingsHandler() gin.HandlerFunc {
 			return
 		}
 		next := make([]config.MCPServerConfig, 0, len(req.Servers))
-		for _, item := range req.Servers {
-			next = append(next, config.MCPServerConfig{
-				ID:                       strings.TrimSpace(item.ID),
-				Label:                    strings.TrimSpace(item.Label),
-				Enabled:                  item.Enabled,
-				EnabledCLIToolIDs:        append([]string(nil), item.EnabledCLIToolIDs...),
-				DefaultEnabledCLIToolIDs: append([]string(nil), item.DefaultEnabledCLIToolIDs...),
-				Config:                   cloneJSONMap(item.Config),
-			})
+		for index, item := range req.Servers {
+			parsed, err := config.ParseMCPServersJSON(item.RawJSON)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "servers[" + strconv.Itoa(index) + "]: " + err.Error()})
+				return
+			}
+			defaults := normalizeStringList(item.DefaultEnabledCLIToolIDs)
+			for _, server := range parsed {
+				server.DefaultEnabledCLIToolIDs = append([]string(nil), defaults...)
+				next = append(next, server)
+			}
 		}
 		cfg.MCPServers = next
 		if err := config.NormalizeMCPServers(&cfg.MCPServers, cfg.CLITools); err != nil {
@@ -83,12 +85,32 @@ func buildMCPSettingsResponse(cfg config.Config) mcpSettingsResponse {
 	for _, item := range cfg.MCPServers {
 		servers = append(servers, mcpServerPublic{
 			ID:                       strings.TrimSpace(item.ID),
-			Label:                    strings.TrimSpace(item.Label),
-			Enabled:                  item.Enabled,
-			EnabledCLIToolIDs:        append([]string(nil), item.EnabledCLIToolIDs...),
+			RawJSON:                  strings.TrimSpace(item.RawJSON),
 			DefaultEnabledCLIToolIDs: append([]string(nil), item.DefaultEnabledCLIToolIDs...),
 			Config:                   cloneJSONMap(item.Config),
 		})
 	}
+	sort.Slice(servers, func(i, j int) bool { return servers[i].ID < servers[j].ID })
 	return mcpSettingsResponse{Servers: servers, Tools: buildCLIToolSettingsResponse(cfg).Tools}
+}
+
+func normalizeStringList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }

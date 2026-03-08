@@ -159,9 +159,7 @@ export async function putCLIToolSettings(daemonUrl: string, req: CLIToolSettings
 
 export type MCPServerSetting = {
   id: string
-  label?: string
-  enabled: boolean
-  enabled_cli_tool_ids: string[]
+  raw_json: string
   default_enabled_cli_tool_ids: string[]
   config?: Record<string, unknown>
 }
@@ -205,37 +203,14 @@ export type SkillBindingSetting = {
   description?: string
   path?: string
   source?: string
-  enabled: boolean
-  enabled_cli_tool_ids: string[]
 }
 
 export type SkillSettings = {
-  skills: SkillBindingSetting[]
-  tools: CLITool[]
-}
-
-export type PutSkillSettingsRequest = {
   skills: SkillBindingSetting[]
 }
 
 export async function fetchSkillSettings(daemonUrl: string): Promise<SkillSettings> {
   const res = await fetch(`${daemonUrl}/api/v1/settings/skills`)
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
-  }
-  return (await res.json()) as SkillSettings
-}
-
-export async function putSkillSettings(
-  daemonUrl: string,
-  req: PutSkillSettingsRequest,
-): Promise<SkillSettings> {
-  const res = await fetch(`${daemonUrl}/api/v1/settings/skills`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-  })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())

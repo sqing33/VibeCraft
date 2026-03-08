@@ -85,8 +85,8 @@
 | `backend/internal/config/clitools.go`                | CLI 工具配置：维护 `Codex CLI` / `Claude Code` 的协议绑定、默认模型与命令路径 |
 | `backend/internal/config/mcp_skill_settings.go`     | MCP / Skill 配置归一化与运行时筛选：默认启用集合、有效 MCP 映射、Skill 绑定合并与 expert 交集裁剪 |
 | `backend/internal/api/settings_clitools.go`          | CLI 工具设置 API：读取/保存工具配置与默认模型，供设置页 `CLI 工具` Tab 使用 |
-| `backend/internal/api/settings_mcp.go`               | MCP 设置 API：读取/保存 MCP 注册表、按 CLI 工具启用关系与默认启用关系 |
-| `backend/internal/api/settings_skills.go`            | Skill 设置 API：合并 discovered skills 与持久化绑定，供设置页 `技能` Tab 使用 |
+| `backend/internal/api/settings_mcp.go`               | MCP 设置 API：以原始 JSON 读写 MCP 注册表，并按 CLI 工具维护“默认启用”集合 |
+| `backend/internal/api/settings_skills.go`            | Skill 设置 API：返回项目/用户目录发现到的 skills 目录状态，供设置页 `技能` Tab 展示 |
 | `backend/internal/openaicompat/compat.go`   | OpenAI 兼容适配：按模型探测/持久化 `responses` 或 `chat/completions`，并提供 endpoint mismatch 分类与 plain-text 调用帮助         |
 | `backend/internal/workspace/manager.go`    | Workspace 策略管理：`read_only/shared_workspace/git_worktree` 解析、worktree 分配、代码变更检查与 artifact 生成                      |
 | `backend/internal/dag/dag.go`              | DAG 解析与校验：从 master 输出提取第一个 JSON 对象并做 MVP 约束校验（无环/引用存在/expert 校验）                                      |
@@ -123,8 +123,8 @@
 | `ui/src/components/DAGView.tsx`            | React Flow DAG 视图：dagre 自动布局 + 节点按状态上色 + 点击节点联动终端                                                               |
 | `ui/src/components/TerminalPane.tsx`       | xterm.js 封装组件（fit + write/reset 接口）                                                                                           |
 | `ui/src/app/components/CLIToolSettingsTab.tsx` | 系统设置「CLI 工具」Tab：管理 `Codex CLI` / `Claude Code` 的启用状态、默认模型与命令路径                                           |
-| `ui/src/app/components/MCPSettingsTab.tsx`     | 系统设置「MCP」Tab：管理 MCP 注册表、按 CLI 工具启用关系与默认启用关系，并编辑原始 MCP config JSON |
-| `ui/src/app/components/SkillSettingsTab.tsx`   | 系统设置「技能」Tab：展示 discovered skills，统一开关并维护按 CLI 工具的启用绑定 |
+| `ui/src/app/components/MCPSettingsTab.tsx`     | 系统设置「MCP」Tab：以 JSON 编辑 MCP 注册表，并按 CLI 工具维护“默认启用”集合 |
+| `ui/src/app/components/SkillSettingsTab.tsx`   | 系统设置「技能」Tab：展示项目/用户目录中已发现的 skills 与来源信息 |
 | `ui/src/app/components/LLMSettingsTab.tsx` | 系统设置「模型」Tab：编辑 Sources 与 Models 组成的模型池，供 CLI 工具与 helper SDK 复用                                              |
 | `ui/src/app/components/BasicSettingsTab.tsx` | 系统设置「基本设置」Tab：配置思考过程翻译的 API 源、翻译模型与目标 AI 模型列表                                                     |
 | `ui/src/app/components/ExpertSettingsTab.tsx` | 系统设置「专家」Tab：专家列表、AI 生成专家、生成会话历史、快照发布                                                                   |

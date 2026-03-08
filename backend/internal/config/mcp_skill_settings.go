@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,9 +25,28 @@ func NormalizeMCPServers(servers *[]MCPServerConfig, cliTools []CLIToolConfig) e
 	for i := range *servers {
 		item := (*servers)[i]
 		item.ID = strings.TrimSpace(item.ID)
-		item.Label = strings.TrimSpace(item.Label)
-		item.EnabledCLIToolIDs = normalizeCLIToolIDList(item.EnabledCLIToolIDs, allowedTools)
+		item.RawJSON = strings.TrimSpace(item.RawJSON)
 		item.DefaultEnabledCLIToolIDs = normalizeCLIToolIDList(item.DefaultEnabledCLIToolIDs, allowedTools)
+		if item.RawJSON != "" {
+			parsed, err := ParseMCPServersJSON(item.RawJSON)
+			if err != nil {
+				return fmt.Errorf("mcp_servers[%d].raw_json: %w", i, err)
+			}
+			if len(parsed) != 1 {
+				return fmt.Errorf("mcp_servers[%d].raw_json must contain exactly one server", i)
+			}
+			parsedItem := parsed[0]
+			if item.ID != "" && item.ID != parsedItem.ID {
+				return fmt.Errorf("mcp_servers[%d].id %q does not match raw_json id %q", i, item.ID, parsedItem.ID)
+			}
+			item.ID = parsedItem.ID
+			if len(item.Config) == 0 {
+				item.Config = parsedItem.Config
+			}
+			if item.RawJSON == "" {
+				item.RawJSON = parsedItem.RawJSON
+			}
+		}
 		if item.ID == "" {
 			return fmt.Errorf("mcp_servers[%d].id is required", i)
 		}
@@ -34,62 +54,68 @@ func NormalizeMCPServers(servers *[]MCPServerConfig, cliTools []CLIToolConfig) e
 			return fmt.Errorf("mcp_servers[%d].id %q is duplicated", i, item.ID)
 		}
 		seen[item.ID] = struct{}{}
-		if item.Label == "" {
-			item.Label = item.ID
-		}
 		if item.Config == nil {
 			item.Config = map[string]any{}
 		}
 		if len(item.Config) == 0 {
 			return fmt.Errorf("mcp_servers[%d].config is required", i)
 		}
-		defaultAllowed := make(map[string]struct{}, len(item.EnabledCLIToolIDs))
-		for _, toolID := range item.EnabledCLIToolIDs {
-			defaultAllowed[toolID] = struct{}{}
-		}
-		for _, toolID := range item.DefaultEnabledCLIToolIDs {
-			if _, ok := defaultAllowed[toolID]; !ok {
-				return fmt.Errorf("mcp_servers[%d].default_enabled_cli_tool_ids contains %q which is not enabled", i, toolID)
-			}
-		}
-		out = append(out, item)
+		item.RawJSON = canonicalMCPServerRawJSON(item.ID, item.Config)
+		out = append(out, MCPServerConfig{
+			ID:                       item.ID,
+			DefaultEnabledCLIToolIDs: append([]string(nil), item.DefaultEnabledCLIToolIDs...),
+			Config:                   cloneJSONMap(item.Config),
+			RawJSON:                  item.RawJSON,
+		})
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	*servers = out
 	return nil
 }
 
-func NormalizeSkillBindings(bindings *[]SkillBindingConfig, cliTools []CLIToolConfig) error {
-	if bindings == nil {
-		return nil
+func ParseMCPServersJSON(raw string) ([]MCPServerConfig, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, fmt.Errorf("JSON is required")
 	}
-	if len(*bindings) == 0 {
-		*bindings = nil
-		return nil
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return nil, fmt.Errorf("invalid JSON: %w", err)
 	}
-	allowedTools := cliToolIDSet(cliTools)
-	seen := make(map[string]struct{}, len(*bindings))
-	out := make([]SkillBindingConfig, 0, len(*bindings))
-	for i := range *bindings {
-		item := (*bindings)[i]
-		item.ID = strings.TrimSpace(item.ID)
-		item.Description = strings.TrimSpace(item.Description)
-		item.Path = strings.TrimSpace(item.Path)
-		item.Source = strings.TrimSpace(item.Source)
-		item.EnabledCLIToolIDs = normalizeCLIToolIDList(item.EnabledCLIToolIDs, allowedTools)
-		if item.ID == "" {
-			return fmt.Errorf("skill_bindings[%d].id is required", i)
+	registry := payload
+	if nested, ok := payload["mcpServers"]; ok {
+		nestedMap, ok := nested.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("mcpServers must be an object")
 		}
-		if _, ok := seen[item.ID]; ok {
-			return fmt.Errorf("skill_bindings[%d].id %q is duplicated", i, item.ID)
-		}
-		seen[item.ID] = struct{}{}
-		if item.Path != "" {
-			item.Path = filepath.Clean(item.Path)
-		}
-		out = append(out, item)
+		registry = nestedMap
 	}
-	*bindings = out
-	return nil
+	if len(registry) == 0 {
+		return nil, fmt.Errorf("at least one MCP server is required")
+	}
+	keys := make([]string, 0, len(registry))
+	for key := range registry {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]MCPServerConfig, 0, len(keys))
+	for _, key := range keys {
+		id := strings.TrimSpace(key)
+		if id == "" {
+			return nil, fmt.Errorf("MCP server key cannot be empty")
+		}
+		cfgMap, ok := registry[key].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("MCP server %q must be an object", id)
+		}
+		configMap := cloneJSONMap(cfgMap)
+		out = append(out, MCPServerConfig{
+			ID:      id,
+			Config:  configMap,
+			RawJSON: canonicalMCPServerRawJSON(id, configMap),
+		})
+	}
+	return out, nil
 }
 
 func DefaultEnabledMCPServerIDs(cfg Config, cliToolID string) []string {
@@ -99,9 +125,6 @@ func DefaultEnabledMCPServerIDs(cfg Config, cliToolID string) []string {
 	}
 	out := make([]string, 0)
 	for _, server := range cfg.MCPServers {
-		if !server.Enabled {
-			continue
-		}
 		if !containsString(server.DefaultEnabledCLIToolIDs, cliToolID) {
 			continue
 		}
@@ -132,12 +155,6 @@ func EffectiveMCPServers(cfg Config, cliToolID string, selectedIDs []string) map
 	}
 	out := make(map[string]map[string]any)
 	for _, server := range cfg.MCPServers {
-		if !server.Enabled {
-			continue
-		}
-		if !containsString(server.EnabledCLIToolIDs, cliToolID) {
-			continue
-		}
 		if _, ok := selected[server.ID]; !ok {
 			continue
 		}
@@ -152,89 +169,44 @@ func EffectiveMCPServers(cfg Config, cliToolID string, selectedIDs []string) map
 	return out
 }
 
-func EffectiveSkillBindings(bindings []SkillBindingConfig, cliToolID string) []SkillBindingConfig {
-	cliToolID = strings.TrimSpace(cliToolID)
-	if cliToolID == "" {
+func NormalizeSkillBindings(bindings *[]SkillBindingConfig, _ []CLIToolConfig) error {
+	if bindings == nil {
 		return nil
 	}
-	out := make([]SkillBindingConfig, 0, len(bindings))
-	for _, item := range bindings {
-		if !item.Enabled {
-			continue
+	if len(*bindings) == 0 {
+		*bindings = nil
+		return nil
+	}
+	seen := make(map[string]struct{}, len(*bindings))
+	out := make([]SkillBindingConfig, 0, len(*bindings))
+	for i := range *bindings {
+		item := (*bindings)[i]
+		item.ID = strings.TrimSpace(item.ID)
+		item.Description = strings.TrimSpace(item.Description)
+		item.Path = strings.TrimSpace(item.Path)
+		item.Source = strings.TrimSpace(item.Source)
+		if item.ID == "" {
+			return fmt.Errorf("skill_bindings[%d].id is required", i)
 		}
-		if !containsString(item.EnabledCLIToolIDs, cliToolID) {
-			continue
+		if _, ok := seen[item.ID]; ok {
+			return fmt.Errorf("skill_bindings[%d].id %q is duplicated", i, item.ID)
+		}
+		seen[item.ID] = struct{}{}
+		if item.Path != "" {
+			item.Path = filepath.Clean(item.Path)
 		}
 		out = append(out, item)
 	}
-	return out
-}
-
-func MergeDiscoveredSkillBindings(cfg Config, discovered []skillcatalog.Entry) []SkillBindingConfig {
-	toolIDs := availableCLIToolIDs(cfg.CLITools)
-	byID := make(map[string]SkillBindingConfig, len(cfg.SkillBindings))
-	for _, item := range cfg.SkillBindings {
-		byID[strings.TrimSpace(item.ID)] = item
-	}
-	orderedIDs := make([]string, 0, len(discovered)+len(cfg.SkillBindings))
-	seen := make(map[string]struct{}, len(discovered)+len(cfg.SkillBindings))
-	pushID := func(id string) {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			return
-		}
-		if _, ok := seen[id]; ok {
-			return
-		}
-		seen[id] = struct{}{}
-		orderedIDs = append(orderedIDs, id)
-	}
-	for _, entry := range discovered {
-		pushID(entry.ID)
-	}
-	for _, item := range cfg.SkillBindings {
-		pushID(item.ID)
-	}
-
-	discoveredByID := make(map[string]skillcatalog.Entry, len(discovered))
-	for _, entry := range discovered {
-		discoveredByID[strings.TrimSpace(entry.ID)] = entry
-	}
-
-	out := make([]SkillBindingConfig, 0, len(orderedIDs))
-	for _, id := range orderedIDs {
-		binding, ok := byID[id]
-		if !ok {
-			entry := discoveredByID[id]
-			binding = SkillBindingConfig{
-				ID:                id,
-				Description:       strings.TrimSpace(entry.Description),
-				Path:              strings.TrimSpace(entry.Path),
-				Source:            inferSkillSource(entry.Path),
-				Enabled:           true,
-				EnabledCLIToolIDs: append([]string(nil), toolIDs...),
-			}
-		} else {
-			entry := discoveredByID[id]
-			if strings.TrimSpace(binding.Description) == "" {
-				binding.Description = strings.TrimSpace(entry.Description)
-			}
-			if strings.TrimSpace(binding.Path) == "" {
-				binding.Path = strings.TrimSpace(entry.Path)
-			}
-			if strings.TrimSpace(binding.Source) == "" {
-				binding.Source = inferSkillSource(binding.Path)
-			}
-		}
-		out = append(out, binding)
-	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
+	*bindings = out
+	return nil
 }
 
-func EffectiveSkillCatalogEntries(cfg Config, cliToolID string, expertSkillIDs []string, discovered []skillcatalog.Entry) []skillcatalog.Entry {
-	bindings := EffectiveSkillBindings(MergeDiscoveredSkillBindings(cfg, discovered), cliToolID)
-	if len(bindings) == 0 {
+func EffectiveSkillCatalogEntries(_ Config, _ string, expertSkillIDs []string, discovered []skillcatalog.Entry) []skillcatalog.Entry {
+	if len(discovered) == 0 {
+		discovered = skillcatalog.Discover()
+	}
+	if len(discovered) == 0 {
 		return nil
 	}
 	allowedExpertSkills := make(map[string]struct{}, len(expertSkillIDs))
@@ -246,26 +218,36 @@ func EffectiveSkillCatalogEntries(cfg Config, cliToolID string, expertSkillIDs [
 		allowedExpertSkills[item] = struct{}{}
 	}
 	strictExpert := len(allowedExpertSkills) > 0
-	out := make([]skillcatalog.Entry, 0, len(bindings))
-	for _, binding := range bindings {
+	out := make([]skillcatalog.Entry, 0, len(discovered))
+	seen := make(map[string]struct{}, len(discovered))
+	for _, entry := range discovered {
+		id := strings.TrimSpace(entry.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
 		if strictExpert {
-			if _, ok := allowedExpertSkills[binding.ID]; !ok {
+			if _, ok := allowedExpertSkills[id]; !ok {
 				continue
 			}
 		}
-		path := strings.TrimSpace(binding.Path)
+		path := strings.TrimSpace(entry.Path)
 		if path == "" {
 			continue
 		}
 		if info, err := os.Stat(path); err != nil || info.IsDir() {
 			continue
 		}
+		seen[id] = struct{}{}
 		out = append(out, skillcatalog.Entry{
-			ID:          strings.TrimSpace(binding.ID),
-			Description: strings.TrimSpace(binding.Description),
+			ID:          id,
+			Description: strings.TrimSpace(entry.Description),
 			Path:        path,
 		})
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 
@@ -304,19 +286,6 @@ func cliToolIDSet(cliTools []CLIToolConfig) map[string]struct{} {
 		}
 		out[id] = struct{}{}
 	}
-	return out
-}
-
-func availableCLIToolIDs(cliTools []CLIToolConfig) []string {
-	out := make([]string, 0, len(cliTools))
-	for _, item := range cliTools {
-		id := strings.TrimSpace(item.ID)
-		if id == "" {
-			continue
-		}
-		out = append(out, id)
-	}
-	sort.Strings(out)
 	return out
 }
 
@@ -371,4 +340,17 @@ func cloneJSONValue(value any) any {
 	default:
 		return typed
 	}
+}
+
+func canonicalMCPServerRawJSON(id string, cfg map[string]any) string {
+	payload := map[string]any{
+		"mcpServers": map[string]any{
+			strings.TrimSpace(id): cloneJSONMap(cfg),
+		},
+	}
+	b, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }

@@ -13,8 +13,10 @@ import (
 
 func TestResolveCodexRuntimeSettings_InjectsSelectedMCPsAndSkills(t *testing.T) {
 	xdg := t.TempDir()
+	home := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
-	skillPath := filepath.Join(t.TempDir(), "skills", "ui-ux-pro-max", "SKILL.md")
+	t.Setenv("HOME", home)
+	skillPath := filepath.Join(home, ".codex", "skills", "ui-ux-pro-max", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(skillPath), 0o755); err != nil {
 		t.Fatalf("mkdir skill dir: %v", err)
 	}
@@ -25,16 +27,12 @@ func TestResolveCodexRuntimeSettings_InjectsSelectedMCPsAndSkills(t *testing.T) 
 	cfg := config.Default()
 	cfg.CLITools = []config.CLIToolConfig{{ID: "codex", Label: "Codex", ProtocolFamily: "openai", CLIFamily: "codex", Enabled: true}}
 	cfg.Experts = append(cfg.Experts, config.ExpertConfig{ID: "ui-expert", Label: "UI", Provider: "cli", CLIFamily: "codex", Model: "gpt-5-codex", EnabledSkills: []string{"ui-ux-pro-max"}, Env: map[string]string{}, TimeoutMs: 30000})
-	cfg.MCPServers = []config.MCPServerConfig{{ID: "filesystem", Enabled: true, EnabledCLIToolIDs: []string{"codex"}, DefaultEnabledCLIToolIDs: []string{"codex"}, Config: map[string]any{"command": "npx", "args": []any{"-y", "@modelcontextprotocol/server-filesystem"}}}}
-	cfg.SkillBindings = []config.SkillBindingConfig{{ID: "ui-ux-pro-max", Path: skillPath, Description: "UI skill", Source: "filesystem", Enabled: true, EnabledCLIToolIDs: []string{"codex"}}}
+	cfg.MCPServers = []config.MCPServerConfig{{ID: "filesystem", DefaultEnabledCLIToolIDs: []string{"codex"}, Config: map[string]any{"command": "npx", "args": []any{"-y", "@modelcontextprotocol/server-filesystem"}}}}
 	if err := config.NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
 		t.Fatalf("normalize cli tools: %v", err)
 	}
 	if err := config.NormalizeMCPServers(&cfg.MCPServers, cfg.CLITools); err != nil {
 		t.Fatalf("normalize mcp: %v", err)
-	}
-	if err := config.NormalizeSkillBindings(&cfg.SkillBindings, cfg.CLITools); err != nil {
-		t.Fatalf("normalize skills: %v", err)
 	}
 	cfgPath, err := config.Path()
 	if err != nil {
@@ -57,7 +55,7 @@ func TestResolveCodexRuntimeSettings_InjectsSelectedMCPsAndSkills(t *testing.T) 
 	if len(mcp) != 1 || mcp["filesystem"] == nil {
 		t.Fatalf("unexpected mcp config: %#v", mcp)
 	}
-	if !strings.Contains(runtime.BaseInstructions, "[Enabled Skills]") || !strings.Contains(runtime.BaseInstructions, "ui-ux-pro-max") || !strings.Contains(runtime.BaseInstructions, skillPath) {
+	if !strings.Contains(runtime.BaseInstructions, "[Enabled Skills]") || !strings.Contains(runtime.BaseInstructions, "ui-ux-pro-max") || !strings.Contains(runtime.BaseInstructions, "path=") {
 		t.Fatalf("unexpected base instructions: %s", runtime.BaseInstructions)
 	}
 }

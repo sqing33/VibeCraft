@@ -49,7 +49,6 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.GET("/settings/mcp", getMCPSettingsHandler())
 	v1.PUT("/settings/mcp", putMCPSettingsHandler())
 	v1.GET("/settings/skills", getSkillSettingsHandler())
-	v1.PUT("/settings/skills", putSkillSettingsHandler())
 	v1.GET("/settings/llm", getLLMSettingsHandler())
 	v1.PUT("/settings/llm", putLLMSettingsHandler(deps))
 	v1.POST("/settings/llm/test", llmTestHandler())
