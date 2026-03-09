@@ -85,3 +85,18 @@ func TestEffectiveSkillCatalogEntries_RespectsExpertIntersection(t *testing.T) {
 		t.Fatalf("unexpected effective skills: %#v", got)
 	}
 }
+
+func TestEffectiveSkillCatalogEntries_RespectsDisabledBinding(t *testing.T) {
+	dir := t.TempDir()
+	skillPath := filepath.Join(dir, "ui-ux-pro-max", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(skillPath, []byte("name: ui-ux-pro-max\ndescription: ui\n"), 0o644); err != nil {
+		t.Fatalf("write skill file: %v", err)
+	}
+	got := config.EffectiveSkillCatalogEntries(config.Config{SkillBindings: []config.SkillBindingConfig{{ID: "ui-ux-pro-max", Enabled: false}}}, "codex", []string{"ui-ux-pro-max"}, []skillcatalog.Entry{{ID: "ui-ux-pro-max", Path: skillPath, Description: "ui"}})
+	if len(got) != 0 {
+		t.Fatalf("expected disabled skill to be filtered out: %#v", got)
+	}
+}

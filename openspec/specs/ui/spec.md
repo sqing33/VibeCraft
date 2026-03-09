@@ -482,12 +482,20 @@ The chat page MUST provide actions for manual compaction and session fork. The U
 - **AND** the new forked session appears in the session list
 
 ### Requirement: Settings MUST expose a dedicated CLI tools tab
-The UI MUST provide a dedicated `CLI 工具` tab for managing `Codex CLI` and `Claude Code`, including enablement, default model selection, and optional command path override.
+The UI MUST provide a dedicated `CLI 工具` tab for managing `Codex CLI`, `Claude Code`, and `iFlow CLI`.
 
-#### Scenario: User manages codex and claude tools
+For `iFlow CLI`, the tab MUST expose dedicated official-auth and official-model controls instead of reusing the shared LLM model pool.
+
+#### Scenario: User manages codex, claude, and iflow tools
 - **WHEN** user opens System Settings
 - **THEN** the UI shows a `CLI 工具` tab
-- **AND** the tab allows managing both primary execution tools
+- **AND** the tab allows managing all three primary execution tools
+
+#### Scenario: User starts iFlow browser login from settings
+- **WHEN** the user clicks the iFlow browser-login action
+- **THEN** the frontend starts a daemon-managed auth session
+- **AND** shows the real OAuth URL parsed from the iFlow terminal output
+- **AND** allows the user to submit the returned authorization code
 
 ### Requirement: Chat UI SHALL support runtime-first model selection
 The chat page MUST let the user select a conversation runtime first and then choose a compatible model from that runtime's model pool.
@@ -498,6 +506,7 @@ At minimum, when corresponding models exist, the selector MUST expose:
 
 - `Codex CLI`
 - `Claude Code`
+- `iFlow CLI`
 - `OpenAI SDK`
 - `Anthropic SDK`
 
@@ -505,9 +514,10 @@ For CLI runtimes, the model selector MUST only show models compatible with that 
 
 For SDK runtimes, the model selector MUST only show models belonging to the selected provider.
 
-#### Scenario: User chooses codex then openai model
-- **WHEN** user selects `Codex CLI` in the chat composer
-- **THEN** the model selector only shows OpenAI-compatible models
+#### Scenario: User chooses iFlow then iFlow model
+- **WHEN** user selects `iFlow CLI` in the chat composer
+- **THEN** the model selector only shows the `iflow_models` configured in the iFlow CLI card
+- **AND** the default value comes from `iflow_default_model`
 
 #### Scenario: User chooses OpenAI SDK
 - **WHEN** user selects `OpenAI SDK` in the chat composer
@@ -517,6 +527,10 @@ For SDK runtimes, the model selector MUST only show models belonging to the sele
 #### Scenario: Active SDK session restores selector state
 - **WHEN** an active session has `provider="openai"` or `provider="anthropic"` and no `cli_tool_id`
 - **THEN** the chat page restores the corresponding SDK runtime option and current model selection
+
+#### Scenario: Active IFLOW session restores selector state
+- **WHEN** an active session stores `cli_tool_id="iflow"`
+- **THEN** the chat page restores the `iFlow CLI` runtime option and current model selection
 
 ### Requirement: Chat model selectors MUST display the selected model label
 The Chat page's tool-first model selectors MUST visibly display the currently selected model label whenever the selected key matches an available model option.

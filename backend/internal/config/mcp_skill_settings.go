@@ -195,19 +195,33 @@ func NormalizeSkillBindings(bindings *[]SkillBindingConfig, _ []CLIToolConfig) e
 		if item.Path != "" {
 			item.Path = filepath.Clean(item.Path)
 		}
-		out = append(out, item)
+		out = append(out, SkillBindingConfig{
+			ID:          item.ID,
+			Description: item.Description,
+			Path:        item.Path,
+			Source:      item.Source,
+			Enabled:     item.Enabled,
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	*bindings = out
 	return nil
 }
 
-func EffectiveSkillCatalogEntries(_ Config, _ string, expertSkillIDs []string, discovered []skillcatalog.Entry) []skillcatalog.Entry {
+func EffectiveSkillCatalogEntries(cfg Config, _ string, expertSkillIDs []string, discovered []skillcatalog.Entry) []skillcatalog.Entry {
 	if len(discovered) == 0 {
 		discovered = skillcatalog.Discover()
 	}
 	if len(discovered) == 0 {
 		return nil
+	}
+	enabledBindings := make(map[string]bool, len(cfg.SkillBindings))
+	for _, item := range cfg.SkillBindings {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		enabledBindings[id] = item.Enabled
 	}
 	allowedExpertSkills := make(map[string]struct{}, len(expertSkillIDs))
 	for _, item := range expertSkillIDs {
@@ -226,6 +240,9 @@ func EffectiveSkillCatalogEntries(_ Config, _ string, expertSkillIDs []string, d
 			continue
 		}
 		if _, ok := seen[id]; ok {
+			continue
+		}
+		if enabled, ok := enabledBindings[id]; ok && !enabled {
 			continue
 		}
 		if strictExpert {

@@ -15,6 +15,7 @@ import (
 	"vibe-tree/backend/internal/chat"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/expert"
+	iflowcli "vibe-tree/backend/internal/iflow"
 	"vibe-tree/backend/internal/orchestration"
 	"vibe-tree/backend/internal/repolib"
 	"vibe-tree/backend/internal/runner"
@@ -30,6 +31,7 @@ type Deps struct {
 	Chat          *chat.Manager
 	Orchestration *orchestration.Manager
 	RepoLibrary   *repolib.Service
+	IFLOWAuth     *iflowcli.BrowserAuthManager
 }
 
 // Register 功能：注册 HTTP/WS 路由到 `/api/v1` 路由组。
@@ -46,9 +48,15 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.PUT("/settings/basic", putBasicSettingsHandler())
 	v1.GET("/settings/cli-tools", getCLIToolSettingsHandler())
 	v1.PUT("/settings/cli-tools", putCLIToolSettingsHandler(deps))
+	v1.POST("/settings/cli-tools/iflow/browser-auth", startIFLOWBrowserAuthHandler(deps))
+	v1.GET("/settings/cli-tools/iflow/browser-auth/:id", getIFLOWBrowserAuthHandler(deps))
+	v1.POST("/settings/cli-tools/iflow/browser-auth/:id/code", submitIFLOWBrowserAuthCodeHandler(deps))
+	v1.POST("/settings/cli-tools/iflow/browser-auth/:id/cancel", cancelIFLOWBrowserAuthHandler(deps))
 	v1.GET("/settings/mcp", getMCPSettingsHandler())
 	v1.PUT("/settings/mcp", putMCPSettingsHandler())
 	v1.GET("/settings/skills", getSkillSettingsHandler())
+	v1.PUT("/settings/skills", putSkillSettingsHandler())
+	v1.POST("/settings/skills/install", installSkillSettingsHandler())
 	v1.GET("/settings/llm", getLLMSettingsHandler())
 	v1.PUT("/settings/llm", putLLMSettingsHandler(deps))
 	v1.POST("/settings/llm/test", llmTestHandler())
@@ -60,6 +68,8 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.GET("/settings/experts/sessions/:id", getExpertBuilderSessionHandler(deps))
 	v1.POST("/settings/experts/sessions/:id/messages", postExpertBuilderMessageHandler(deps))
 	v1.POST("/settings/experts/sessions/:id/publish", publishExpertBuilderSnapshotHandler(deps))
+
+	v1.POST("/translate/text", translateTextHandler(deps))
 
 	v1.POST("/chat/sessions", createChatSessionHandler(deps))
 	v1.GET("/chat/sessions", listChatSessionsHandler(deps))

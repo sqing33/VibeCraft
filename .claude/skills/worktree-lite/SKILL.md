@@ -1,6 +1,6 @@
 ---
 name: worktree-lite
-description: 轻量 Git worktree 流程：修改前创建新 worktree、完成后输出审查摘要、明确询问用户是否合并、合并前生成“动作：修改内容”格式提交信息。Use when users want a simpler replacement for parafork or need create-review-merge flow with explicit merge approval.
+description: 轻量 Git worktree 流程：修改前创建新 worktree、完成后输出审查摘要、明确询问用户是否合并、合并前根据目标分支历史提交风格生成推荐提交标题。Use when users want a simpler replacement for parafork or need create-review-merge flow with explicit merge approval.
 ---
 
 # Worktree Lite
@@ -22,7 +22,7 @@ bash ".codex/skills/worktree-lite/scripts/worktree-lite.sh" <command> [args...]
 - `review [--base <branch>]`
 - `merge-options [--target <branch>] [--source <branch>] [--format <plain|codex>]`
 - `propose-message [--base <branch>]`（兼容旧流程）
-- `merge --target <branch> [--message "动作：修改内容"] [--source <branch>]`
+- `merge --target <branch> [--message "<commit title>"] [--source <branch>]`
 
 ## 默认执行流程
 
@@ -81,8 +81,11 @@ bash ".codex/skills/worktree-lite/scripts/worktree-lite.sh" <command> [args...]
 
 ## 提交标题格式
 
-- 模板：`动作：修改内容`（全角冒号）。
-- 动作词优先级：`修复 > 新增 > 优化 > 修改 > 合并`。
+- `merge-options` 会先分析 **目标分支** 最近提交标题风格，并据此生成推荐标题：
+  - **Conventional Commits**（例如 `feat(core): ...`）占比高 → 推荐输出 Conventional Commits 标题
+  - `动作：内容`（例如 `新增：...`）占比高 → 推荐输出 `动作：内容`
+  - 否则 → 推荐输出纯标题（不带前缀）
+- 推荐标题默认优先复用 **来源分支最新提交标题** 的“内容部分”（会自动去掉 `feat(scope):` / `动作：` 前缀）；若不可用则回退为基于 diff 文件集合的摘要。
 - 输出格式：
   - `推荐：...`
   - `备选1：...`

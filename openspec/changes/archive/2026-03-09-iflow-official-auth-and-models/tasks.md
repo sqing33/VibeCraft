@@ -1,0 +1,8 @@
+- [x] Extend CLI tool config with iFlow-only auth/model fields.
+- [x] Add iFlow browser-auth PTY manager and HTTP endpoints.
+- [x] Replace iFlow wrapper OpenAI-compatible env injection with official auth env injection.
+- [x] Inject iFlow managed home, MCP allow-list, and skill instructions before CLI runs.
+- [x] Update CLI Tool settings UI with iFlow auth + model controls.
+- [x] Update Chat / Repo Library selectors to use iFlow model lists.
+- [x] Add targeted backend tests and run frontend/backend validation.
+- [x] Sync OpenSpec baseline specs and archive the change.

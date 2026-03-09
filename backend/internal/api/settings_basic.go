@@ -16,8 +16,7 @@ type basicSettingsResponse struct {
 }
 
 type thinkingTranslationPublic struct {
-	SourceID       string   `json:"source_id"`
-	Model          string   `json:"model"`
+	ModelID        string   `json:"model_id"`
 	TargetModelIDs []string `json:"target_model_ids"`
 }
 
@@ -26,8 +25,7 @@ type putBasicSettingsRequest struct {
 }
 
 type putThinkingTranslation struct {
-	SourceID       string   `json:"source_id"`
-	Model          string   `json:"model"`
+	ModelID        string   `json:"model_id"`
 	TargetModelIDs []string `json:"target_model_ids"`
 }
 
@@ -61,8 +59,7 @@ func putBasicSettingsHandler() gin.HandlerFunc {
 		next := &config.BasicSettings{}
 		if req.ThinkingTranslation != nil {
 			next.ThinkingTranslation = &config.ThinkingTranslationSettings{
-				SourceID:       strings.TrimSpace(req.ThinkingTranslation.SourceID),
-				Model:          strings.TrimSpace(req.ThinkingTranslation.Model),
+				ModelID:        strings.TrimSpace(req.ThinkingTranslation.ModelID),
 				TargetModelIDs: append([]string(nil), req.ThinkingTranslation.TargetModelIDs...),
 			}
 		}
@@ -87,8 +84,7 @@ func buildBasicSettingsResponse(basic *config.BasicSettings) basicSettingsRespon
 		return resp
 	}
 	resp.ThinkingTranslation = &thinkingTranslationPublic{
-		SourceID:       strings.TrimSpace(basic.ThinkingTranslation.SourceID),
-		Model:          strings.TrimSpace(basic.ThinkingTranslation.Model),
+		ModelID:        strings.TrimSpace(basic.ThinkingTranslation.ModelID),
 		TargetModelIDs: append([]string(nil), basic.ThinkingTranslation.TargetModelIDs...),
 	}
 	return resp

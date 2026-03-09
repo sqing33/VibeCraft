@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, Button, Skeleton, Switch, Textarea } from '@heroui/react'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Save, Trash2 } from 'lucide-react'
 
 import {
   fetchMCPSettings,
@@ -10,6 +10,15 @@ import {
 } from '@/lib/daemon'
 import { toast } from '@/lib/toast'
 import { useDaemonStore } from '@/stores/daemonStore'
+
+const CONTEXT7_MCP_PLACEHOLDER = `{
+  "mcpServers": {
+    "context7": {
+      "url": "https://mcp.context7.com/mcp",
+      "bearer_token_env_var": "CONTEXT7_API_KEY"
+    }
+  }
+}`
 
 function normalizeStringList(values: string[]): string[] {
   const next: string[] = []
@@ -32,38 +41,51 @@ function toggleStringList(values: string[], target: string, selected: boolean): 
   return Array.from(next)
 }
 
-function createEmptyServer(seed: number): MCPServerSetting {
+function createEmptyServer(): MCPServerSetting {
   return {
-    id: `new-mcp-${seed}`,
-    raw_json: `{
-  "mcpServers": {
-    "mcp-router": {
-      "command": "npx",
-      "args": ["-y", "@mcp_router/cli@latest", "connect"],
-      "env": {
-        "MCPR_TOKEN": "your-token"
-      }
-    }
-  }
-}`,
+    id: '',
+    raw_json: '',
     default_enabled_cli_tool_ids: [],
     config: {},
   }
 }
 
-function readServerDescription(server: MCPServerSetting): string {
-  const description = server.config?.['description']
+function parseServerPreview(rawJSON: string): { id: string; config?: Record<string, unknown> } | null {
+  const raw = rawJSON.trim()
+  if (!raw) return null
+  try {
+    const payload = JSON.parse(raw) as Record<string, unknown>
+    const registryValue = payload.mcpServers
+    const registry = isRecord(registryValue) ? registryValue : payload
+    const keys = Object.keys(registry).sort()
+    if (keys.length === 0) return null
+    const id = keys[0]?.trim()
+    if (!id) return null
+    const config = registry[id]
+    if (!isRecord(config)) return null
+    return { id, config }
+  } catch {
+    return null
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function readServerDescription(config?: Record<string, unknown>): string {
+  const description = config?.description
   return typeof description === 'string' ? description.trim() : ''
 }
 
-function readServerTransport(server: MCPServerSetting): string {
-  const command = server.config?.['command']
+function readServerTransport(config?: Record<string, unknown>): string {
+  const command = config?.command
   if (typeof command === 'string' && command.trim()) {
-    const rawArgs = Array.isArray(server.config?.['args']) ? server.config?.['args'] : []
+    const rawArgs = Array.isArray(config?.args) ? config.args : []
     const args = rawArgs.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     return [command.trim(), ...args].join(' ')
   }
-  const url = server.config?.['url']
+  const url = config?.url
   if (typeof url === 'string' && url.trim()) {
     return url.trim()
   }
@@ -131,7 +153,7 @@ export function MCPSettingsTab() {
       if (!prev) return prev
       return {
         ...prev,
-        servers: [...prev.servers, createEmptyServer(prev.servers.length + 1)],
+        servers: [...prev.servers, createEmptyServer()],
       }
     })
   }, [])
@@ -184,104 +206,94 @@ export function MCPSettingsTab() {
   }
 
   return (
-    <div className="space-y-4">
-      <Alert
-        color="primary"
-        title="MCP 直接使用 JSON 配置，并按会话注入到 Codex"
-        description={'这里接受两种 JSON 形态：{"mcpServers": {...}} 或直接 {...}。页面只保留“默认启用”，用于决定新建会话时每个 CLI 工具默认勾选哪些 MCP。'}
-      />
-
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div className="text-sm text-muted-foreground">当前共配置 {data.servers.length} 个 MCP。</div>
-        <Button variant="flat" startContent={<Plus className="h-4 w-4" />} onPress={onAddServer}>
-          新增 MCP JSON
-        </Button>
-      </div>
-
-      {data.servers.length === 0 ? (
-        <div className="rounded-xl border border-dashed px-4 py-6 text-sm text-muted-foreground">
-          还没有 MCP 配置，点击右上角“新增 MCP JSON”开始添加。
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="flat" startContent={<Plus className="h-4 w-4" />} onPress={onAddServer}>
+            新增 MCP JSON
+          </Button>
+          <Button color="primary" isLoading={saving} startContent={<Save className="h-4 w-4" />} onPress={() => void onSave()}>
+            保存 MCP 设置
+          </Button>
         </div>
-      ) : null}
-
-      <div className="space-y-4">
-        {data.servers.map((server, index) => {
-          const description = readServerDescription(server)
-          const transport = readServerTransport(server)
-          return (
-            <section key={`${server.id || 'mcp'}-${index}`} className="space-y-4 rounded-xl border bg-card p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">{server.id || `MCP ${index + 1}`}</div>
-                  {description ? <div className="mt-1 text-sm text-muted-foreground">{description}</div> : null}
-                  {transport ? <div className="mt-1 break-all text-xs text-muted-foreground">{transport}</div> : null}
-                </div>
-                <Button
-                  isIconOnly
-                  size="sm"
-                  variant="light"
-                  color="danger"
-                  onPress={() => onRemoveServer(index)}
-                  aria-label="删除 MCP"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-
-              <Textarea
-                label="MCP JSON"
-                minRows={12}
-                value={server.raw_json}
-                onValueChange={(value) => updateServer(index, { raw_json: value })}
-                placeholder={'粘贴 {"mcpServers": {...}} 或直接 { ... }'}
-              />
-
-              <div className="rounded-xl border bg-background/40 p-3">
-                <div className="text-sm font-medium">默认启用</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  这里只影响“新建会话”的默认 MCP 选择。当前会话仍然可以单独勾选任意已保存的 MCP。
-                </div>
-                {data.tools.length === 0 ? (
-                  <div className="mt-3 rounded-lg border border-dashed px-3 py-4 text-xs text-muted-foreground">
-                    当前没有可用的 CLI 工具可供设置默认值。
-                  </div>
-                ) : (
-                  <div className="mt-3 space-y-2">
-                    {data.tools.map((tool) => {
-                      const defaultForTool = (server.default_enabled_cli_tool_ids ?? []).includes(tool.id)
-                      return (
-                        <div
-                          key={tool.id}
-                          className="flex items-center justify-between gap-3 rounded-lg border bg-background/70 px-3 py-3"
-                        >
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium">{tool.label}</div>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {tool.id} · {tool.cli_family}
-                            </div>
-                          </div>
-                          <Switch
-                            size="sm"
-                            isSelected={defaultForTool}
-                            onValueChange={(value) => onToggleToolDefault(index, tool.id, value)}
-                          >
-                            默认启用
-                          </Switch>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            </section>
-          )
-        })}
       </div>
 
-      <div className="flex justify-end">
-        <Button color="primary" isLoading={saving} onPress={() => void onSave()}>
-          保存 MCP 设置
-        </Button>
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        {data.servers.length === 0 ? (
+          <div className="rounded-xl border border-dashed px-4 py-6 text-sm text-muted-foreground">
+            还没有 MCP 配置，点击右上角“新增 MCP JSON”开始添加。
+          </div>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2">
+            {data.servers.map((server, index) => {
+              const preview = parseServerPreview(server.raw_json)
+              const previewID = preview?.id || server.id || `MCP ${index + 1}`
+              const previewConfig = preview?.config ?? server.config
+              const description = readServerDescription(previewConfig)
+              const transport = readServerTransport(previewConfig)
+              return (
+                <section key={`${server.id || 'mcp'}-${index}`} className="space-y-4 rounded-xl border bg-card p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold">{previewID}</div>
+                      {description ? <div className="mt-1 text-sm text-muted-foreground">{description}</div> : null}
+                      {transport ? <div className="mt-1 break-all text-xs text-muted-foreground">{transport}</div> : null}
+                    </div>
+                    <Button
+                      isIconOnly
+                      size="sm"
+                      variant="light"
+                      color="danger"
+                      onPress={() => onRemoveServer(index)}
+                      aria-label="删除 MCP"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  <Textarea
+                    label="MCP JSON"
+                    minRows={10}
+                    value={server.raw_json}
+                    onValueChange={(value) => updateServer(index, { raw_json: value })}
+                    placeholder={CONTEXT7_MCP_PLACEHOLDER}
+                  />
+
+                  <div className="rounded-xl border bg-background/40 p-3">
+                    {data.tools.length === 0 ? (
+                      <div className="rounded-lg border border-dashed px-3 py-4 text-xs text-muted-foreground">
+                        当前没有可用的 CLI 工具可供设置默认值。
+                      </div>
+                    ) : (
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {data.tools.map((tool) => {
+                          const defaultForTool = (server.default_enabled_cli_tool_ids ?? []).includes(tool.id)
+                          return (
+                            <div
+                              key={tool.id}
+                              className="flex items-center justify-between gap-3 rounded-lg border bg-background/70 px-3 py-2"
+                            >
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-medium">{tool.label}</div>
+                                <div className="text-[11px] text-muted-foreground">{tool.id}</div>
+                              </div>
+                              <Switch
+                                size="sm"
+                                isSelected={defaultForTool}
+                                onValueChange={(value) => onToggleToolDefault(index, tool.id, value)}
+                              />
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )

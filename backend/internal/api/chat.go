@@ -560,10 +560,11 @@ func buildThinkingTranslationSpec(primaryModelID string) *chat.ThinkingTranslati
 		return nil
 	}
 	return &chat.ThinkingTranslationSpec{
-		Provider: strings.TrimSpace(runtime.Provider),
-		Model:    strings.TrimSpace(runtime.Model),
-		BaseURL:  strings.TrimSpace(runtime.BaseURL),
-		Env:      env,
+		Provider:       strings.TrimSpace(runtime.Provider),
+		Model:          strings.TrimSpace(runtime.Model),
+		BaseURL:        strings.TrimSpace(runtime.BaseURL),
+		Env:            env,
+		OpenAIAPIStyle: runtime.OpenAIAPIStyle,
 	}
 }
 

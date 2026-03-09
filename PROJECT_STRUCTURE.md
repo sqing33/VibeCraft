@@ -1,6 +1,6 @@
 # vibe-tree 项目结构与功能定位索引
 
-> 更新时间：2026-03-08
+> 更新时间：2026-03-09
 > 说明：本文档用于开发期快速定位功能文件。修改前先读本文件，再做定向检索。
 
 ## 1. 项目概览
@@ -21,6 +21,7 @@
 | `.codex/agents/` | 项目级 Codex 子代理角色配置（按角色覆盖模型/沙箱/指令）                               |
 | `.codex/config.toml` | 项目级 Codex 配置覆盖（feature flags、agents 并发与深度等）                      |
 | `openspec/`      | OpenSpec 规范管理：基线 specs（系统当前行为真相源）+ changes（变更提案与 delta specs） |
+| `.iflow/`       | 项目级 IFLOW 配置：上下文文件、hooks 与 CLI 会话恢复辅助配置 |
 
 ## 3. 当前关键文件索引
 
@@ -79,14 +80,19 @@
 | `backend/internal/chat/codex_appserver.go` | Codex Chat app-server 客户端：JSON-RPC 握手、`thread/start|resume`、细粒度 delta 映射、结构化 `chat.turn.event` 广播、token usage 与 artifact 写入             |
 | `backend/internal/chat/codex_turn_feed.go` | Codex turn feed 归一化：兼容 `item/*` 与 `codex/event/*`，把 answer/thinking/tool/plan/question/system 分层成结构化聊天事件 |
 | `backend/internal/chat/attachments.go`      | Chat 附件能力：附件类型校验、大小限制、文件落盘、provider 多模态 block 构造、调试输入摘要                                               |
-| `backend/internal/chat/codex_runtime_settings.go` | Codex 线程运行时注入：按会话注入 `config.mcp_servers`，并为 baseInstructions 追加 skill allowlist/path index |
+| `backend/internal/chat/codex_runtime_settings.go` | Codex 线程运行时注入：按会话注入 `config.mcp_servers`，并仅为“已发现且已启用”的 skills 追加 allowlist/path index |
 | `backend/internal/chat/provider_input.go`    | Chat 多模态重建：基于本地消息 + 附件重建 OpenAI/Anthropic provider 输入                                                                |
 | `backend/internal/chat/thinking_translation.go` | Chat 思考过程翻译：按分段阈值缓冲 reasoning、调用翻译模型并广播中文 delta / 失败事件                                             |
-| `backend/internal/config/clitools.go`                | CLI 工具配置：维护 `Codex CLI` / `Claude Code` 的协议绑定、默认模型与命令路径 |
+| `backend/internal/config/clitools.go`                | CLI 工具配置：维护 `Codex CLI` / `Claude Code` / `iFlow CLI` 的协议绑定；其中 iFlow 额外维护官方认证方式、官方 Base URL、专属模型列表与默认模型 |
 | `backend/internal/config/mcp_skill_settings.go`     | MCP / Skill 配置归一化与运行时筛选：默认启用集合、有效 MCP 映射、Skill 绑定合并与 expert 交集裁剪 |
-| `backend/internal/api/settings_clitools.go`          | CLI 工具设置 API：读取/保存工具配置与默认模型，供设置页 `CLI 工具` Tab 使用 |
+| `backend/internal/api/settings_clitools.go`          | CLI 工具设置 API：读取/保存工具配置；iFlow 额外返回 masked API Key、网页登录状态与专属模型列表，供设置页 `CLI 工具` Tab 使用 |
+| `backend/internal/api/settings_iflow_auth.go`        | iFlow 官方网页登录 API：启动 PTY 登录、读取实时状态、提交授权码与取消网页登录 |
+| `backend/internal/iflow/home.go`                     | iFlow managed home：在 daemon 数据目录下维护独立 `iflow-home` 与最小 bootstrap settings |
+| `backend/internal/iflow/auth_manager.go`             | iFlow 登录会话管理器：自动选择网页登录、解析终端 OAuth 链接、检测登录完成并维护状态 |
+| `backend/internal/chat/iflow_runtime_settings.go`    | iFlow Chat 运行时注入：在实际启动 CLI 前注入 managed home、官方认证、有效 MCP 与技能说明 |
 | `backend/internal/api/settings_mcp.go`               | MCP 设置 API：以原始 JSON 读写 MCP 注册表，并按 CLI 工具维护“默认启用”集合 |
-| `backend/internal/api/settings_skills.go`            | Skill 设置 API：返回项目/用户目录发现到的 skills 目录状态，供设置页 `技能` Tab 展示 |
+| `backend/internal/api/settings_skills.go`            | Skill 设置 API：读取/保存 skill 启用状态，并支持 zip / 文件夹安装到用户级 `~/.codex/skills` |
+| `backend/internal/skillcatalog/install.go`           | Skill 安装器：处理 zip / 目录上传、定位 `SKILL.md` 根目录，并将 skill 安装到用户级 Codex skills 目录 |
 | `backend/internal/openaicompat/compat.go`   | OpenAI 兼容适配：按模型探测/持久化 `responses` 或 `chat/completions`，并提供 endpoint mismatch 分类与 plain-text 调用帮助         |
 | `backend/internal/workspace/manager.go`    | Workspace 策略管理：`read_only/shared_workspace/git_worktree` 解析、worktree 分配、代码变更检查与 artifact 生成                      |
 | `backend/internal/dag/dag.go`              | DAG 解析与校验：从 master 输出提取第一个 JSON 对象并做 MVP 约束校验（无环/引用存在/expert 校验）                                      |
@@ -122,12 +128,14 @@
 | `ui/src/lib/chatAttachmentPreview.ts`      | Chat 附件预览判断：按文件后缀/MIME 推断图片/PDF/Markdown/代码/纯文本预览模式                                                         |
 | `ui/src/components/DAGView.tsx`            | React Flow DAG 视图：dagre 自动布局 + 节点按状态上色 + 点击节点联动终端                                                               |
 | `ui/src/components/TerminalPane.tsx`       | xterm.js 封装组件（fit + write/reset 接口）                                                                                           |
-| `ui/src/app/components/CLIToolSettingsTab.tsx` | 系统设置「CLI 工具」Tab：管理 `Codex CLI` / `Claude Code` 的启用状态、默认模型与命令路径                                           |
-| `ui/src/app/components/MCPSettingsTab.tsx`     | 系统设置「MCP」Tab：以 JSON 编辑 MCP 注册表，并按 CLI 工具维护“默认启用”集合 |
-| `ui/src/app/components/SkillSettingsTab.tsx`   | 系统设置「技能」Tab：展示项目/用户目录中已发现的 skills 与来源信息 |
+| `ui/src/app/components/CLIToolSettingsTab.tsx` | 系统设置「CLI 工具」Tab：管理 `Codex CLI` / `Claude Code` / `iFlow CLI`；其中 iFlow 提供官方网页登录、授权码提交、API Key、专属模型列表与默认模型配置 |
+| `ui/src/app/components/MCPSettingsTab.tsx`     | 系统设置「MCP」Tab：以 JSON 编辑 MCP 注册表、双列卡片展示，并紧凑维护各 CLI 工具的默认启用集合 |
+| `ui/src/app/components/SkillSettingsTab.tsx`   | 系统设置「技能」Tab：展示已发现 skills、维护单一启用开关，并支持 zip / 文件夹安装 |
 | `ui/src/app/components/LLMSettingsTab.tsx` | 系统设置「模型」Tab：编辑 Sources 与 Models 组成的模型池，供 CLI 工具与 helper SDK 复用                                              |
 | `ui/src/app/components/BasicSettingsTab.tsx` | 系统设置「基本设置」Tab：配置思考过程翻译的 API 源、翻译模型与目标 AI 模型列表                                                     |
 | `ui/src/app/components/ExpertSettingsTab.tsx` | 系统设置「专家」Tab：专家列表、AI 生成专家、生成会话历史、快照发布                                                                   |
+| `.iflow/settings.json`, `.iflow/hooks/session_start.sh`                    | iFlow 项目级默认配置：声明上下文文件名，使 CLI 优先读取仓库内 `AGENTS.md`                                                              |
+| `scripts/agent-runtimes/iflow_exec.sh`     | iFlow CLI wrapper：桥接 `--prompt/--resume/--output-file/--yolo` 与标准 artifact/session contract                                      |
 | `ui/src/lib/daemon.ts`                     | daemon URL/WS URL 解析与 health/workflow/execution/chat attachment/chat turns API 封装                                                 |
 | `ui/src/stores/chatStore.ts`               | Chat 前端状态：sessions/messages、后端可恢复 turn timeline、轻量视图态与 chat API actions                                            |
 | `scripts/dev.sh`                           | 本地开发一键启动脚本（并行拉起 backend 与 UI）                                                                                        |
@@ -154,8 +162,9 @@
 | 基本设置 / 思考过程翻译            | `backend/internal/api/settings_basic.go`, `backend/internal/config/basic_settings.go`, `backend/internal/api/chat.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/thinking_translation.go`, `backend/internal/chat/timeline_persistence.go`, `backend/internal/store/chat_turns.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/BasicSettingsTab.tsx`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/daemon.ts` |
 | OpenAI 兼容接口自动切换            | `backend/internal/openaicompat/compat.go`, `backend/internal/api/settings_llm_test_call.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/thinking_translation.go`, `backend/internal/runner/sdk_runner.go`, `backend/internal/config/openai_api_style.go` |
 | 专家设置 / AI 创建专家             | `backend/internal/api/settings_experts.go`, `backend/internal/api/settings_expert_sessions.go`, `backend/internal/expertbuilder/service.go`, `backend/internal/skillcatalog/catalog.go`, `.codex/skills/expert-creator/SKILL.md`, `ui/src/app/components/ExpertSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
-| MCP / Skill 设置                    | `backend/internal/api/settings_mcp.go`, `backend/internal/api/settings_skills.go`, `backend/internal/config/mcp_skill_settings.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/MCPSettingsTab.tsx`, `ui/src/app/components/SkillSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
+| MCP / Skill 设置                    | `backend/internal/api/settings_mcp.go`, `backend/internal/api/settings_skills.go`, `backend/internal/skillcatalog/install.go`, `backend/internal/config/mcp_skill_settings.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/MCPSettingsTab.tsx`, `ui/src/app/components/SkillSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
 | Codex MCP/Skill 运行时注入          | `backend/internal/chat/codex_appserver.go`, `backend/internal/chat/codex_runtime_settings.go`, `backend/internal/config/mcp_skill_settings.go`, `backend/internal/expert/expert.go`, `backend/internal/api/chat.go` |
+| iFlow 官方认证与运行时注入          | `backend/internal/api/settings_iflow_auth.go`, `backend/internal/iflow/home.go`, `backend/internal/iflow/auth_manager.go`, `backend/internal/chat/iflow_runtime_settings.go`, `scripts/agent-runtimes/iflow_exec.sh`, `ui/src/app/components/CLIToolSettingsTab.tsx` |
 | Chat 会话 MCP 选择                  | `backend/internal/api/chat.go`, `backend/internal/store/chat.go`, `backend/internal/store/migrate.go`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/daemon.ts` |
 | XDG 配置路径                       | `backend/internal/config/config.go`                                                                                                                                                                                                        |
 | XDG 日志路径                       | `backend/internal/paths/paths.go`                                                                                                                                                                                                          |

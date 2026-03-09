@@ -1,5 +1,5 @@
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Chip, Input, Select, SelectItem, Switch } from '@heroui/react'
+import { Alert, Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Select, SelectItem, Switch } from '@heroui/react'
 import { ArrowUp, Eye, Plus, Trash2, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -10,7 +10,6 @@ import {
   chatAttachmentContentUrl,
   fetchCLIToolSettings,
   fetchMCPSettings,
-  patchChatSession,
   type ChatAttachment,
   type ChatSession,
   type CLITool,
@@ -23,6 +22,7 @@ import { ChatTurnFeed as ChatTurnFeedView } from '@/app/components/chat/ChatTurn
 import { canPreviewAttachmentTarget, describeAttachmentPreview } from '@/lib/chatAttachmentPreview'
 import { type ChatTurnEventPayload, feedAnswerText, hasFeedEntries } from '@/lib/chatTurnFeed'
 import { toast } from '@/lib/toast'
+import { buildCLIToolModelProfiles } from '@/lib/cliToolModels'
 import { formatRelativeTime } from '@/lib/time'
 import { useDaemonStore } from '@/stores/daemonStore'
 import { useChatStore } from '@/stores/chatStore'
@@ -129,13 +129,6 @@ function normalizeIDList(values?: string[]): string[] {
   return next
 }
 
-function sameIDList(left: string[], right: string[]): boolean {
-  const leftIDs = normalizeIDList(left)
-  const rightIDs = normalizeIDList(right)
-  if (leftIDs.length !== rightIDs.length) return false
-  const rightSet = new Set(rightIDs)
-  return leftIDs.every((item) => rightSet.has(item))
-}
 
 function toggleIDList(values: string[], target: string): string[] {
   const normalizedTarget = target.trim()
@@ -144,18 +137,6 @@ function toggleIDList(values: string[], target: string): string[] {
   if (next.has(normalizedTarget)) next.delete(normalizedTarget)
   else next.add(normalizedTarget)
   return Array.from(next)
-}
-
-function summarizeMCPSelection(selectedIDs: string[], servers: MCPServerSetting[]): string {
-  const selectedSet = new Set(normalizeIDList(selectedIDs))
-  if (selectedSet.size === 0) return '未选择 MCP'
-  const labels = servers
-    .filter((server) => selectedSet.has(server.id))
-    .map((server) => server.id)
-    .filter(Boolean)
-  if (labels.length === 0) return `已选 ${selectedSet.size} 个 MCP`
-  if (labels.length <= 2) return labels.join('、')
-  return `${labels[0]}、${labels[1]} 等 ${labels.length} 个 MCP`
 }
 
 export function ChatSessionsPage(props: ChatSessionsPageProps) {
@@ -201,13 +182,13 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const loadMessages = useChatStore((s) => s.loadMessages)
   const loadTurns = useChatStore((s) => s.loadTurns)
   const createSession = useChatStore((s) => s.createSession)
-  const upsertSession = useChatStore((s) => s.upsertSession)
   const sendTurn = useChatStore((s) => s.sendTurn)
   const forkSession = useChatStore((s) => s.forkSession)
   const archiveSession = useChatStore((s) => s.archiveSession)
 
   const [newTitle, setNewTitle] = useState('')
   const [newExpertId, setNewExpertId] = useState('')
+  const [newSessionModalOpen, setNewSessionModalOpen] = useState(false)
   const [input, setInput] = useState('')
   const [turnExpertId, setTurnExpertId] = useState('')
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
@@ -219,11 +200,8 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const [cliTools, setCliTools] = useState<CLITool[]>([])
   const [toolModels, setToolModels] = useState<LLMModelProfile[]>([])
   const [mcpSettings, setMCPSettings] = useState<MCPSettings | null>(null)
-  const [mcpLoading, setMCPLoading] = useState(true)
-  const [mcpError, setMCPError] = useState<string | null>(null)
   const [newSessionMCPServerIDs, setNewSessionMCPServerIDs] = useState<string[]>([])
   const [sessionMCPDraft, setSessionMCPDraft] = useState<string[]>([])
-  const [sessionMCPSaving, setSessionMCPSaving] = useState(false)
   const messageScrollRef = useRef<HTMLDivElement | null>(null)
   const shouldAutoScrollRef = useRef(true)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -259,7 +237,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       kind: 'cli',
       provider: (tool.protocol_family || '').trim(),
       cliToolId: tool.id,
-      defaultModelId: tool.default_model_id,
+      defaultModelId: (tool.cli_family || '').trim() === 'iflow' ? tool.iflow_default_model : tool.default_model_id,
     }))
     for (const provider of sdkRuntimeProviders) {
       if (!toolModels.some((model) => (model.provider || '').trim() === provider)) continue
@@ -278,6 +256,17 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     return map
   }, [runtimeOptions])
   const defaultSelectableRuntimeKey = runtimeOptions[0]?.key ?? ''
+  const runtimeKeyForCLIFamily = useCallback(
+    (cliFamily?: string) => {
+      const normalized = (cliFamily || '').trim()
+      if (!normalized) return ''
+      for (const tool of selectableTools) {
+        if ((tool.cli_family || '').trim() === normalized) return `cli:${tool.id}`
+      }
+      return ''
+    },
+    [selectableTools],
+  )
   const inferRuntimeKey = useCallback(
     (meta?: RuntimeSelectionMeta) => {
       const cliToolId = meta?.cli_tool_id?.trim() || ''
@@ -285,8 +274,8 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       const explicit = meta?.expert_id?.trim() || ''
       if (explicit && runtimeOptionsByKey.has(`cli:${explicit}`)) return `cli:${explicit}`
       const expert = explicit ? expertsById.get(explicit) : undefined
-      if (expert?.cli_family === 'claude' && runtimeOptionsByKey.has('cli:claude')) return 'cli:claude'
-      if (expert?.cli_family === 'codex' && runtimeOptionsByKey.has('cli:codex')) return 'cli:codex'
+      const familyRuntimeKey = runtimeKeyForCLIFamily(expert?.cli_family)
+      if (familyRuntimeKey && runtimeOptionsByKey.has(familyRuntimeKey)) return familyRuntimeKey
       const provider = (meta?.provider?.trim() || expert?.provider || '').toLowerCase()
       if ((provider === 'openai' || provider === 'anthropic') && runtimeOptionsByKey.has(`sdk:${provider}`)) {
         return `sdk:${provider}`
@@ -295,7 +284,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       if (provider === 'openai' && runtimeOptionsByKey.has('cli:codex')) return 'cli:codex'
       return defaultSelectableRuntimeKey
     },
-    [defaultSelectableRuntimeKey, expertsById, runtimeOptionsByKey],
+    [defaultSelectableRuntimeKey, expertsById, runtimeKeyForCLIFamily, runtimeOptionsByKey],
   )
   const effectiveNewRuntimeKey =
     newExpertId && runtimeOptionsByKey.has(newExpertId)
@@ -309,9 +298,12 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     (runtimeKey: string) => {
       const runtime = runtimeOptionsByKey.get(runtimeKey)
       if (!runtime) return [] as LLMModelProfile[]
+      if (runtime.kind === 'cli') {
+        return buildCLIToolModelProfiles(toolsById.get(runtime.cliToolId || ''), toolModels)
+      }
       return toolModels.filter((model) => (model.provider || '').trim() === runtime.provider)
     },
-    [runtimeOptionsByKey, toolModels],
+    [runtimeOptionsByKey, toolModels, toolsById],
   )
   const effectiveNewModelId = useMemo(() => {
     const models = modelsForRuntime(effectiveNewRuntimeKey)
@@ -340,12 +332,6 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const activeSessionCliToolId =
     activeSession?.cli_tool_id?.trim() ||
     (effectiveTurnRuntime?.kind === 'cli' ? effectiveTurnRuntime.cliToolId?.trim() || '' : '')
-  const newSessionToolLabel = newSessionCliToolId
-    ? toolsById.get(newSessionCliToolId)?.label || newSessionCliToolId
-    : ''
-  const activeSessionToolLabel = activeSessionCliToolId
-    ? toolsById.get(activeSessionCliToolId)?.label || activeSessionCliToolId
-    : ''
   const effectiveTurnReasoningEffort = useMemo(
     () => normalizeCodexReasoningEffort(turnReasoningEffort || activeSession?.reasoning_effort),
     [activeSession?.reasoning_effort, turnReasoningEffort],
@@ -383,36 +369,9 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     () => selectableMCPServers(newSessionCliToolId),
     [newSessionCliToolId, selectableMCPServers],
   )
-  const activeSessionMCPServers = useMemo(
-    () => selectableMCPServers(activeSessionCliToolId),
-    [activeSessionCliToolId, selectableMCPServers],
-  )
   const normalizedNewSessionMCPServerIDs = useMemo(
     () => sanitizeMCPSelection(newSessionMCPServerIDs, newSessionCliToolId),
     [newSessionCliToolId, newSessionMCPServerIDs, sanitizeMCPSelection],
-  )
-  const normalizedSessionMCPDraft = useMemo(
-    () => sanitizeMCPSelection(sessionMCPDraft, activeSessionCliToolId),
-    [activeSessionCliToolId, sanitizeMCPSelection, sessionMCPDraft],
-  )
-  const sessionMCPBase = useMemo(() => {
-    if (!activeSession) return [] as string[]
-    return sanitizeMCPSelection(
-      activeSession.mcp_server_ids ?? defaultMCPServerIDs(activeSessionCliToolId),
-      activeSessionCliToolId,
-    )
-  }, [activeSession, activeSessionCliToolId, defaultMCPServerIDs, sanitizeMCPSelection])
-  const newSessionMCPSummary = useMemo(
-    () => summarizeMCPSelection(normalizedNewSessionMCPServerIDs, newSessionMCPServers),
-    [newSessionMCPServers, normalizedNewSessionMCPServerIDs],
-  )
-  const activeSessionMCPSummary = useMemo(
-    () => summarizeMCPSelection(normalizedSessionMCPDraft, activeSessionMCPServers),
-    [activeSessionMCPServers, normalizedSessionMCPDraft],
-  )
-  const sessionMCPDirty = useMemo(
-    () => !sameIDList(normalizedSessionMCPDraft, sessionMCPBase),
-    [normalizedSessionMCPDraft, sessionMCPBase],
   )
 
   const formatModelIdentity = useCallback(
@@ -425,11 +384,15 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       const label = runtime?.kind === 'cli'
         ? tool?.label || runtime.label || expert?.label || expertId
         : expert?.label || runtime?.label || tool?.label || expertId
-      const provider = (meta.provider?.trim() || tool?.protocol_family || expert?.provider || '').trim()
+      const toolFamily = (tool?.cli_family || expert?.cli_family || '').trim()
+      const provider = toolFamily === 'iflow' ? 'iflow' : (meta.provider?.trim() || tool?.protocol_family || expert?.provider || '').trim()
       const model = (meta.model?.trim() || expert?.model || '').trim()
       const parts: string[] = []
       if (label) parts.push(label)
-      if (provider && model) parts.push(`${provider}/${model}`)
+      if (model) {
+        if (provider && provider !== 'iflow') parts.push(`${provider}/${model}`)
+        else parts.push(model)
+      }
       return parts.join(' · ')
     },
     [expertsById, inferRuntimeKey, runtimeOptionsByKey, toolsById],
@@ -636,8 +599,6 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
 
   useEffect(() => {
     let cancelled = false
-    setMCPLoading(true)
-    setMCPError(null)
     void fetchMCPSettings(daemonUrl)
       .then((settings) => {
         if (cancelled) return
@@ -647,14 +608,9 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
           tools: settings.tools ?? [],
         })
       })
-      .catch((err: unknown) => {
+      .catch(() => {
         if (cancelled) return
         setMCPSettings(null)
-        setMCPError(err instanceof Error ? err.message : String(err))
-      })
-      .finally(() => {
-        if (cancelled) return
-        setMCPLoading(false)
       })
     return () => {
       cancelled = true
@@ -948,31 +904,6 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     [runtimeOptionsByKey],
   )
 
-  const onSaveSessionMCP = async () => {
-    if (!activeSession) return
-    setSessionMCPSaving(true)
-    try {
-      const nextMCPServerIDs = sanitizeMCPSelection(sessionMCPDraft, activeSessionCliToolId)
-      const updated = await patchChatSession(daemonUrl, activeSession.session_id, {
-        mcp_server_ids: nextMCPServerIDs,
-      })
-      upsertSession(updated)
-      setSessionMCPDraft(updated.mcp_server_ids ?? nextMCPServerIDs)
-      toast({
-        title: '会话 MCP 已保存',
-        description: nextMCPServerIDs.length > 0 ? `已选择 ${nextMCPServerIDs.length} 个 MCP` : '当前会话未启用 MCP',
-      })
-    } catch (err: unknown) {
-      toast({
-        variant: 'destructive',
-        title: '保存会话 MCP 失败',
-        description: err instanceof Error ? err.message : String(err),
-      })
-    } finally {
-      setSessionMCPSaving(false)
-    }
-  }
-
   const onCreate = async () => {
     try {
       const selection = buildRuntimeRequest(effectiveNewRuntimeKey, effectiveNewModelId)
@@ -1013,7 +944,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     try {
       const selection = buildRuntimeRequest(effectiveTurnRuntimeKey, effectiveTurnModelId)
       const turnMCPServerIDs = sanitizeMCPSelection(
-        normalizedSessionMCPDraft,
+        sessionMCPDraft,
         selection.cliToolId || activeSessionCliToolId,
       )
       await sendTurn(
@@ -1134,127 +1065,15 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
             </Chip>
           </div>
 
-          <div className="space-y-2 rounded-[22px] border bg-background/60 p-2">
-            <Input
-              aria-label="新会话标题"
-              value={newTitle}
-              onValueChange={setNewTitle}
-              placeholder="新会话标题"
-              size="sm"
-            />
-            <Select
-              label="对话方式"
-              selectedKeys={effectiveNewRuntimeKey ? new Set([effectiveNewRuntimeKey]) : new Set()}
-              onSelectionChange={(keys) => {
-                if (keys === 'all') return
-                const first = keys.values().next().value
-                if (typeof first === 'string') setNewExpertId(first)
-              }}
-              size="sm"
-              disallowEmptySelection
-              isDisabled={runtimeOptions.length === 0}
-            >
-              {runtimeOptions.map((runtime) => (
-                <SelectItem key={runtime.key}>{runtime.label}</SelectItem>
-              ))}
-            </Select>
-            <Select
-              label="模型"
-              selectedKeys={effectiveNewModelId ? new Set([effectiveNewModelId]) : new Set()}
-              renderValue={() => {
-                const selected = modelsForRuntime(effectiveNewRuntimeKey).find((model) => model.id === effectiveNewModelId)
-                return selected ? `${selected.label || selected.id} · ${selected.model}` : ''
-              }}
-              onSelectionChange={(keys) => {
-                if (keys === 'all') return
-                const first = keys.values().next().value
-                if (typeof first === 'string') setNewModelId(first)
-              }}
-              size="sm"
-              disallowEmptySelection
-              isDisabled={modelsForRuntime(effectiveNewRuntimeKey).length === 0}
-            >
-              {modelsForRuntime(effectiveNewRuntimeKey).map((model) => (
-                <SelectItem key={model.id}>{model.label || model.id} · {model.model}</SelectItem>
-              ))}
-            </Select>
-            <div className="rounded-xl border bg-background/40 p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="text-xs font-medium">会话 MCP</div>
-                  <div className="mt-1 text-[11px] text-muted-foreground">
-                    {newSessionCliToolId
-                      ? `将按 ${newSessionToolLabel} 的绑定规则创建当前会话。`
-                      : '当前选择的不是 CLI 对话方式，MCP 不会注入。'}
-                  </div>
-                </div>
-                {newSessionCliToolId ? <Chip size="sm" variant="flat">{newSessionMCPSummary}</Chip> : null}
-              </div>
-
-              {mcpLoading ? (
-                <div className="mt-3 rounded-xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
-                  MCP 设置加载中…
-                </div>
-              ) : mcpError ? (
-                <div className="mt-3 rounded-xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
-                  MCP 接口暂不可用：{mcpError}
-                </div>
-              ) : !newSessionCliToolId ? (
-                <div className="mt-3 rounded-xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
-                  请选择 CLI 工具后再设置会话 MCP。
-                </div>
-              ) : newSessionMCPServers.length === 0 ? (
-                <div className="mt-3 rounded-xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
-                  当前工具没有可用的 MCP。
-                </div>
-              ) : (
-                <>
-                  <div className="mt-3 space-y-2">
-                    {newSessionMCPServers.map((server) => {
-                      const selected = normalizedNewSessionMCPServerIDs.includes(server.id)
-                      return (
-                        <div key={server.id} className="flex items-center justify-between gap-3 rounded-xl border bg-background/70 px-3 py-2">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium">{server.id}</div>
-                            <div className="mt-1 truncate text-[11px] text-muted-foreground">{server.id}</div>
-                          </div>
-                          <Switch
-                            size="sm"
-                            isSelected={selected}
-                            onValueChange={() => {
-                              setNewSessionMCPServerIDs((prev) =>
-                                sanitizeMCPSelection(toggleIDList(prev, server.id), newSessionCliToolId),
-                              )
-                            }}
-                          >
-                            启用
-                          </Switch>
-                        </div>
-                      )
-                    })}
-                  </div>
-                  <div className="mt-3 flex justify-end">
-                    <Button
-                      size="sm"
-                      variant="light"
-                      onPress={() => setNewSessionMCPServerIDs(defaultMCPServerIDs(newSessionCliToolId))}
-                    >
-                      恢复工具默认
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
-            <Button
-              color="primary"
-              size="sm"
-              className="w-full"
-              isDisabled={runtimeOptions.length === 0}
-              onPress={() => void onCreate()}
-            >
-              新建会话
-            </Button>
-          </div>
+          <Button
+            color="primary"
+            size="sm"
+            className="w-full"
+            startContent={<Plus className="h-4 w-4" />}
+            onPress={() => setNewSessionModalOpen(true)}
+          >
+            新建会话
+          </Button>
 
           {error ? <Alert color="danger" title="加载失败" description={error} className="mt-3" /> : null}
 
@@ -1330,84 +1149,6 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
               </Button>
             </div>
           </div>
-
-          {activeSession ? (
-            <div className="shrink-0 border-b bg-background/40 px-5 py-3 md:px-6">
-              <div className="rounded-[24px] border bg-background/70 p-3">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold">当前会话 MCP</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {activeSessionCliToolId
-                        ? `当前按 ${activeSessionToolLabel} 绑定，会影响后续 CLI 会话启动与恢复。`
-                        : '当前会话没有 CLI 工具上下文，MCP 仅在 CLI 对话方式下生效。'}
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {activeSessionCliToolId ? <Chip size="sm" variant="flat">{activeSessionMCPSummary}</Chip> : null}
-                    <Button
-                      size="sm"
-                      variant="light"
-                      isDisabled={!activeSessionCliToolId || mcpLoading || !!mcpError}
-                      onPress={() => setSessionMCPDraft(defaultMCPServerIDs(activeSessionCliToolId))}
-                    >
-                      恢复默认
-                    </Button>
-                    <Button
-                      size="sm"
-                      color="primary"
-                      isLoading={sessionMCPSaving}
-                      isDisabled={!sessionMCPDirty || mcpLoading || !!mcpError}
-                      onPress={() => void onSaveSessionMCP()}
-                    >
-                      保存到会话
-                    </Button>
-                  </div>
-                </div>
-
-                {mcpLoading ? (
-                  <div className="mt-3 rounded-xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
-                    MCP 设置加载中…
-                  </div>
-                ) : mcpError ? (
-                  <Alert className="mt-3" color="warning" title="MCP 接口暂不可用" description={mcpError} />
-                ) : !activeSessionCliToolId ? (
-                  <div className="mt-3 rounded-xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
-                    当前会话未使用 CLI 工具，因此不会注入 MCP。
-                  </div>
-                ) : activeSessionMCPServers.length === 0 ? (
-                  <div className="mt-3 rounded-xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
-                    当前工具下没有可选 MCP。
-                  </div>
-                ) : (
-                  <div className="mt-3 grid gap-2 md:grid-cols-2">
-                    {activeSessionMCPServers.map((server) => {
-                      const selected = normalizedSessionMCPDraft.includes(server.id)
-                      return (
-                        <div key={server.id} className="flex items-center justify-between gap-3 rounded-xl border bg-background/70 px-3 py-2">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium">{server.id}</div>
-                            <div className="mt-1 truncate text-[11px] text-muted-foreground">{server.id}</div>
-                          </div>
-                          <Switch
-                            size="sm"
-                            isSelected={selected}
-                            onValueChange={() => {
-                              setSessionMCPDraft((prev) =>
-                                sanitizeMCPSelection(toggleIDList(prev, server.id), activeSessionCliToolId),
-                              )
-                            }}
-                          >
-                            启用
-                          </Switch>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : null}
 
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background/30">
             <div ref={messageScrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8">
@@ -1642,7 +1383,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                     </div>
                   ) : null}
 
-                  <div className="grid items-stretch gap-2 md:grid-cols-[minmax(0,1fr)_156px]">
+                  <div className="grid items-stretch gap-2 md:grid-cols-[minmax(0,1fr)_190px]">
                     <div className="min-w-0 md:flex md:min-h-0 md:h-full md:self-stretch">
                       <textarea
                         value={input}
@@ -1654,7 +1395,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                       />
                     </div>
 
-                    <div className="flex flex-col gap-1.5 md:min-w-[156px]">
+                    <div className="flex flex-col gap-1.5 md:w-[190px] md:min-w-[190px]">
                       <Select
                         aria-label="本条运行时"
                         placeholder="选择运行时"
@@ -1756,6 +1497,101 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
         </section>
       </div>
       <AttachmentPreviewModal preview={preview} onClose={closePreview} />
+
+      <Modal isOpen={newSessionModalOpen} onOpenChange={setNewSessionModalOpen} classNames={{ base: 'w-[550px] max-w-[550px] h-[550px] max-h-[550px]' }}>
+        <ModalContent>
+          {() => (
+            <>
+              <ModalHeader>新建会话</ModalHeader>
+              <ModalBody className="space-y-3 overflow-y-auto">
+                <div className="grid grid-cols-3 gap-2">
+                  <Input
+                    label="会话标题（可选）"
+                    placeholder="留空自动生成"
+                    value={newTitle}
+                    onValueChange={setNewTitle}
+                  />
+                  <Select
+                    aria-label="运行时"
+                    label="运行时"
+                    placeholder="选择运行时"
+                    selectedKeys={effectiveNewRuntimeKey ? new Set([effectiveNewRuntimeKey]) : new Set()}
+                    onSelectionChange={(keys) => {
+                      if (keys === 'all') return
+                      const first = keys.values().next().value
+                      if (typeof first === 'string') setNewExpertId(first)
+                    }}
+                    disallowEmptySelection
+                    isDisabled={runtimeOptions.length === 0}
+                  >
+                    {runtimeOptions.map((runtime) => (
+                      <SelectItem key={runtime.key}>{runtime.label}</SelectItem>
+                    ))}
+                  </Select>
+                  <Select
+                    aria-label="模型"
+                    label="模型"
+                    placeholder="选择模型"
+                    selectedKeys={effectiveNewModelId ? new Set([effectiveNewModelId]) : new Set()}
+                    renderValue={() => {
+                      const selected = modelsForRuntime(effectiveNewRuntimeKey).find((model) => model.id === effectiveNewModelId)
+                      return selected ? `${selected.label || selected.id} · ${selected.model}` : ''
+                    }}
+                    onSelectionChange={(keys) => {
+                      if (keys === 'all') return
+                      const first = keys.values().next().value
+                      if (typeof first === 'string') setNewModelId(first)
+                    }}
+                    disallowEmptySelection
+                    isDisabled={modelsForRuntime(effectiveNewRuntimeKey).length === 0}
+                  >
+                    {modelsForRuntime(effectiveNewRuntimeKey).map((model) => (
+                      <SelectItem key={model.id}>{model.label || model.id} · {model.model}</SelectItem>
+                    ))}
+                  </Select>
+                </div>
+                {newSessionMCPServers.length > 0 ? (
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">MCP 服务器</div>
+                    <div className="grid gap-2 grid-cols-2">
+                      {newSessionMCPServers.map((server) => {
+                        const selected = normalizedNewSessionMCPServerIDs.includes(server.id)
+                        return (
+                          <div key={server.id} className="flex items-center justify-between gap-3 rounded-xl border bg-background/70 px-3 py-2">
+                            <div className="truncate text-sm font-medium">{server.id}</div>
+                            <Switch
+                              size="sm"
+                              isSelected={selected}
+                              onValueChange={() => {
+                                setNewSessionMCPServerIDs((prev) =>
+                                  sanitizeMCPSelection(toggleIDList(prev, server.id), newSessionCliToolId),
+                                )
+                              }}
+                            />
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </ModalBody>
+              <ModalFooter>
+                <Button variant="light" onPress={() => setNewSessionModalOpen(false)}>取消</Button>
+                <Button
+                  color="primary"
+                  isDisabled={runtimeOptions.length === 0}
+                  onPress={() => {
+                    void onCreate()
+                    setNewSessionModalOpen(false)
+                  }}
+                >
+                  创建
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
     </>
   )
 

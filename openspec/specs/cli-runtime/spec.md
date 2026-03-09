@@ -91,6 +91,47 @@ For Codex-backed chat turns, the system MAY satisfy this requirement via the off
 - **THEN** the system still writes chat runtime artifacts including `session.json` and `final_message.md`
 - **AND** the stored session reference remains reusable by later turns
 
+### Requirement: iFlow runtime MUST use official authentication only
+The `iflow` runtime MUST NOT depend on the generic OpenAI-compatible LLM source/model settings.
+
+The runtime MUST support exactly these official iFlow auth inputs:
+- browser-auth state persisted in the managed iFlow home
+- explicit official iFlow API key from the CLI tool settings card
+
+#### Scenario: iFlow API key auth injects official env
+- **WHEN** a chat or repo analysis request selects `iflow` and the tool is configured for `api_key`
+- **THEN** the runtime injects official iFlow auth env values
+- **AND** it does not inject OpenAI-compatible auth env values
+
+#### Scenario: iFlow browser auth reuses managed home
+- **WHEN** a chat or repo analysis request selects `iflow` and the tool is configured for `browser`
+- **THEN** the runtime uses the daemon-managed iFlow home for auth reuse
+- **AND** it relies on the persisted official browser login state
+
+### Requirement: iFlow runtime MUST support per-turn MCP and skill injection
+The `iflow` runtime MUST inject the effective MCP and skill selection derived from vibe-tree settings and the chat session.
+
+#### Scenario: iFlow turn receives effective MCP allow-list
+- **WHEN** an iFlow chat turn runs with selected/default MCP server ids
+- **THEN** the runtime syncs those MCP definitions into project scope
+- **AND** passes only the effective subset through `--allowed-mcp-server-names`
+
+#### Scenario: iFlow turn receives effective skills
+- **WHEN** an iFlow chat turn runs with enabled skill bindings
+- **THEN** the runtime appends effective skill instructions to the system prompt before launching the CLI
+
+### Requirement: IFLOW wrapper MUST implement the standard CLI artifact contract
+The `iflow` wrapper MUST write `summary.json` and `artifacts.json` for every completed run.
+
+When the underlying CLI exposes a resumable session identifier, the wrapper MUST also write `session.json`.
+When stdout produces a final assistant response, the wrapper MUST persist it as `final_message.md`.
+
+#### Scenario: IFLOW non-interactive run writes session and final message artifacts
+- **WHEN** the `iflow` wrapper completes a non-interactive run with `--output-file`
+- **THEN** the wrapper writes `summary.json` and `artifacts.json`
+- **AND** it writes `session.json` from the returned execution info when `session-id` is present
+- **AND** it writes `final_message.md` from the assistant output
+
 ### Requirement: Codex chat runtime MUST inject only session-selected MCP servers
 When a chat turn runs through the Codex app-server transport, the system MUST derive the effective MCP server set from the chat session and selected CLI tool, then pass only that set through the thread request `config` overrides.
 

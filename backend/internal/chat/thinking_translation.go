@@ -22,10 +22,11 @@ const (
 )
 
 type ThinkingTranslationSpec struct {
-	Provider string
-	Model    string
-	BaseURL  string
-	Env      map[string]string
+	Provider       string
+	Model          string
+	BaseURL        string
+	Env            map[string]string
+	OpenAIAPIStyle string // 可选，指定 openai api style（"responses" 或 "chat_completions"），为空则自动探测
 }
 
 type ThinkingTranslatorFunc func(ctx context.Context, spec ThinkingTranslationSpec, text string) (string, error)
@@ -266,6 +267,7 @@ func (m *Manager) translateThinking(ctx context.Context, spec ThinkingTranslatio
 		ctx,
 		sdk,
 		spec.Env,
+		spec.OpenAIAPIStyle,
 		buildThinkingTranslationPrompt(text),
 		"你是一个思考过程翻译器。请把用户提供的内容忠实翻译为简体中文，保留原有段落、列表、代码块、URL、命令、模型名和专有名词，不要总结，不要删减，不要补充解释，只输出译文。",
 		1600,
@@ -273,11 +275,26 @@ func (m *Manager) translateThinking(ctx context.Context, spec ThinkingTranslatio
 	)
 }
 
+// TranslateText 将任意文本翻译为简体中文，复用思考翻译模型配置。
+func (m *Manager) TranslateText(ctx context.Context, spec ThinkingTranslationSpec, text string) (string, error) {
+	if m == nil {
+		return "", errors.New("chat manager not configured")
+	}
+	sdk := runner.SDKSpec{
+		Provider: spec.Provider,
+		Model:    spec.Model,
+		BaseURL:  spec.BaseURL,
+	}
+	system := "你是一个简介翻译器。请把用户提供的内容简洁地翻译为简体中文，保留专有名词、命令名、模型名，只输出译文，不要解释。"
+	prompt := "请将以下内容翻译成简体中文：\n\n" + strings.TrimSpace(text)
+	return m.generatePlainTextWithLLM(ctx, sdk, spec.Env, spec.OpenAIAPIStyle, prompt, system, 500, 0.3)
+}
+
 func buildThinkingTranslationPrompt(text string) string {
 	return strings.TrimSpace("请将以下内容翻译成简体中文，并尽量保持原始结构与语气：\n\n" + strings.TrimSpace(text))
 }
 
-func (m *Manager) generatePlainTextWithLLM(ctx context.Context, sdk runner.SDKSpec, env map[string]string, prompt, system string, maxTokens int, temperature float64) (string, error) {
+func (m *Manager) generatePlainTextWithLLM(ctx context.Context, sdk runner.SDKSpec, env map[string]string, apiStyle string, prompt, system string, maxTokens int, temperature float64) (string, error) {
 	if m == nil {
 		return "", errors.New("chat manager not configured")
 	}
@@ -310,7 +327,11 @@ func (m *Manager) generatePlainTextWithLLM(ctx context.Context, sdk runner.SDKSp
 			MaxOutputTokens: maxTokens,
 			Temperature:     &temperature,
 		}
-		out, _, err := openaicompat.CompleteText(ctx, openaicompat.APIStyleResponses, request)
+		style := openaicompat.NormalizeAPIStyle(apiStyle)
+		if !style.Valid() {
+			style = openaicompat.APIStyleResponses
+		}
+		out, _, err := openaicompat.CompleteText(ctx, style, request)
 		return strings.TrimSpace(out), err
 	case "anthropic":
 		body := anthropic.MessageNewParams{

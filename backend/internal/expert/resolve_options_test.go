@@ -5,6 +5,7 @@ import (
 
 	"vibe-tree/backend/internal/config"
 	"vibe-tree/backend/internal/expert"
+	iflowcli "vibe-tree/backend/internal/iflow"
 )
 
 func TestResolveWithOptions_UsesToolDefaultModel(t *testing.T) {
@@ -29,5 +30,82 @@ func TestResolveWithOptions_UsesToolDefaultModel(t *testing.T) {
 	}
 	if res.ProtocolFamily != "openai" {
 		t.Fatalf("protocol family = %q, want openai", res.ProtocolFamily)
+	}
+}
+
+func TestResolveWithOptions_AllowsMultiProtocolCLIToolModelSwitch(t *testing.T) {
+	cfg := config.Default()
+	cfg.LLM = &config.LLMSettings{
+		Sources: []config.LLMSourceConfig{
+			{ID: "openai-default", Provider: "openai"},
+			{ID: "anthropic-default", Provider: "anthropic"},
+		},
+		Models: []config.LLMModelConfig{
+			{ID: "gpt-5.4", Provider: "openai", Model: "gpt-5.4", SourceID: "openai-default"},
+			{ID: "claude-sonnet", Provider: "anthropic", Model: "claude-sonnet", SourceID: "anthropic-default"},
+		},
+	}
+	cfg.CLITools = []config.CLIToolConfig{{
+		ID:               "codex",
+		Label:            "Codex CLI",
+		ProtocolFamily:   "openai",
+		ProtocolFamilies: []string{"openai", "anthropic"},
+		CLIFamily:        "codex",
+		DefaultModelID:   "claude-sonnet",
+		Enabled:          true,
+	}}
+	if err := config.NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
+		t.Fatalf("normalize cli tools: %v", err)
+	}
+	if err := config.RebuildExperts(&cfg); err != nil {
+		t.Fatalf("rebuild experts: %v", err)
+	}
+	res, err := expert.NewRegistry(cfg).ResolveWithOptions("codex", "hello", ".", expert.ResolveOptions{CLIToolID: "codex", ModelID: "gpt-5.4"})
+	if err != nil {
+		t.Fatalf("resolve with options: %v", err)
+	}
+	if got := res.Model; got != "gpt-5.4" {
+		t.Fatalf("model = %q, want gpt-5.4", got)
+	}
+	if got := res.ProtocolFamily; got != "openai" {
+		t.Fatalf("protocol family = %q, want openai", got)
+	}
+}
+
+func TestResolveWithOptions_IFLOWUsesOfficialModelSelection(t *testing.T) {
+	cfg := config.Default()
+	cfg.CLITools = []config.CLIToolConfig{{
+		ID:                "iflow",
+		Label:             "iFlow CLI",
+		ProtocolFamily:    "openai",
+		CLIFamily:         "iflow",
+		Enabled:           true,
+		IFlowAuthMode:     config.IFLOWAuthModeAPIKey,
+		IFlowAPIKey:       "sk-iflow-123",
+		IFlowBaseURL:      iflowcli.DefaultBaseURL,
+		IFlowModels:       []string{"glm-4.7", "minimax-m2.5"},
+		IFlowDefaultModel: "minimax-m2.5",
+	}}
+	if err := config.NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
+		t.Fatalf("normalize cli tools: %v", err)
+	}
+	if err := config.RebuildExperts(&cfg); err != nil {
+		t.Fatalf("rebuild experts: %v", err)
+	}
+	res, err := expert.NewRegistry(cfg).ResolveWithOptions("iflow", "hello", ".", expert.ResolveOptions{CLIToolID: "iflow"})
+	if err != nil {
+		t.Fatalf("resolve with options: %v", err)
+	}
+	if got := res.Model; got != "minimax-m2.5" {
+		t.Fatalf("model = %q, want minimax-m2.5", got)
+	}
+	if got := res.Spec.Env["OPENAI_API_KEY"]; got != "" {
+		t.Fatalf("OPENAI_API_KEY = %q, want empty", got)
+	}
+	if got := res.Spec.Env["OPENAI_BASE_URL"]; got != "" {
+		t.Fatalf("OPENAI_BASE_URL = %q, want empty", got)
+	}
+	if got := res.Spec.Env["VIBE_TREE_MODEL_ID"]; got != "minimax-m2.5" {
+		t.Fatalf("VIBE_TREE_MODEL_ID = %q, want minimax-m2.5", got)
 	}
 }

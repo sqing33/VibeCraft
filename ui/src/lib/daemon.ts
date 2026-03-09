@@ -124,15 +124,45 @@ export type CLITool = {
   id: string
   label: string
   protocol_family: string
+  protocol_families?: string[]
   cli_family: string
   default_model_id?: string
   command_path?: string
   enabled: boolean
+  iflow_auth_mode?: 'browser' | 'api_key'
+  iflow_base_url?: string
+  iflow_models?: string[]
+  iflow_default_model?: string
+  iflow_has_key?: boolean
+  iflow_masked_key?: string
+  iflow_browser_authenticated?: boolean
+  iflow_browser_model?: string
+}
+
+export type PutCLITool = CLITool & {
+  iflow_api_key?: string
 }
 
 export type CLIToolSettings = {
   tools: CLITool[]
   models: LLMModelProfile[]
+}
+
+export type PutCLIToolSettingsRequest = {
+  tools: PutCLITool[]
+}
+
+export type IFLOWBrowserAuthSession = {
+  session_id: string
+  status: string
+  auth_url?: string
+  last_output?: string
+  error?: string
+  can_submit_code: boolean
+  authenticated: boolean
+  command_path?: string
+  started_at: number
+  updated_at: number
 }
 
 export async function fetchCLIToolSettings(daemonUrl: string): Promise<CLIToolSettings> {
@@ -144,7 +174,7 @@ export async function fetchCLIToolSettings(daemonUrl: string): Promise<CLIToolSe
   return (await res.json()) as CLIToolSettings
 }
 
-export async function putCLIToolSettings(daemonUrl: string, req: CLIToolSettings): Promise<CLIToolSettings> {
+export async function putCLIToolSettings(daemonUrl: string, req: PutCLIToolSettingsRequest): Promise<CLIToolSettings> {
   const res = await fetch(`${daemonUrl}/api/v1/settings/cli-tools`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -155,6 +185,65 @@ export async function putCLIToolSettings(daemonUrl: string, req: CLIToolSettings
     throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
   }
   return (await res.json()) as CLIToolSettings
+}
+
+export async function startIFLOWBrowserAuth(
+  daemonUrl: string,
+  req?: { command_path?: string },
+): Promise<IFLOWBrowserAuthSession> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/cli-tools/iflow/browser-auth`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req ?? {}),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as IFLOWBrowserAuthSession
+}
+
+export async function fetchIFLOWBrowserAuth(
+  daemonUrl: string,
+  sessionId: string,
+): Promise<IFLOWBrowserAuthSession> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/cli-tools/iflow/browser-auth/${sessionId}`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as IFLOWBrowserAuthSession
+}
+
+export async function submitIFLOWBrowserAuthCode(
+  daemonUrl: string,
+  sessionId: string,
+  req: { authorization_code: string },
+): Promise<IFLOWBrowserAuthSession> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/cli-tools/iflow/browser-auth/${sessionId}/code`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as IFLOWBrowserAuthSession
+}
+
+export async function cancelIFLOWBrowserAuth(
+  daemonUrl: string,
+  sessionId: string,
+): Promise<IFLOWBrowserAuthSession> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/cli-tools/iflow/browser-auth/${sessionId}/cancel`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as IFLOWBrowserAuthSession
 }
 
 export type MCPServerSetting = {
@@ -203,14 +292,85 @@ export type SkillBindingSetting = {
   description?: string
   path?: string
   source?: string
+  enabled: boolean
 }
 
 export type SkillSettings = {
   skills: SkillBindingSetting[]
 }
 
+export type PutSkillSettingsRequest = {
+  skills: SkillBindingSetting[]
+}
+
 export async function fetchSkillSettings(daemonUrl: string): Promise<SkillSettings> {
   const res = await fetch(`${daemonUrl}/api/v1/settings/skills`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as SkillSettings
+}
+
+export async function putSkillSettings(
+  daemonUrl: string,
+  req: PutSkillSettingsRequest,
+): Promise<SkillSettings> {
+  const res = await fetch(`${daemonUrl}/api/v1/settings/skills`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as SkillSettings
+}
+
+export async function postTranslateText(daemonUrl: string, text: string): Promise<{ translated: string }> {
+  const res = await fetch(`${daemonUrl}/api/v1/translate/text`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => null) as { error?: string } | null
+    throw new Error(data?.error ?? `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as { translated: string }
+}
+
+export async function postSkillInstallArchive(
+  daemonUrl: string,
+  archive: File,
+): Promise<SkillSettings> {
+  const form = new FormData()
+  form.set('archive', archive)
+  const res = await fetch(`${daemonUrl}/api/v1/settings/skills/install`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
+  }
+  return (await res.json()) as SkillSettings
+}
+
+export async function postSkillInstallDirectory(
+  daemonUrl: string,
+  files: Array<{ file: File; relativePath: string }>,
+): Promise<SkillSettings> {
+  const form = new FormData()
+  for (const item of files) {
+    form.append('files', item.file, item.relativePath)
+    form.append('paths', item.relativePath)
+  }
+  const res = await fetch(`${daemonUrl}/api/v1/settings/skills/install`, {
+    method: 'POST',
+    body: form,
+  })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim())
@@ -228,15 +388,13 @@ export type BasicSettings = {
 }
 
 export type ThinkingTranslationSettings = {
-  source_id: string
-  model: string
+  model_id: string
   target_model_ids: string[]
 }
 
 export type PutBasicSettingsRequest = {
   thinking_translation?: {
-    source_id: string
-    model: string
+    model_id: string
     target_model_ids: string[]
   }
 }
@@ -632,8 +790,8 @@ export type ChatSession = {
   expert_id: string
   cli_tool_id?: string
   model_id?: string
-  reasoning_effort?: string
   cli_session_id?: string
+  reasoning_effort?: string
   mcp_server_ids?: string[]
   provider: string
   model: string

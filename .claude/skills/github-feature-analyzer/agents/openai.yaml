@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Feature Analyzer"
+  short_description: "Principle-first feature analysis with optional multi-agent parallel synthesis"
+  default_prompt: "Analyze a GitHub repository with a README-first, evidence-backed workflow: optionally retrieve historical references from .github-feature-analyzer via UV-managed local embedding index first, then summarize 3 project characteristics and run multi-agent feature principle analysis with strict path:line evidence under <project-root>/.github-feature-analyzer/<owner-repo>/report.md."

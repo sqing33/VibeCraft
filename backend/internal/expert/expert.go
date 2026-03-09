@@ -215,8 +215,11 @@ func (r *Registry) ResolveWithOptions(expertID, prompt, cwd string, opts Resolve
 	protocolFamily := provider
 	toolID := strings.TrimSpace(opts.CLIToolID)
 	selectedModelID := strings.TrimSpace(opts.ModelID)
+	selectedTool := config.CLIToolConfig{}
+	selectedToolID := ""
 	if provider == "cli" {
-		selectedTool, selectedToolID, err := resolveCLIToolSelection(tools, e, toolID)
+		var err error
+		selectedTool, selectedToolID, err = resolveCLIToolSelection(tools, e, toolID)
 		if err != nil {
 			return Resolved{}, err
 		}
@@ -233,23 +236,33 @@ func (r *Registry) ResolveWithOptions(expertID, prompt, cwd string, opts Resolve
 				e.Env["VIBE_TREE_CLI_COMMAND_PATH"] = strings.TrimSpace(selectedTool.CommandPath)
 			}
 			if selectedModelID == "" {
-				selectedModelID = strings.TrimSpace(selectedTool.DefaultModelID)
+				if runner.NormalizeCLIFamily(selectedTool.CLIFamily) == "iflow" {
+					selectedModelID = strings.TrimSpace(selectedTool.IFlowDefaultModel)
+				} else {
+					selectedModelID = strings.TrimSpace(selectedTool.DefaultModelID)
+				}
 			}
 		}
 		if selectedModelID == "" {
 			selectedModelID = strings.TrimSpace(e.PrimaryModelID)
 		}
 		if strings.TrimSpace(selectedModelID) != "" {
-			selectedModel, ok := lookupLLMModel(llm, selectedModelID)
-			if !ok {
-				return Resolved{}, fmt.Errorf("expert %q: model %q does not exist", expertID, selectedModelID)
+			if runner.NormalizeCLIFamily(e.CLIFamily) == "iflow" {
+				model = strings.TrimSpace(selectedModelID)
+				e.PrimaryModelID = strings.TrimSpace(selectedModelID)
+			} else {
+				selectedModel, ok := lookupLLMModel(llm, selectedModelID)
+				if !ok {
+					return Resolved{}, fmt.Errorf("expert %q: model %q does not exist", expertID, selectedModelID)
+				}
+				selectedProvider := configProtocol(selectedModel.Provider)
+				if protocolFamily != "" && selectedProvider != configProtocol(protocolFamily) && !config.CLIToolSupportsProtocol(selectedTool, selectedProvider) {
+					return Resolved{}, fmt.Errorf("expert %q: model %q is incompatible with cli tool protocol %q", expertID, selectedModelID, protocolFamily)
+				}
+				model = strings.TrimSpace(selectedModel.Model)
+				e.PrimaryModelID = strings.TrimSpace(selectedModel.ID)
+				protocolFamily = configProtocol(selectedModel.Provider)
 			}
-			if protocolFamily != "" && configProtocol(selectedModel.Provider) != configProtocol(protocolFamily) {
-				return Resolved{}, fmt.Errorf("expert %q: model %q is incompatible with cli tool protocol %q", expertID, selectedModelID, protocolFamily)
-			}
-			model = strings.TrimSpace(selectedModel.Model)
-			e.PrimaryModelID = strings.TrimSpace(selectedModel.ID)
-			protocolFamily = configProtocol(selectedModel.Provider)
 		}
 	}
 	if provider != "demo" && provider != "process" && model == "" {
@@ -269,6 +282,9 @@ func (r *Registry) ResolveWithOptions(expertID, prompt, cwd string, opts Resolve
 			return Resolved{}, fmt.Errorf("expert %q: env %s: %w", expertID, k, err)
 		}
 		env[k] = expanded
+	}
+	if provider == "cli" && runner.NormalizeCLIFamily(e.CLIFamily) != "iflow" {
+		applyCLIModelRuntimeEnv(env, llm, selectedModelID)
 	}
 
 	timeout := time.Duration(e.TimeoutMs) * time.Millisecond
@@ -529,6 +545,40 @@ func lookupLLMModel(llm *config.LLMSettings, modelID string) (config.LLMModelCon
 		}
 	}
 	return config.LLMModelConfig{}, false
+}
+
+func applyCLIModelRuntimeEnv(env map[string]string, llm *config.LLMSettings, modelID string) {
+	model, source, _, ok := config.FindLLMModelByID(llm, modelID)
+	if !ok {
+		return
+	}
+	provider := configProtocol(model.Provider)
+	switch provider {
+	case "openai":
+		delete(env, "OPENAI_API_KEY")
+		delete(env, "OPENAI_BASE_URL")
+		delete(env, "ANTHROPIC_API_KEY")
+		delete(env, "ANTHROPIC_BASE_URL")
+		if strings.TrimSpace(source.APIKey) != "" {
+			env["OPENAI_API_KEY"] = strings.TrimSpace(source.APIKey)
+		}
+		if strings.TrimSpace(source.BaseURL) != "" {
+			env["OPENAI_BASE_URL"] = strings.TrimSpace(source.BaseURL)
+			env["VIBE_TREE_BASE_URL"] = strings.TrimSpace(source.BaseURL)
+		}
+	case "anthropic":
+		delete(env, "ANTHROPIC_API_KEY")
+		delete(env, "ANTHROPIC_BASE_URL")
+		delete(env, "OPENAI_API_KEY")
+		delete(env, "OPENAI_BASE_URL")
+		if strings.TrimSpace(source.APIKey) != "" {
+			env["ANTHROPIC_API_KEY"] = strings.TrimSpace(source.APIKey)
+		}
+		if strings.TrimSpace(source.BaseURL) != "" {
+			env["ANTHROPIC_BASE_URL"] = strings.TrimSpace(source.BaseURL)
+			env["VIBE_TREE_BASE_URL"] = strings.TrimSpace(source.BaseURL)
+		}
+	}
 }
 
 func configProtocol(v string) string {

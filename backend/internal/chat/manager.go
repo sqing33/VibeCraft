@@ -421,6 +421,11 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 		} else {
 			delete(runSpec.Env, "VIBE_TREE_RESUME_SESSION_ID")
 		}
+		preparedRunSpec, prepErr := prepareIFLOWRunSpec(sess, runSpec, expertID)
+		if prepErr != nil {
+			return "", "", "", prepErr
+		}
+		runSpec = preparedRunSpec
 		if artifactDir != "" {
 			runSpec = cliruntime.PrepareRunSpec(runSpec, artifactDir)
 		}
@@ -523,6 +528,12 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 			}
 		}
 		if waitErr != nil || exitRes.ExitCode != 0 {
+			if strings.TrimSpace(resumeSessionID) != "" {
+				if waitErr != nil {
+					return "", reasoningText, nextSessionID, waitErr
+				}
+				return "", reasoningText, nextSessionID, fmt.Errorf("cli runtime exited with code %d", exitRes.ExitCode)
+			}
 			if strings.TrimSpace(finalText) == "" {
 				if waitErr != nil {
 					return "", reasoningText, nextSessionID, waitErr
@@ -632,7 +643,17 @@ func parseCLIStreamEvents(toolID, line string) []cliStreamEvent {
 	if toolID == "claude" {
 		return parseClaudeCLIStreamEvents(line)
 	}
+	if toolID == "iflow" {
+		return parseIFLOWCLIStreamEvents(line)
+	}
 	return parseCodexCLIStreamEvents(line)
+}
+
+func parseIFLOWCLIStreamEvents(line string) []cliStreamEvent {
+	if strings.TrimSpace(line) == "" {
+		return nil
+	}
+	return []cliStreamEvent{{Type: "assistant_delta", Delta: line + "\n"}}
 }
 
 func parseCodexCLIStreamEvents(line string) []cliStreamEvent {

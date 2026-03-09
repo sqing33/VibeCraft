@@ -128,8 +128,9 @@ type BasicSettings struct {
 }
 
 type ThinkingTranslationSettings struct {
-	SourceID       string   `json:"source_id,omitempty"`
-	Model          string   `json:"model,omitempty"`
+	ModelID        string   `json:"model_id,omitempty"`
+	SourceID       string   `json:"source_id,omitempty"` // 旧字段，仅保留用于 JSON 反序列化兼容，不再写入
+	Model          string   `json:"model,omitempty"`     // 旧字段，仅保留用于 JSON 反序列化兼容，不再写入
 	TargetModelIDs []string `json:"target_model_ids,omitempty"`
 }
 
@@ -233,6 +234,18 @@ func Default() Config {
 				CLIFamily:     "claude",
 				Model:         "claude-3-7-sonnet-latest",
 				SystemPrompt:  "You are Claude. Respond in plain text suitable for a terminal. Do not use markdown unless explicitly requested.",
+				Env:           map[string]string{},
+				TimeoutMs:     30 * 60 * 1000,
+			},
+			{
+				ID:            "iflow",
+				Label:         "iFlow",
+				ManagedSource: ManagedSourceBuiltin,
+				Provider:      "cli",
+				RuntimeKind:   "cli",
+				CLIFamily:     "iflow",
+				Model:         "glm-4.7",
+				SystemPrompt:  "You are iFlow. Respond in plain text suitable for a terminal. Do not use markdown unless explicitly requested.",
 				Env:           map[string]string{},
 				TimeoutMs:     30 * 60 * 1000,
 			},

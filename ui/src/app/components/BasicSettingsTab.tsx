@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Input, Skeleton, Select, SelectItem } from '@heroui/react'
+import { Alert, Button, Select, SelectItem, Skeleton } from '@heroui/react'
 
 import {
   fetchBasicSettings,
@@ -13,8 +13,7 @@ import { toast } from '@/lib/toast'
 import { useDaemonStore } from '@/stores/daemonStore'
 
 type ThinkingTranslationDraft = {
-  source_id: string
-  model: string
+  model_id: string
   target_model_ids: string[]
 }
 
@@ -41,8 +40,7 @@ function normalizeTargetModelIDs(values: string[]): string[] {
 
 function draftFromSettings(settings: BasicSettings): ThinkingTranslationDraft {
   return {
-    source_id: settings.thinking_translation?.source_id ?? '',
-    model: settings.thinking_translation?.model ?? '',
+    model_id: settings.thinking_translation?.model_id ?? '',
     target_model_ids: normalizeTargetModelIDs(settings.thinking_translation?.target_model_ids ?? []),
   }
 }
@@ -56,8 +54,7 @@ export function BasicSettingsTab() {
   const [sources, setSources] = useState<LLMSource[]>([])
   const [models, setModels] = useState<LLMModelProfile[]>([])
   const [draft, setDraft] = useState<ThinkingTranslationDraft>({
-    source_id: '',
-    model: '',
+    model_id: '',
     target_model_ids: [],
   })
 
@@ -109,7 +106,6 @@ export function BasicSettingsTab() {
       }))
   }, [models, sources])
 
-  const hasSources = sources.length > 0
   const hasModels = models.length > 0
 
   const toggleTargetModel = (modelID: string) => {
@@ -126,12 +122,8 @@ export function BasicSettingsTab() {
   }
 
   const onSave = async () => {
-    if (!draft.source_id.trim()) {
-      toast({ variant: 'destructive', title: '请先选择 API 源' })
-      return
-    }
-    if (!draft.model.trim()) {
-      toast({ variant: 'destructive', title: '请先填写翻译模型' })
+    if (!draft.model_id.trim()) {
+      toast({ variant: 'destructive', title: '请先选择翻译模型' })
       return
     }
     if (draft.target_model_ids.length === 0) {
@@ -143,8 +135,7 @@ export function BasicSettingsTab() {
     try {
       const saved = await putBasicSettings(daemonUrl, {
         thinking_translation: {
-          source_id: draft.source_id.trim(),
-          model: draft.model.trim(),
+          model_id: draft.model_id.trim(),
           target_model_ids: normalizeTargetModelIDs(draft.target_model_ids),
         },
       })
@@ -174,47 +165,43 @@ export function BasicSettingsTab() {
         {loading ? (
           <div className="space-y-3">
             <Skeleton className="h-12 rounded-lg" />
-            <Skeleton className="h-12 rounded-lg" />
             <Skeleton className="h-32 rounded-lg" />
           </div>
         ) : (
           <>
-            {!hasSources ? (
+            {!hasModels ? (
               <Alert
                 color="warning"
-                title="请先配置 API 源"
-                description="当前还没有可用的 API 源，请先到“模型”标签页添加 Source 和模型。"
+                title="请先配置模型"
+                description='当前还没有可用的模型，请先到"模型"标签页添加模型后再来配置翻译。'
               />
             ) : null}
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Select
-                aria-label="翻译 API 源"
-                label="API 源"
-                placeholder={hasSources ? '请选择翻译 API 源' : '请先到模型页配置 API 源'}
-                selectedKeys={draft.source_id ? new Set([draft.source_id]) : new Set([])}
-                selectionMode="single"
-                isDisabled={!hasSources}
-                onSelectionChange={(keys) =>
-                  setDraft((prev) => ({
-                    ...prev,
-                    source_id: selectionToString(keys),
-                  }))
-                }
-              >
-                {sources.map((source) => (
-                  <SelectItem key={source.id}>{source.label?.trim() || source.id}</SelectItem>
-                ))}
-              </Select>
-
-              <Input
-                label="翻译模型"
-                placeholder="例如：gpt-4.1-mini-translator"
-                value={draft.model}
-                isDisabled={!hasSources}
-                onValueChange={(value) => setDraft((prev) => ({ ...prev, model: value }))}
-              />
-            </div>
+            <Select
+              aria-label="翻译模型"
+              label="翻译模型"
+              placeholder={hasModels ? '请选择用于翻译的模型' : '请先到模型页配置模型'}
+              selectedKeys={draft.model_id ? new Set([draft.model_id]) : new Set([])}
+              selectionMode="single"
+              isDisabled={!hasModels}
+              onSelectionChange={(keys) =>
+                setDraft((prev) => ({
+                  ...prev,
+                  model_id: selectionToString(keys),
+                }))
+              }
+            >
+              {groupedModels.flatMap((group) =>
+                group.items.map((model) => (
+                  <SelectItem key={model.id} textValue={model.label || model.id}>
+                    <div className="flex flex-col">
+                      <span>{model.label || model.id}</span>
+                      <span className="text-xs text-muted-foreground">{group.label}</span>
+                    </div>
+                  </SelectItem>
+                ))
+              )}
+            </Select>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
@@ -222,13 +209,7 @@ export function BasicSettingsTab() {
                 <div className="text-xs text-muted-foreground">已选择 {draft.target_model_ids.length} 个</div>
               </div>
 
-              {!hasModels ? (
-                <Alert
-                  color="warning"
-                  title="暂无可选模型"
-                  description="请先到“模型”标签页添加至少一个模型，然后再回来选择需要翻译的 AI 模型。"
-                />
-              ) : (
+              {hasModels ? (
                 <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
                   {groupedModels.map((group) => (
                     <div key={group.source_id} className="space-y-2">
@@ -252,7 +233,7 @@ export function BasicSettingsTab() {
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
             </div>
 
             <div className="mt-auto flex justify-end gap-2 pt-2">
@@ -262,7 +243,7 @@ export function BasicSettingsTab() {
               <Button
                 color="primary"
                 isLoading={saving}
-                isDisabled={!hasSources}
+                isDisabled={!hasModels}
                 onPress={() => void onSave()}
               >
                 保存

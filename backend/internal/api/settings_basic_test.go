@@ -18,7 +18,10 @@ func TestBasicSettings_PutAndGetThinkingTranslation(t *testing.T) {
 	cfg := config.Default()
 	cfg.LLM = &config.LLMSettings{
 		Sources: []config.LLMSourceConfig{{ID: "openai-default", Provider: "openai", APIKey: "sk_test_123456"}},
-		Models:  []config.LLMModelConfig{{ID: "gpt-5-codex", Provider: "openai", Model: "gpt-5-codex", SourceID: "openai-default"}},
+		Models: []config.LLMModelConfig{
+			{ID: "translator-fast", Provider: "openai", Model: "gpt-4.1-mini", SourceID: "openai-default"},
+			{ID: "gpt-5-codex", Provider: "openai", Model: "gpt-5-codex", SourceID: "openai-default"},
+		},
 	}
 	cfgPath, err := config.Path()
 	if err != nil {
@@ -29,7 +32,7 @@ func TestBasicSettings_PutAndGetThinkingTranslation(t *testing.T) {
 	}
 
 	env := newTestEnv(t, cfg, 2)
-	body := []byte(`{"thinking_translation":{"source_id":"openai-default","model":"translator-fast","target_model_ids":["gpt-5-codex"]}}`)
+	body := []byte(`{"thinking_translation":{"model_id":"translator-fast","target_model_ids":["gpt-5-codex"]}}`)
 	req, err := http.NewRequest(http.MethodPut, env.httpSrv.URL+"/api/v1/settings/basic", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("new request: %v", err)
@@ -56,8 +59,7 @@ func TestBasicSettings_PutAndGetThinkingTranslation(t *testing.T) {
 	}
 	var out struct {
 		ThinkingTranslation *struct {
-			SourceID       string   `json:"source_id"`
-			Model          string   `json:"model"`
+			ModelID        string   `json:"model_id"`
 			TargetModelIDs []string `json:"target_model_ids"`
 		} `json:"thinking_translation"`
 	}
@@ -67,8 +69,8 @@ func TestBasicSettings_PutAndGetThinkingTranslation(t *testing.T) {
 	if out.ThinkingTranslation == nil {
 		t.Fatalf("expected thinking translation config")
 	}
-	if out.ThinkingTranslation.Model != "translator-fast" {
-		t.Fatalf("unexpected model: %q", out.ThinkingTranslation.Model)
+	if out.ThinkingTranslation.ModelID != "translator-fast" {
+		t.Fatalf("unexpected model_id: %q", out.ThinkingTranslation.ModelID)
 	}
 }
 
@@ -79,7 +81,10 @@ func TestBasicSettings_PutRejectsUnknownTargetModel(t *testing.T) {
 	cfg := config.Default()
 	cfg.LLM = &config.LLMSettings{
 		Sources: []config.LLMSourceConfig{{ID: "openai-default", Provider: "openai"}},
-		Models:  []config.LLMModelConfig{{ID: "gpt-5-codex", Provider: "openai", Model: "gpt-5-codex", SourceID: "openai-default"}},
+		Models: []config.LLMModelConfig{
+			{ID: "translator-fast", Provider: "openai", Model: "gpt-4.1-mini", SourceID: "openai-default"},
+			{ID: "gpt-5-codex", Provider: "openai", Model: "gpt-5-codex", SourceID: "openai-default"},
+		},
 	}
 	cfgPath, err := config.Path()
 	if err != nil {
@@ -90,7 +95,7 @@ func TestBasicSettings_PutRejectsUnknownTargetModel(t *testing.T) {
 	}
 
 	env := newTestEnv(t, cfg, 2)
-	body := []byte(`{"thinking_translation":{"source_id":"openai-default","model":"translator-fast","target_model_ids":["missing-model"]}}`)
+	body := []byte(`{"thinking_translation":{"model_id":"translator-fast","target_model_ids":["missing-model"]}}`)
 	req, err := http.NewRequest(http.MethodPut, env.httpSrv.URL+"/api/v1/settings/basic", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("new request: %v", err)
@@ -115,12 +120,14 @@ func TestLLMSettings_PutClearsStaleThinkingTranslation(t *testing.T) {
 	cfg := config.Default()
 	cfg.LLM = &config.LLMSettings{
 		Sources: []config.LLMSourceConfig{{ID: "openai-default", Provider: "openai"}},
-		Models:  []config.LLMModelConfig{{ID: "gpt-5-codex", Provider: "openai", Model: "gpt-5-codex", SourceID: "openai-default"}},
+		Models: []config.LLMModelConfig{
+			{ID: "translator-fast", Provider: "openai", Model: "gpt-4.1-mini", SourceID: "openai-default"},
+			{ID: "gpt-5-codex", Provider: "openai", Model: "gpt-5-codex", SourceID: "openai-default"},
+		},
 	}
 	cfg.Basic = &config.BasicSettings{
 		ThinkingTranslation: &config.ThinkingTranslationSettings{
-			SourceID:       "openai-default",
-			Model:          "translator-fast",
+			ModelID:        "translator-fast",
 			TargetModelIDs: []string{"gpt-5-codex"},
 		},
 	}

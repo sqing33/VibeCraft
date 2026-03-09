@@ -7,9 +7,12 @@ import (
 	"testing"
 
 	"vibe-tree/backend/internal/config"
+	iflowcli "vibe-tree/backend/internal/iflow"
 )
 
 func TestCLIToolSettings_GetAndPut(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	env := newTestEnv(t, config.Default(), 2)
 	cfgPath, err := config.Path()
 	if err != nil {
@@ -37,8 +40,13 @@ func TestCLIToolSettings_GetAndPut(t *testing.T) {
 	}
 	var got struct {
 		Tools []struct {
-			ID             string `json:"id"`
-			DefaultModelID string `json:"default_model_id"`
+			ID                 string   `json:"id"`
+			DefaultModelID     string   `json:"default_model_id"`
+			IFLOWAuthMode      string   `json:"iflow_auth_mode"`
+			IFLOWModels        []string `json:"iflow_models"`
+			IFLOWDefaultModel  string   `json:"iflow_default_model"`
+			IFLOWMaskedKey     string   `json:"iflow_masked_key"`
+			IFLOWBrowserAuthed bool     `json:"iflow_browser_authenticated"`
 		} `json:"tools"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
@@ -47,11 +55,38 @@ func TestCLIToolSettings_GetAndPut(t *testing.T) {
 	if len(got.Tools) == 0 {
 		t.Fatalf("expected cli tools")
 	}
+	foundIFLOW := false
+	for _, item := range got.Tools {
+		if item.ID != "iflow" {
+			continue
+		}
+		foundIFLOW = true
+		if item.IFLOWAuthMode != config.IFLOWAuthModeBrowser {
+			t.Fatalf("iflow auth mode = %q, want %q", item.IFLOWAuthMode, config.IFLOWAuthModeBrowser)
+		}
+		if item.IFLOWDefaultModel != iflowcli.DefaultModel {
+			t.Fatalf("iflow default model = %q, want %q", item.IFLOWDefaultModel, iflowcli.DefaultModel)
+		}
+		if len(item.IFLOWModels) == 0 {
+			t.Fatalf("expected iflow models in get response")
+		}
+		if item.IFLOWMaskedKey != "" {
+			t.Fatalf("unexpected masked key before save: %q", item.IFLOWMaskedKey)
+		}
+		if item.IFLOWBrowserAuthed {
+			t.Fatalf("expected browser auth false in isolated test env")
+		}
+	}
+	if !foundIFLOW {
+		t.Fatalf("expected iflow in get response")
+	}
 
+	apiKey := "sk-iflow-123456"
 	body, _ := json.Marshal(map[string]any{
 		"tools": []map[string]any{
 			{"id": "codex", "label": "Codex CLI", "protocol_family": "openai", "cli_family": "codex", "default_model_id": "gpt-5.4", "enabled": true},
 			{"id": "claude", "label": "Claude Code", "protocol_family": "anthropic", "cli_family": "claude", "default_model_id": "", "enabled": true},
+			{"id": "iflow", "label": "iFlow CLI", "protocol_family": "openai", "cli_family": "iflow", "enabled": true, "iflow_auth_mode": "api_key", "iflow_base_url": iflowcli.DefaultBaseURL, "iflow_models": []string{"glm-4.7", "minimax-m2.5"}, "iflow_default_model": "minimax-m2.5", "iflow_api_key": apiKey},
 		},
 	})
 	req, err := http.NewRequest(http.MethodPut, env.httpSrv.URL+"/api/v1/settings/cli-tools", bytes.NewReader(body))
@@ -69,16 +104,102 @@ func TestCLIToolSettings_GetAndPut(t *testing.T) {
 	}
 	var updated struct {
 		Tools []struct {
-			ID             string `json:"id"`
-			DefaultModelID string `json:"default_model_id"`
+			ID                string   `json:"id"`
+			DefaultModelID    string   `json:"default_model_id"`
+			IFLOWAuthMode     string   `json:"iflow_auth_mode"`
+			IFLOWModels       []string `json:"iflow_models"`
+			IFLOWDefaultModel string   `json:"iflow_default_model"`
+			IFLOWHasKey       bool     `json:"iflow_has_key"`
+			IFLOWMaskedKey    string   `json:"iflow_masked_key"`
 		} `json:"tools"`
 	}
 	if err := json.NewDecoder(putRes.Body).Decode(&updated); err != nil {
 		t.Fatalf("decode put response: %v", err)
 	}
+	foundIFLOW = false
 	for _, item := range updated.Tools {
 		if item.ID == "codex" && item.DefaultModelID != "gpt-5.4" {
 			t.Fatalf("codex default model = %q, want gpt-5.4", item.DefaultModelID)
 		}
+		if item.ID != "iflow" {
+			continue
+		}
+		foundIFLOW = true
+		if item.IFLOWAuthMode != config.IFLOWAuthModeAPIKey {
+			t.Fatalf("iflow auth mode = %q, want %q", item.IFLOWAuthMode, config.IFLOWAuthModeAPIKey)
+		}
+		if !item.IFLOWHasKey {
+			t.Fatalf("expected iflow_has_key true")
+		}
+		if item.IFLOWMaskedKey != "****3456" {
+			t.Fatalf("iflow masked key = %q, want ****3456", item.IFLOWMaskedKey)
+		}
+		if item.IFLOWDefaultModel != "minimax-m2.5" {
+			t.Fatalf("iflow default model = %q, want minimax-m2.5", item.IFLOWDefaultModel)
+		}
+		if len(item.IFLOWModels) != 2 {
+			t.Fatalf("iflow models len = %d, want 2", len(item.IFLOWModels))
+		}
+	}
+	if !foundIFLOW {
+		t.Fatalf("expected iflow in put response")
+	}
+}
+
+func TestCLIToolSettings_GetBackfillsIFLOWFromLegacyConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	cfg := config.Default()
+	cfg.LLM = &config.LLMSettings{
+		Sources: []config.LLMSourceConfig{{ID: "openai-default", Provider: "openai"}},
+		Models:  []config.LLMModelConfig{{ID: "gpt-5.4", Provider: "openai", Model: "gpt-5.4", SourceID: "openai-default"}},
+	}
+	cfg.CLITools = []config.CLIToolConfig{
+		{ID: "codex", Label: "Codex CLI", ProtocolFamily: "openai", CLIFamily: "codex", Enabled: true},
+		{ID: "claude", Label: "Claude Code", ProtocolFamily: "anthropic", CLIFamily: "claude", Enabled: true},
+	}
+	cfgPath, err := config.Path()
+	if err != nil {
+		t.Fatalf("config path: %v", err)
+	}
+	if err := config.SaveTo(cfgPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	env := newTestEnv(t, cfg, 2)
+	res, err := http.Get(env.httpSrv.URL + "/api/v1/settings/cli-tools")
+	if err != nil {
+		t.Fatalf("get cli tools: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: %s", res.Status)
+	}
+	var got struct {
+		Tools []struct {
+			ID                string `json:"id"`
+			IFLOWDefaultModel string `json:"iflow_default_model"`
+		} `json:"tools"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(got.Tools) != 3 {
+		t.Fatalf("cli tools len = %d, want 3", len(got.Tools))
+	}
+	foundIFLOW := false
+	for _, item := range got.Tools {
+		if item.ID == "iflow" {
+			foundIFLOW = true
+			if item.IFLOWDefaultModel == "" {
+				t.Fatalf("expected backfilled iflow default model")
+			}
+		}
+	}
+	if !foundIFLOW {
+		t.Fatalf("expected iflow in get response")
 	}
 }

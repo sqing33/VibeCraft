@@ -6,27 +6,29 @@ import (
 )
 
 type ThinkingTranslationRuntime struct {
-	SourceID string
-	Provider string
-	BaseURL  string
-	APIKey   string
-	Model    string
+	SourceID       string
+	Provider       string
+	BaseURL        string
+	APIKey         string
+	Model          string
+	OpenAIAPIStyle string
 }
 
 // NormalizeBasicSettings 功能：规范化 basic settings，并在配置为空时清理空容器。
 // 参数/返回：basic 为 `*BasicSettings` 指针；原地 trim/dedupe 后无返回值。
 // 失败场景：无。
-// 副作用：会原地修改 `source_id/model/target_model_ids`，并在配置为空时置 nil。
+// 副作用：会原地修改字段，并在配置为空时置 nil。
 func NormalizeBasicSettings(basic **BasicSettings) {
 	if basic == nil || *basic == nil {
 		return
 	}
 	if (*basic).ThinkingTranslation != nil {
 		tt := (*basic).ThinkingTranslation
-		tt.SourceID = strings.TrimSpace(tt.SourceID)
-		tt.Model = strings.TrimSpace(tt.Model)
+		tt.ModelID = strings.TrimSpace(tt.ModelID)
+		tt.SourceID = ""
+		tt.Model = ""
 		tt.TargetModelIDs = normalizeModelIDList(tt.TargetModelIDs)
-		if tt.SourceID == "" && tt.Model == "" && len(tt.TargetModelIDs) == 0 {
+		if tt.ModelID == "" && len(tt.TargetModelIDs) == 0 {
 			(*basic).ThinkingTranslation = nil
 		}
 	}
@@ -37,7 +39,7 @@ func NormalizeBasicSettings(basic **BasicSettings) {
 
 // ValidateBasicSettings 功能：校验 basic settings 的结构与 LLM 引用关系。
 // 参数/返回：basic 可为 nil；llm 为当前 LLM settings；成功返回 nil。
-// 失败场景：source/provider/model/target_model_ids 不合法时返回 error。
+// 失败场景：model_id/target_model_ids 不合法时返回 error。
 // 副作用：无。
 func ValidateBasicSettings(basic *BasicSettings, llm *LLMSettings) error {
 	copyValue := cloneBasicSettings(basic)
@@ -46,11 +48,8 @@ func ValidateBasicSettings(basic *BasicSettings, llm *LLMSettings) error {
 		return nil
 	}
 	tt := copyValue.ThinkingTranslation
-	if tt.SourceID == "" {
-		return fmt.Errorf("basic.thinking_translation.source_id is required")
-	}
-	if tt.Model == "" {
-		return fmt.Errorf("basic.thinking_translation.model is required")
+	if tt.ModelID == "" {
+		return fmt.Errorf("basic.thinking_translation.model_id is required")
 	}
 	if len(tt.TargetModelIDs) == 0 {
 		return fmt.Errorf("basic.thinking_translation.target_model_ids must not be empty")
@@ -58,14 +57,14 @@ func ValidateBasicSettings(basic *BasicSettings, llm *LLMSettings) error {
 	if llm == nil {
 		return fmt.Errorf("llm settings are required for thinking translation")
 	}
-	sourceByID := llmSourceByID(llm)
-	source, ok := sourceByID[tt.SourceID]
+	modelCfg, source, _, ok := FindLLMModelByID(llm, tt.ModelID)
 	if !ok {
-		return fmt.Errorf("basic.thinking_translation.source_id %q does not exist", tt.SourceID)
+		return fmt.Errorf("basic.thinking_translation.model_id %q does not exist in llm models", tt.ModelID)
 	}
+	_ = modelCfg
 	provider := normalizeProvider(source.Provider)
 	if provider != "openai" && provider != "anthropic" {
-		return fmt.Errorf("basic.thinking_translation.source_id %q references unsupported provider %q", tt.SourceID, strings.TrimSpace(source.Provider))
+		return fmt.Errorf("basic.thinking_translation.model_id %q references unsupported provider %q", tt.ModelID, strings.TrimSpace(source.Provider))
 	}
 	modelIDs := llmModelIDSet(llm)
 	for _, modelID := range tt.TargetModelIDs {
@@ -90,18 +89,13 @@ func ReconcileBasicSettingsWithLLM(basic **BasicSettings, llm *LLMSettings) {
 		return
 	}
 	tt := (*basic).ThinkingTranslation
-	sourceByID := llmSourceByID(llm)
-	source, ok := sourceByID[tt.SourceID]
+	_, source, _, ok := FindLLMModelByID(llm, tt.ModelID)
 	if !ok {
 		*basic = nil
 		return
 	}
 	provider := normalizeProvider(source.Provider)
 	if provider != "openai" && provider != "anthropic" {
-		*basic = nil
-		return
-	}
-	if tt.Model == "" {
 		*basic = nil
 		return
 	}
@@ -148,13 +142,14 @@ func ResolveThinkingTranslation(basic *BasicSettings, llm *LLMSettings, targetMo
 	if !hit {
 		return nil, nil
 	}
-	source := llmSourceByID(llm)[tt.SourceID]
+	modelCfg, source, _, _ := FindLLMModelByID(llm, tt.ModelID)
 	return &ThinkingTranslationRuntime{
-		SourceID: tt.SourceID,
-		Provider: normalizeProvider(source.Provider),
-		BaseURL:  strings.TrimSpace(source.BaseURL),
-		APIKey:   strings.TrimSpace(source.APIKey),
-		Model:    tt.Model,
+		SourceID:       strings.TrimSpace(source.ID),
+		Provider:       normalizeProvider(source.Provider),
+		BaseURL:        strings.TrimSpace(source.BaseURL),
+		APIKey:         strings.TrimSpace(source.APIKey),
+		Model:          strings.TrimSpace(modelCfg.Model),
+		OpenAIAPIStyle: modelCfg.OpenAIAPIStyle,
 	}, nil
 }
 

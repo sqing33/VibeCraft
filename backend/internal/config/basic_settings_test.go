@@ -9,12 +9,14 @@ import (
 func TestValidateBasicSettings_OK(t *testing.T) {
 	llm := &config.LLMSettings{
 		Sources: []config.LLMSourceConfig{{ID: "openai-default", Provider: "openai"}},
-		Models:  []config.LLMModelConfig{{ID: "gpt-5-codex", Provider: "openai", Model: "gpt-5-codex", SourceID: "openai-default"}},
+		Models: []config.LLMModelConfig{
+			{ID: "translator-fast", Provider: "openai", Model: "gpt-4.1-mini", SourceID: "openai-default"},
+			{ID: "gpt-5-codex", Provider: "openai", Model: "gpt-5-codex", SourceID: "openai-default"},
+		},
 	}
 	basic := &config.BasicSettings{
 		ThinkingTranslation: &config.ThinkingTranslationSettings{
-			SourceID:       "openai-default",
-			Model:          "translator-fast",
+			ModelID:        "translator-fast",
 			TargetModelIDs: []string{"GPT-5-CODEX"},
 		},
 	}
@@ -28,12 +30,14 @@ func TestValidateBasicSettings_OK(t *testing.T) {
 func TestValidateBasicSettings_RejectsUnknownTargetModel(t *testing.T) {
 	llm := &config.LLMSettings{
 		Sources: []config.LLMSourceConfig{{ID: "openai-default", Provider: "openai"}},
-		Models:  []config.LLMModelConfig{{ID: "gpt-5-codex", Provider: "openai", Model: "gpt-5-codex", SourceID: "openai-default"}},
+		Models: []config.LLMModelConfig{
+			{ID: "translator-fast", Provider: "openai", Model: "gpt-4.1-mini", SourceID: "openai-default"},
+			{ID: "gpt-5-codex", Provider: "openai", Model: "gpt-5-codex", SourceID: "openai-default"},
+		},
 	}
 	basic := &config.BasicSettings{
 		ThinkingTranslation: &config.ThinkingTranslationSettings{
-			SourceID:       "openai-default",
-			Model:          "translator-fast",
+			ModelID:        "translator-fast",
 			TargetModelIDs: []string{"missing-model"},
 		},
 	}
@@ -43,15 +47,17 @@ func TestValidateBasicSettings_RejectsUnknownTargetModel(t *testing.T) {
 	}
 }
 
-func TestReconcileBasicSettingsWithLLM_TrimsRemovedModelsAndClearsMissingSource(t *testing.T) {
+func TestReconcileBasicSettingsWithLLM_TrimsRemovedModelsAndClearsMissingModel(t *testing.T) {
 	llm := &config.LLMSettings{
 		Sources: []config.LLMSourceConfig{{ID: "openai-default", Provider: "openai"}},
-		Models:  []config.LLMModelConfig{{ID: "gpt-5-codex", Provider: "openai", Model: "gpt-5-codex", SourceID: "openai-default"}},
+		Models: []config.LLMModelConfig{
+			{ID: "translator-fast", Provider: "openai", Model: "gpt-4.1-mini", SourceID: "openai-default"},
+			{ID: "gpt-5-codex", Provider: "openai", Model: "gpt-5-codex", SourceID: "openai-default"},
+		},
 	}
 	basic := &config.BasicSettings{
 		ThinkingTranslation: &config.ThinkingTranslationSettings{
-			SourceID:       "openai-default",
-			Model:          "translator-fast",
+			ModelID:        "translator-fast",
 			TargetModelIDs: []string{"gpt-5-codex", "claude-3-7-sonnet"},
 		},
 	}
@@ -64,22 +70,24 @@ func TestReconcileBasicSettingsWithLLM_TrimsRemovedModelsAndClearsMissingSource(
 		t.Fatalf("unexpected target_model_ids: %#v", got)
 	}
 
-	basic.ThinkingTranslation.SourceID = "missing-source"
+	basic.ThinkingTranslation.ModelID = "missing-model"
 	config.ReconcileBasicSettingsWithLLM(&basic, llm)
 	if basic != nil {
-		t.Fatalf("expected basic settings to be cleared when source is missing")
+		t.Fatalf("expected basic settings to be cleared when translation model is missing")
 	}
 }
 
 func TestResolveThinkingTranslation_MatchesTargetModel(t *testing.T) {
 	llm := &config.LLMSettings{
 		Sources: []config.LLMSourceConfig{{ID: "anthropic-default", Provider: "anthropic", BaseURL: "https://anthropic.example.com", APIKey: "sk-ant-123"}},
-		Models:  []config.LLMModelConfig{{ID: "claude-3-7-sonnet", Provider: "anthropic", Model: "claude-3-7-sonnet", SourceID: "anthropic-default"}},
+		Models: []config.LLMModelConfig{
+			{ID: "translator-fast", Provider: "anthropic", Model: "claude-3-5-haiku", SourceID: "anthropic-default"},
+			{ID: "claude-3-7-sonnet", Provider: "anthropic", Model: "claude-3-7-sonnet", SourceID: "anthropic-default"},
+		},
 	}
 	basic := &config.BasicSettings{
 		ThinkingTranslation: &config.ThinkingTranslationSettings{
-			SourceID:       "anthropic-default",
-			Model:          "translator-fast",
+			ModelID:        "translator-fast",
 			TargetModelIDs: []string{"claude-3-7-sonnet"},
 		},
 	}
@@ -91,7 +99,7 @@ func TestResolveThinkingTranslation_MatchesTargetModel(t *testing.T) {
 	if runtime == nil {
 		t.Fatalf("expected runtime config")
 	}
-	if runtime.Provider != "anthropic" || runtime.Model != "translator-fast" {
+	if runtime.Provider != "anthropic" || runtime.Model != "claude-3-5-haiku" {
 		t.Fatalf("unexpected runtime: %+v", runtime)
 	}
 	miss, err := config.ResolveThinkingTranslation(basic, llm, "other-model")

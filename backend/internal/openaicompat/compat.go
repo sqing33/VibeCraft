@@ -300,7 +300,7 @@ func streamChatCompletions(ctx context.Context, req TextRequest, onDelta func(st
 func buildMessages(system, prompt string) []openai.ChatCompletionMessageParamUnion {
 	messages := make([]openai.ChatCompletionMessageParamUnion, 0, 2)
 	if strings.TrimSpace(system) != "" {
-		messages = append(messages, openai.DeveloperMessage(strings.TrimSpace(system)))
+		messages = append(messages, openai.SystemMessage(strings.TrimSpace(system)))
 	}
 	messages = append(messages, openai.UserMessage(strings.TrimSpace(prompt)))
 	return messages

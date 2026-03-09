@@ -19,6 +19,7 @@ import {
   type RepoLibraryCreateAnalysisResponse,
   type RepoLibraryRepositorySummary,
 } from '@/lib/daemon'
+import { buildCLIToolModelProfiles, cliToolDefaultModelID } from '@/lib/cliToolModels'
 import { formatRelativeTime } from '@/lib/time'
 import { toast } from '@/lib/toast'
 import { useDaemonStore } from '@/stores/daemonStore'
@@ -205,8 +206,7 @@ export function RepoLibraryRepositoriesPage() {
   const modelsForTool = useCallback(
     (toolId: string) => {
       const tool = toolsById.get(toolId)
-      if (!tool) return [] as LLMModelProfile[]
-      return toolModels.filter((model) => (model.provider || '').trim() === tool.protocol_family)
+      return buildCLIToolModelProfiles(tool, toolModels)
     },
     [toolModels, toolsById],
   )
@@ -214,9 +214,10 @@ export function RepoLibraryRepositoriesPage() {
     const models = modelsForTool(effectiveCliToolId)
     if (selectedModelId && models.some((model) => model.id === selectedModelId)) return selectedModelId
     const tool = toolsById.get(effectiveCliToolId)
-    if (tool?.default_model_id && models.some((model) => model.id === tool.default_model_id)) return tool.default_model_id
+    const fallback = cliToolDefaultModelID(tool, toolModels)
+    if (fallback && models.some((model) => model.id === fallback)) return fallback
     return models[0]?.id ?? ''
-  }, [effectiveCliToolId, modelsForTool, selectedModelId, toolsById])
+  }, [effectiveCliToolId, modelsForTool, selectedModelId, toolModels, toolsById])
 
   const onSubmit = async () => {
     const features = parseFeatureList(featuresText)

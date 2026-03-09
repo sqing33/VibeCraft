@@ -160,17 +160,17 @@ export function SettingsDialog() {
                   aria-label="系统设置"
                   classNames={{
                     base: "w-full shrink-0",
-                    panel: "h-full min-h-0 flex-1 overflow-y-auto pr-1",
+                    panel: "h-full min-h-0 flex-1 overflow-hidden",
                     tabList: "grid w-full shrink-0 grid-cols-7",
                   }}
                 >
                   <Tab key="basic" title="基本设置">
-                    <div className="flex min-h-full flex-col">
+                    <div className="flex h-full min-h-0 flex-col overflow-y-auto pr-1">
                       <BasicSettingsTab />
                     </div>
                   </Tab>
                   <Tab key="diagnostics" title="连接与诊断">
-                    <div className="flex min-h-full flex-col space-y-6">
+                    <div className="flex h-full min-h-0 flex-col space-y-6 overflow-y-auto pr-1">
                       <section className="space-y-3">
                         <div className="flex flex-wrap items-center gap-2">
                           {healthBadge(health)}
@@ -324,23 +324,33 @@ export function SettingsDialog() {
                   </Tab>
 
                   <Tab key="cli-tools" title="CLI 工具">
-                    <CLIToolSettingsTab />
+                    <div className="flex h-full min-h-0 flex-col overflow-y-auto pr-1">
+                      <CLIToolSettingsTab />
+                    </div>
                   </Tab>
 
                   <Tab key="mcp" title="MCP">
-                    <MCPSettingsTab />
+                    <div className="flex h-full min-h-0 flex-col">
+                      <MCPSettingsTab />
+                    </div>
                   </Tab>
 
                   <Tab key="skills" title="技能">
-                    <SkillSettingsTab />
+                    <div className="flex h-full min-h-0 flex-col">
+                      <SkillSettingsTab />
+                    </div>
                   </Tab>
 
                   <Tab key="llm" title="模型">
-                    <LLMSettingsTab />
+                    <div className="flex h-full min-h-0 flex-col overflow-y-auto pr-1">
+                      <LLMSettingsTab />
+                    </div>
                   </Tab>
 
                   <Tab key="experts" title="专家">
-                    <ExpertSettingsTab />
+                    <div className="flex h-full min-h-0 flex-col overflow-y-auto pr-1">
+                      <ExpertSettingsTab />
+                    </div>
                   </Tab>
                 </Tabs>
               </ModalBody>

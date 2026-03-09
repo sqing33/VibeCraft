@@ -15,6 +15,7 @@ import (
 	"vibe-tree/backend/internal/dotenv"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/expert"
+	iflowcli "vibe-tree/backend/internal/iflow"
 	"vibe-tree/backend/internal/logx"
 	"vibe-tree/backend/internal/orchestration"
 	"vibe-tree/backend/internal/paths"
@@ -108,6 +109,8 @@ func main() {
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
 
+	iflowAuthMgr := iflowcli.NewBrowserAuthManager(runner.PTYRunner{DefaultGrace: 500 * time.Millisecond})
+
 	sched := scheduler.New(scheduler.Options{
 		Store:          stateStore,
 		Executions:     execMgr,
@@ -138,7 +141,7 @@ func main() {
 
 	engine := server.New(
 		server.Options{DevCORS: server.DevCORSFromEnv()},
-		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore, Experts: experts, Chat: chatMgr, Orchestration: orchMgr, RepoLibrary: repoLibSvc},
+		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore, Experts: experts, Chat: chatMgr, Orchestration: orchMgr, RepoLibrary: repoLibSvc, IFLOWAuth: iflowAuthMgr},
 	)
 	srv := &http.Server{
 		Addr:              cfg.Addr(),
