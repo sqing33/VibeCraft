@@ -29,16 +29,10 @@ func TestNormalizeCLITools_AcceptsMatchingDefaultModel(t *testing.T) {
 	}
 }
 
-func TestNormalizeCLITools_AcceptsLegacyProtocolFamilies(t *testing.T) {
+func TestNormalizeCLITools_AllowsMultiProtocolDefaultModel(t *testing.T) {
 	llm := &config.LLMSettings{
-		Sources: []config.LLMSourceConfig{
-			{ID: "openai-default", Provider: "openai"},
-			{ID: "anthropic-default", Provider: "anthropic"},
-		},
-		Models: []config.LLMModelConfig{
-			{ID: "gpt-5.4", Provider: "openai", Model: "gpt-5.4", SourceID: "openai-default"},
-			{ID: "claude-sonnet", Provider: "anthropic", Model: "claude-sonnet", SourceID: "anthropic-default"},
-		},
+		Sources: []config.LLMSourceConfig{{ID: "anthropic-default", Provider: "anthropic"}},
+		Models:  []config.LLMModelConfig{{ID: "claude-sonnet", Provider: "anthropic", Model: "claude-sonnet", SourceID: "anthropic-default"}},
 	}
 	tools := []config.CLIToolConfig{{
 		ID:               "opencode",
@@ -52,46 +46,63 @@ func TestNormalizeCLITools_AcceptsLegacyProtocolFamilies(t *testing.T) {
 	if err := config.NormalizeCLITools(&tools, llm); err != nil {
 		t.Fatalf("normalize cli tools: %v", err)
 	}
-	if got := tools[0].ProtocolFamily; got != "anthropic" {
-		t.Fatalf("protocol family = %q, want anthropic", got)
+	families := config.CLIToolProtocolFamilies(tools[0])
+	if len(families) != 2 || families[0] != "openai" || families[1] != "anthropic" {
+		t.Fatalf("protocol families = %#v, want [openai anthropic]", families)
 	}
-	if len(tools[0].ProtocolFamilies) != 2 {
-		t.Fatalf("protocol families len = %d, want 2", len(tools[0].ProtocolFamilies))
+	if tools[0].ProtocolFamily != "openai" {
+		t.Fatalf("protocol family = %q, want openai", tools[0].ProtocolFamily)
 	}
 }
 
-func TestNormalizeCLITools_DefaultsIncludeIFLOW(t *testing.T) {
-	var tools []config.CLIToolConfig
+func TestNormalizeCLITools_DefaultsIncludeIFLOWAndOpenCode(t *testing.T) {
+	tools := []config.CLIToolConfig{}
 	if err := config.NormalizeCLITools(&tools, nil); err != nil {
 		t.Fatalf("normalize cli tools: %v", err)
 	}
-	if len(tools) != 3 {
-		t.Fatalf("cli tools len = %d, want 3", len(tools))
+	if len(tools) != 4 {
+		t.Fatalf("default cli tools len = %d, want 4", len(tools))
 	}
-	found := false
+	foundIFLOW := false
+	foundOpenCode := false
 	for _, item := range tools {
-		if item.ID != "iflow" {
-			continue
-		}
-		found = true
-		if item.ProtocolFamily != "openai" {
-			t.Fatalf("iflow protocol_family = %q, want openai", item.ProtocolFamily)
-		}
-		if item.CLIFamily != "iflow" {
-			t.Fatalf("iflow cli_family = %q, want iflow", item.CLIFamily)
-		}
-		if item.IFlowAuthMode != config.IFLOWAuthModeBrowser {
-			t.Fatalf("iflow auth mode = %q, want %q", item.IFlowAuthMode, config.IFLOWAuthModeBrowser)
-		}
-		if item.IFlowBaseURL != iflowcli.DefaultBaseURL {
-			t.Fatalf("iflow base url = %q, want %q", item.IFlowBaseURL, iflowcli.DefaultBaseURL)
-		}
-		if len(item.IFlowModels) != 1 || item.IFlowModels[0] != iflowcli.DefaultModel {
-			t.Fatalf("iflow models = %#v, want [%q]", item.IFlowModels, iflowcli.DefaultModel)
+		switch item.ID {
+		case "iflow":
+			foundIFLOW = true
+			if item.ProtocolFamily != "openai" {
+				t.Fatalf("iflow protocol_family = %q, want openai", item.ProtocolFamily)
+			}
+			if item.CLIFamily != "iflow" {
+				t.Fatalf("iflow cli_family = %q, want iflow", item.CLIFamily)
+			}
+			if item.IFlowAuthMode != config.IFLOWAuthModeBrowser {
+				t.Fatalf("iflow auth mode = %q, want %q", item.IFlowAuthMode, config.IFLOWAuthModeBrowser)
+			}
+			if item.IFlowBaseURL != iflowcli.DefaultBaseURL {
+				t.Fatalf("iflow base url = %q, want %q", item.IFlowBaseURL, iflowcli.DefaultBaseURL)
+			}
+			if len(item.IFlowModels) != 1 || item.IFlowModels[0] != iflowcli.DefaultModel {
+				t.Fatalf("iflow models = %#v, want [%q]", item.IFlowModels, iflowcli.DefaultModel)
+			}
+		case "opencode":
+			foundOpenCode = true
+			if item.ProtocolFamily != "openai" {
+				t.Fatalf("opencode protocol_family = %q, want openai", item.ProtocolFamily)
+			}
+			families := config.CLIToolProtocolFamilies(item)
+			if len(families) != 2 || families[0] != "openai" || families[1] != "anthropic" {
+				t.Fatalf("opencode protocol_families = %#v, want [openai anthropic]", families)
+			}
+			if item.CLIFamily != "opencode" {
+				t.Fatalf("opencode cli_family = %q, want opencode", item.CLIFamily)
+			}
 		}
 	}
-	if !found {
+	if !foundIFLOW {
 		t.Fatalf("expected iflow in default cli tools")
+	}
+	if !foundOpenCode {
+		t.Fatalf("expected opencode in default cli tools")
 	}
 }
 
@@ -107,27 +118,43 @@ func TestNormalizeCLITools_BackfillsMissingBuiltinTools(t *testing.T) {
 	if err := config.NormalizeCLITools(&tools, llm); err != nil {
 		t.Fatalf("normalize cli tools: %v", err)
 	}
-	if len(tools) != 3 {
-		t.Fatalf("cli tools len = %d, want 3", len(tools))
+	if len(tools) != 4 {
+		t.Fatalf("cli tools len = %d, want 4", len(tools))
 	}
-	found := false
+	if tools[0].DefaultModelID != "gpt-5.4" {
+		t.Fatalf("codex default_model_id = %q, want gpt-5.4", tools[0].DefaultModelID)
+	}
+	foundIFLOW := false
+	foundOpenCode := false
 	for _, item := range tools {
-		if item.ID != "iflow" {
-			continue
-		}
-		found = true
-		if item.CLIFamily != "iflow" {
-			t.Fatalf("iflow cli_family = %q, want iflow", item.CLIFamily)
-		}
-		if !item.Enabled {
-			t.Fatalf("expected iflow to default enabled")
-		}
-		if item.IFlowDefaultModel != iflowcli.DefaultModel {
-			t.Fatalf("iflow default model = %q, want %q", item.IFlowDefaultModel, iflowcli.DefaultModel)
+		switch item.ID {
+		case "iflow":
+			foundIFLOW = true
+			if item.CLIFamily != "iflow" {
+				t.Fatalf("iflow cli_family = %q, want iflow", item.CLIFamily)
+			}
+			if !item.Enabled {
+				t.Fatalf("expected iflow to default enabled")
+			}
+			if item.IFlowDefaultModel != iflowcli.DefaultModel {
+				t.Fatalf("iflow default model = %q, want %q", item.IFlowDefaultModel, iflowcli.DefaultModel)
+			}
+		case "opencode":
+			foundOpenCode = true
+			if !item.Enabled {
+				t.Fatalf("expected opencode to default enabled")
+			}
+			families := config.CLIToolProtocolFamilies(item)
+			if len(families) != 2 || families[0] != "openai" || families[1] != "anthropic" {
+				t.Fatalf("opencode protocol_families = %#v, want [openai anthropic]", families)
+			}
 		}
 	}
-	if !found {
+	if !foundIFLOW {
 		t.Fatalf("expected iflow to be backfilled")
+	}
+	if !foundOpenCode {
+		t.Fatalf("expected opencode to be backfilled")
 	}
 }
 

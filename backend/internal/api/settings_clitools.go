@@ -81,6 +81,7 @@ func putCLIToolSettingsHandler(deps Deps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+
 		existingIFLOWKeys := map[string]string{}
 		existingProtocolFamilies := map[string][]string{}
 		for _, item := range cfg.CLITools {
@@ -88,12 +89,13 @@ func putCLIToolSettingsHandler(deps Deps) gin.HandlerFunc {
 			if toolID == "" {
 				continue
 			}
-			existingProtocolFamilies[toolID] = append([]string(nil), item.ProtocolFamilies...)
+			existingProtocolFamilies[toolID] = append([]string(nil), config.CLIToolProtocolFamilies(item)...)
 			if normalizeCLIFamily(item.CLIFamily) != "iflow" && toolID != "iflow" {
 				continue
 			}
 			existingIFLOWKeys[toolID] = strings.TrimSpace(item.IFlowAPIKey)
 		}
+
 		next := make([]config.CLIToolConfig, 0, len(req.Tools))
 		for _, item := range req.Tools {
 			toolID := strings.TrimSpace(item.ID)
@@ -101,7 +103,7 @@ func putCLIToolSettingsHandler(deps Deps) gin.HandlerFunc {
 			if item.IFLOWAPIKey != nil {
 				apiKey = strings.TrimSpace(*item.IFLOWAPIKey)
 			}
-			protocolFamilies := append([]string(nil), item.ProtocolFamilies...)
+			protocolFamilies := normalizeStringList(item.ProtocolFamilies)
 			if len(protocolFamilies) == 0 {
 				protocolFamilies = append([]string(nil), existingProtocolFamilies[toolID]...)
 			}
@@ -145,7 +147,7 @@ func buildCLIToolSettingsResponse(cfg config.Config) cliToolSettingsResponse {
 			ID:               item.ID,
 			Label:            item.Label,
 			ProtocolFamily:   item.ProtocolFamily,
-			ProtocolFamilies: append([]string(nil), item.ProtocolFamilies...),
+			ProtocolFamilies: append([]string(nil), config.CLIToolProtocolFamilies(item)...),
 			CLIFamily:        item.CLIFamily,
 			DefaultModelID:   item.DefaultModelID,
 			CommandPath:      item.CommandPath,

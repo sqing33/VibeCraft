@@ -24,13 +24,14 @@ import (
 )
 
 const (
-	defaultContextWindow        = int64(128_000)
-	defaultSoftRatio            = 0.82
-	defaultForceRatio           = 0.92
-	defaultHardRatio            = 0.97
-	defaultKeepRecent           = 12
-	defaultCodexRuntimeIdleTTL  = 10 * time.Minute
-	defaultCodexRuntimeReapTick = time.Minute
+	defaultContextWindow          = int64(128_000)
+	defaultSoftRatio              = 0.82
+	defaultForceRatio             = 0.92
+	defaultHardRatio              = 0.97
+	defaultKeepRecent             = 12
+	defaultCodexRuntimeIdleTTL    = 10 * time.Minute
+	defaultCodexRuntimeReapTick   = time.Minute
+	defaultOpenCodeBlankStepLimit = 40
 )
 
 type Options struct {
@@ -464,8 +465,12 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 		}
 		output := handle.Output()
 		toolID := strings.TrimSpace(runSpec.Env["VIBE_TREE_CLI_FAMILY"])
+		parser := newCLIStreamParser(toolID)
 		assistantBuf := strings.Builder{}
 		thinkingBuf := strings.Builder{}
+		opencodeBlankSteps := 0
+		opencodeLoopGuardText := ""
+		sawOpenCodeContent := false
 		translationRuntime := newThinkingTranslationRuntime(m, sess.ID, turn.ID, thinkingTranslation)
 		feedEmitter := newCodexTurnFeedEmitter(m, turn.ID, sess.ID, userMsg.ID, translationRuntime)
 		done := make(chan struct{})
@@ -483,7 +488,7 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 				if line == "" {
 					continue
 				}
-				events := parseCLIStreamEvents(toolID, line)
+				events := parser.Parse(line)
 				for _, event := range events {
 					switch event.Type {
 					case "session":
@@ -494,6 +499,8 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 						if event.Delta == "" {
 							continue
 						}
+						sawOpenCodeContent = true
+						opencodeBlankSteps = 0
 						assistantBuf.WriteString(event.Delta)
 						feedEmitter.emit(ctx, chatTurnEventPayload{EntryID: "answer", Kind: "answer", Op: "append", Status: "streaming", Delta: event.Delta})
 						m.broadcast("chat.turn.delta", map[string]any{"session_id": sess.ID, "delta": event.Delta})
@@ -501,6 +508,8 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 						if event.Delta == "" {
 							continue
 						}
+						sawOpenCodeContent = true
+						opencodeBlankSteps = 0
 						thinkingBuf.WriteString(event.Delta)
 						feedEmitter.emit(ctx, chatTurnEventPayload{EntryID: "thinking:1", Kind: "thinking", Op: "append", Status: "streaming", Delta: event.Delta})
 						m.broadcast("chat.turn.thinking.delta", map[string]any{"session_id": sess.ID, "delta": event.Delta})
@@ -510,6 +519,18 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 					case "progress_delta":
 						if event.Delta == "" {
 							continue
+						}
+						if toolID == "opencode" && !sawOpenCodeContent {
+							delta := strings.TrimSpace(event.Delta)
+							if strings.HasPrefix(delta, "[step]") {
+								opencodeBlankSteps += 1
+							} else if delta != "" {
+								opencodeBlankSteps = 0
+							}
+							if opencodeBlankSteps >= defaultOpenCodeBlankStepLimit && opencodeLoopGuardText == "" {
+								opencodeLoopGuardText = "OpenCode 在当前模型上持续执行空步骤且未产生文本输出，已提前终止。请改用 gpt-5.4 或其他已验证支持 agentic tool-calling 的模型。"
+								_ = handle.Cancel(1500 * time.Millisecond)
+							}
 						}
 						feedEmitter.emit(ctx, chatTurnEventPayload{EntryID: "progress:legacy", Kind: "progress", Op: "upsert", Status: "streaming", Content: event.Delta})
 						m.broadcast("chat.turn.thinking.delta", map[string]any{"session_id": sess.ID, "delta": event.Delta})
@@ -538,6 +559,9 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 		}
 		if strings.TrimSpace(finalText) == "" && assistantBuf.Len() > 0 {
 			finalText = strings.TrimSpace(assistantBuf.String())
+		}
+		if strings.TrimSpace(finalText) == "" && strings.TrimSpace(opencodeLoopGuardText) != "" {
+			finalText = strings.TrimSpace(opencodeLoopGuardText)
 		}
 		reasoningText = strings.TrimSpace(thinkingBuf.String())
 		if artifactDir != "" {
@@ -664,15 +688,38 @@ type cliStreamEvent struct {
 	Thinking  string
 }
 
-func parseCLIStreamEvents(toolID, line string) []cliStreamEvent {
-	toolID = strings.TrimSpace(toolID)
-	if toolID == "claude" {
+type cliStreamParser struct {
+	toolID            string
+	opencodePartKinds map[string]string
+	opencodePartTexts map[string]string
+}
+
+func newCLIStreamParser(toolID string) *cliStreamParser {
+	return &cliStreamParser{
+		toolID:            strings.TrimSpace(toolID),
+		opencodePartKinds: map[string]string{},
+		opencodePartTexts: map[string]string{},
+	}
+}
+
+func (p *cliStreamParser) Parse(line string) []cliStreamEvent {
+	if p == nil {
+		return nil
+	}
+	switch strings.TrimSpace(p.toolID) {
+	case "claude":
 		return parseClaudeCLIStreamEvents(line)
-	}
-	if toolID == "iflow" {
+	case "iflow":
 		return parseIFLOWCLIStreamEvents(line)
+	case "opencode":
+		return p.parseOpenCodeCLIStreamEvents(line)
+	default:
+		return parseCodexCLIStreamEvents(line)
 	}
-	return parseCodexCLIStreamEvents(line)
+}
+
+func parseCLIStreamEvents(toolID, line string) []cliStreamEvent {
+	return newCLIStreamParser(toolID).Parse(line)
 }
 
 func parseIFLOWCLIStreamEvents(line string) []cliStreamEvent {
@@ -716,6 +763,162 @@ func parseCodexCLIStreamEvents(line string) []cliStreamEvent {
 		}
 	}
 	return out
+}
+
+func (p *cliStreamParser) parseOpenCodeCLIStreamEvents(line string) []cliStreamEvent {
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(line), &raw); err != nil {
+		return nil
+	}
+	out := make([]cliStreamEvent, 0, 3)
+	if sid := firstNonEmptyTrimmed(
+		stringValue(raw["sessionID"]),
+		stringValue(raw["session_id"]),
+		nestedString(raw, "properties", "sessionID"),
+		nestedString(raw, "properties", "part", "sessionID"),
+		nestedString(raw, "properties", "info", "id"),
+		nestedString(raw, "part", "sessionID"),
+	); sid != "" {
+		out = append(out, cliStreamEvent{Type: "session", SessionID: sid})
+	}
+	typeName := strings.TrimSpace(stringValue(raw["type"]))
+	switch typeName {
+	case "message.part.updated":
+		properties, _ := raw["properties"].(map[string]any)
+		part, _ := properties["part"].(map[string]any)
+		out = append(out, p.openCodePartEvents(part)...)
+	case "message.part.delta":
+		properties, _ := raw["properties"].(map[string]any)
+		partID := strings.TrimSpace(stringValue(properties["partID"]))
+		field := strings.TrimSpace(stringValue(properties["field"]))
+		delta := stringValue(properties["delta"])
+		if delta == "" {
+			return out
+		}
+		if field != "" && field != "text" && !strings.HasSuffix(field, ".text") {
+			return out
+		}
+		if partID != "" {
+			p.opencodePartTexts[partID] = p.opencodePartTexts[partID] + delta
+		}
+		switch strings.TrimSpace(p.opencodePartKinds[partID]) {
+		case "reasoning":
+			out = append(out, cliStreamEvent{Type: "thinking_delta", Delta: delta})
+		case "tool", "step-start", "step-finish", "patch", "agent", "subtask", "retry", "compaction":
+			out = append(out, cliStreamEvent{Type: "progress_delta", Delta: delta})
+		default:
+			out = append(out, cliStreamEvent{Type: "assistant_delta", Delta: delta})
+		}
+	case "text", "reasoning", "tool", "patch", "agent", "subtask", "retry", "compaction", "step_start", "step_finish":
+		part, _ := raw["part"].(map[string]any)
+		out = append(out, p.openCodePartEvents(part)...)
+	case "session.status":
+		statusType := strings.TrimSpace(nestedString(raw, "properties", "status", "type"))
+		message := strings.TrimSpace(nestedString(raw, "properties", "status", "message"))
+		if statusType != "" {
+			msg := "[session] " + statusType
+			if message != "" {
+				msg += ": " + message
+			}
+			out = append(out, cliStreamEvent{Type: "progress_delta", Delta: msg})
+		}
+	case "session.compacted":
+		out = append(out, cliStreamEvent{Type: "progress_delta", Delta: "[session] compacted"})
+	case "permission.asked":
+		permission := firstNonEmptyTrimmed(nestedString(raw, "properties", "permission"), "approval requested")
+		out = append(out, cliStreamEvent{Type: "progress_delta", Delta: "[permission] " + permission})
+	case "question.asked":
+		out = append(out, cliStreamEvent{Type: "progress_delta", Delta: "[question] input requested"})
+	case "todo.updated":
+		out = append(out, cliStreamEvent{Type: "progress_delta", Delta: "[todo] updated"})
+	case "error", "session.error":
+		message := firstNonEmptyTrimmed(
+			nestedString(raw, "error", "data", "message"),
+			nestedString(raw, "error", "message"),
+			nestedString(raw, "properties", "error", "data", "message"),
+			nestedString(raw, "properties", "error", "message"),
+		)
+		if message != "" {
+			out = append(out, cliStreamEvent{Type: "final", Text: message})
+		}
+	}
+	return out
+}
+
+func (p *cliStreamParser) openCodePartEvents(part map[string]any) []cliStreamEvent {
+	if len(part) == 0 {
+		return nil
+	}
+	partID := strings.TrimSpace(stringValue(part["id"]))
+	partType := strings.TrimSpace(stringValue(part["type"]))
+	if partID != "" && partType != "" {
+		p.opencodePartKinds[partID] = partType
+	}
+	switch partType {
+	case "text", "reasoning":
+		text := stringValue(part["text"])
+		if text == "" {
+			return nil
+		}
+		previous := ""
+		if partID != "" {
+			previous = p.opencodePartTexts[partID]
+			p.opencodePartTexts[partID] = text
+		}
+		delta := text
+		if previous != "" {
+			if strings.HasPrefix(text, previous) {
+				delta = text[len(previous):]
+			} else if text == previous {
+				delta = ""
+			}
+		}
+		if delta == "" {
+			return nil
+		}
+		if partType == "reasoning" {
+			return []cliStreamEvent{{Type: "thinking_delta", Delta: delta}}
+		}
+		return []cliStreamEvent{{Type: "assistant_delta", Delta: delta}}
+	default:
+		if progress := openCodeProgressFromPart(part); progress != "" {
+			return []cliStreamEvent{{Type: "progress_delta", Delta: progress}}
+		}
+	}
+	return nil
+}
+
+func openCodeProgressFromPart(part map[string]any) string {
+	partType := strings.TrimSpace(stringValue(part["type"]))
+	switch partType {
+	case "tool":
+		state, _ := part["state"].(map[string]any)
+		status := strings.TrimSpace(stringValue(state["status"]))
+		title := firstNonEmptyTrimmed(stringValue(state["title"]), stringValue(part["tool"]), "tool")
+		if status != "" {
+			return fmt.Sprintf("[tool] %s (%s)", title, status)
+		}
+		return "[tool] " + title
+	case "step-start":
+		return "[step] started"
+	case "step-finish":
+		reason := firstNonEmptyTrimmed(stringValue(part["reason"]), "finished")
+		return "[step] " + reason
+	case "patch":
+		if files, ok := part["files"].([]any); ok && len(files) > 0 {
+			return fmt.Sprintf("[patch] %d files", len(files))
+		}
+		return "[patch] updated files"
+	case "agent":
+		return "[agent] " + firstNonEmptyTrimmed(stringValue(part["name"]), "agent")
+	case "subtask":
+		return "[subtask] " + firstNonEmptyTrimmed(stringValue(part["description"]), stringValue(part["prompt"]), "subtask")
+	case "retry":
+		return "[retry] " + firstNonEmptyTrimmed(nestedString(part, "error", "data", "message"), nestedString(part, "error", "message"), "retrying")
+	case "compaction":
+		return "[session] compacted context"
+	}
+	return ""
 }
 
 func parseClaudeCLIStreamEvents(line string) []cliStreamEvent {

@@ -51,6 +51,17 @@ func RebuildExperts(cfg *Config) error {
 		outByID[id] = e
 	}
 
+	for _, builtin := range builtinExperts() {
+		if strings.EqualFold(inferManagedSource(builtin), ManagedSourceLLMModel) {
+			continue
+		}
+		hydrated, err := hydrateExpert(builtin, cfg.LLM)
+		if err != nil {
+			return err
+		}
+		put(hydrated)
+	}
+
 	for _, raw := range cfg.Experts {
 		if strings.EqualFold(inferManagedSource(raw), ManagedSourceLLMModel) {
 			continue
@@ -132,6 +143,21 @@ func llmModels(llm *LLMSettings) []LLMModelConfig {
 		return nil
 	}
 	return llm.Models
+}
+
+func builtinExperts() []ExpertConfig {
+	defaults := Default()
+	if len(defaults.Experts) == 0 {
+		return nil
+	}
+	out := make([]ExpertConfig, 0, len(defaults.Experts))
+	for _, item := range defaults.Experts {
+		if !strings.EqualFold(inferManagedSource(item), ManagedSourceBuiltin) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func hydrateExpert(raw ExpertConfig, llm *LLMSettings) (ExpertConfig, error) {
@@ -258,7 +284,7 @@ func inferManagedSource(e ExpertConfig) string {
 	if strings.TrimSpace(e.PrimaryModelID) != "" || strings.TrimSpace(e.SecondaryModelID) != "" || len(e.EnabledSkills) > 0 || strings.TrimSpace(e.Description) != "" || strings.TrimSpace(e.Category) != "" {
 		return ManagedSourceExpertProfile
 	}
-	if strings.TrimSpace(e.ID) == "master" || strings.TrimSpace(e.ID) == "bash" || strings.TrimSpace(e.ID) == "demo" || strings.TrimSpace(e.ID) == "codex" || strings.TrimSpace(e.ID) == "claudecode" {
+	if strings.TrimSpace(e.ID) == "master" || strings.TrimSpace(e.ID) == "bash" || strings.TrimSpace(e.ID) == "demo" || strings.TrimSpace(e.ID) == "codex" || strings.TrimSpace(e.ID) == "claudecode" || strings.TrimSpace(e.ID) == "iflow" || strings.TrimSpace(e.ID) == "opencode" {
 		return ManagedSourceBuiltin
 	}
 	if p := normalizeProvider(e.Provider); p == "process" || p == "demo" || p == "cli" {

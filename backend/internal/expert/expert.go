@@ -216,15 +216,13 @@ func (r *Registry) ResolveWithOptions(expertID, prompt, cwd string, opts Resolve
 	toolID := strings.TrimSpace(opts.CLIToolID)
 	selectedModelID := strings.TrimSpace(opts.ModelID)
 	selectedTool := config.CLIToolConfig{}
-	selectedToolID := ""
 	if provider == "cli" {
 		var err error
-		selectedTool, selectedToolID, err = resolveCLIToolSelection(tools, e, toolID)
+		selectedTool, toolID, err = resolveCLIToolSelection(tools, e, toolID)
 		if err != nil {
 			return Resolved{}, err
 		}
-		toolID = selectedToolID
-		if selectedToolID != "" {
+		if toolID != "" {
 			protocolFamily = strings.TrimSpace(selectedTool.ProtocolFamily)
 			if strings.TrimSpace(selectedTool.CLIFamily) != "" {
 				e.CLIFamily = strings.TrimSpace(selectedTool.CLIFamily)
@@ -256,12 +254,12 @@ func (r *Registry) ResolveWithOptions(expertID, prompt, cwd string, opts Resolve
 					return Resolved{}, fmt.Errorf("expert %q: model %q does not exist", expertID, selectedModelID)
 				}
 				selectedProvider := configProtocol(selectedModel.Provider)
-				if protocolFamily != "" && selectedProvider != configProtocol(protocolFamily) && !config.CLIToolSupportsProtocol(selectedTool, selectedProvider) {
-					return Resolved{}, fmt.Errorf("expert %q: model %q is incompatible with cli tool protocol %q", expertID, selectedModelID, protocolFamily)
+				if toolID != "" && !config.CLIToolSupportsProtocolFamily(selectedTool, selectedProvider) {
+					return Resolved{}, fmt.Errorf("expert %q: model %q is not compatible with cli tool %q", expertID, selectedModelID, toolID)
 				}
 				model = strings.TrimSpace(selectedModel.Model)
 				e.PrimaryModelID = strings.TrimSpace(selectedModel.ID)
-				protocolFamily = configProtocol(selectedModel.Provider)
+				protocolFamily = selectedProvider
 			}
 		}
 	}
@@ -361,6 +359,9 @@ func (r *Registry) ResolveWithOptions(expertID, prompt, cwd string, opts Resolve
 			env["VIBE_TREE_SYSTEM_PROMPT"] = strings.TrimSpace(e.SystemPrompt)
 		}
 		env["VIBE_TREE_MODEL"] = model
+		if strings.TrimSpace(protocolFamily) != "" {
+			env["VIBE_TREE_PROTOCOL_FAMILY"] = strings.TrimSpace(protocolFamily)
+		}
 		if strings.TrimSpace(toolID) != "" {
 			env["VIBE_TREE_CLI_TOOL_ID"] = strings.TrimSpace(toolID)
 		}

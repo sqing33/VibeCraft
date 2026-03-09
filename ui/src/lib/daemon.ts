@@ -143,6 +143,53 @@ export type PutCLITool = CLITool & {
   iflow_api_key?: string
 }
 
+/**
+ * 功能：返回 CLI tool 支持的协议族列表，兼容旧版单值 `protocol_family`。
+ * 参数/返回：接收一个 CLI tool；返回去重后的 provider 列表。
+ * 失败场景：无，缺失字段时返回空数组。
+ * 副作用：无。
+ */
+export function cliToolProtocolFamilies(
+  tool?: Pick<CLITool, 'protocol_family' | 'protocol_families'> | null,
+): string[] {
+  const seen = new Set<string>()
+  const next: string[] = []
+  for (const raw of [...(tool?.protocol_families ?? []), tool?.protocol_family ?? '']) {
+    const normalized = raw.trim()
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    next.push(normalized)
+  }
+  return next
+}
+
+/**
+ * 功能：返回 CLI tool 的主协议族，用于兼容旧 UI 文案与默认展示。
+ * 参数/返回：接收一个 CLI tool；优先返回 `protocol_families[0]`，否则回退 `protocol_family`。
+ * 失败场景：无，未配置时返回空字符串。
+ * 副作用：无。
+ */
+export function cliToolPrimaryProtocolFamily(
+  tool?: Pick<CLITool, 'protocol_family' | 'protocol_families'> | null,
+): string {
+  return cliToolProtocolFamilies(tool)[0] ?? ''
+}
+
+/**
+ * 功能：判断某个 CLI tool 是否支持指定 provider。
+ * 参数/返回：接收 tool 与 provider；返回布尔值。
+ * 失败场景：无，缺失 provider 时返回 false。
+ * 副作用：无。
+ */
+export function cliToolSupportsProvider(
+  tool: Pick<CLITool, 'protocol_family' | 'protocol_families'> | null | undefined,
+  provider?: string | null,
+): boolean {
+  const normalized = provider?.trim() ?? ''
+  if (!normalized) return false
+  return cliToolProtocolFamilies(tool).includes(normalized)
+}
+
 export type CLIToolSettings = {
   tools: CLITool[]
   models: LLMModelProfile[]

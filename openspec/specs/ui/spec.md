@@ -482,14 +482,14 @@ The chat page MUST provide actions for manual compaction and session fork. The U
 - **AND** the new forked session appears in the session list
 
 ### Requirement: Settings MUST expose a dedicated CLI tools tab
-The UI MUST provide a dedicated `CLI 工具` tab for managing `Codex CLI`, `Claude Code`, and `iFlow CLI`.
+The UI MUST provide a dedicated `CLI 工具` tab for managing `Codex CLI`, `Claude Code`, `iFlow CLI`, and `OpenCode CLI`, including enablement, default model selection, and optional command path override.
 
 For `iFlow CLI`, the tab MUST expose dedicated official-auth and official-model controls instead of reusing the shared LLM model pool.
 
-#### Scenario: User manages codex, claude, and iflow tools
+#### Scenario: User manages four primary CLI tools
 - **WHEN** user opens System Settings
 - **THEN** the UI shows a `CLI 工具` tab
-- **AND** the tab allows managing all three primary execution tools
+- **AND** the tab allows managing `Codex CLI`, `Claude Code`, `iFlow CLI`, and `OpenCode CLI`
 
 #### Scenario: User starts iFlow browser login from settings
 - **WHEN** the user clicks the iFlow browser-login action
@@ -507,11 +507,11 @@ At minimum, when corresponding models exist, the selector MUST expose:
 - `Codex CLI`
 - `Claude Code`
 - `iFlow CLI`
+- `OpenCode CLI`
 - `OpenAI SDK`
 - `Anthropic SDK`
 
-For CLI runtimes, the model selector MUST only show models compatible with that tool's protocol family.
-
+For CLI runtimes, the model selector MUST show only models whose provider is included in that tool's compatible protocol list.
 For SDK runtimes, the model selector MUST only show models belonging to the selected provider.
 
 #### Scenario: User chooses iFlow then iFlow model
@@ -519,18 +519,19 @@ For SDK runtimes, the model selector MUST only show models belonging to the sele
 - **THEN** the model selector only shows the `iflow_models` configured in the iFlow CLI card
 - **AND** the default value comes from `iflow_default_model`
 
-#### Scenario: User chooses OpenAI SDK
-- **WHEN** user selects `OpenAI SDK` in the chat composer
-- **THEN** the model selector only shows OpenAI provider models
-- **AND** sending the message uses the SDK chat path instead of CLI runtime
+#### Scenario: User chooses OpenCode then OpenAI model
+- **WHEN** user selects `OpenCode CLI` in the chat composer
+- **AND** the tool advertises OpenAI compatibility
+- **THEN** the model selector includes OpenAI-compatible models
 
-#### Scenario: Active SDK session restores selector state
-- **WHEN** an active session has `provider="openai"` or `provider="anthropic"` and no `cli_tool_id`
-- **THEN** the chat page restores the corresponding SDK runtime option and current model selection
+#### Scenario: User chooses OpenCode then Anthropic model
+- **WHEN** user selects `OpenCode CLI` in the chat composer
+- **AND** the tool advertises Anthropic compatibility
+- **THEN** the model selector includes Anthropic-compatible models
 
-#### Scenario: Active IFLOW session restores selector state
-- **WHEN** an active session stores `cli_tool_id="iflow"`
-- **THEN** the chat page restores the `iFlow CLI` runtime option and current model selection
+#### Scenario: Active OpenCode session restores selector state
+- **WHEN** an active session stores `cli_tool_id="opencode"`
+- **THEN** the chat page restores the `OpenCode CLI` runtime option and current model selection
 
 ### Requirement: Chat model selectors MUST display the selected model label
 The Chat page's tool-first model selectors MUST visibly display the currently selected model label whenever the selected key matches an available model option.
@@ -588,22 +589,14 @@ The frontend MAY still keep lightweight view state locally, but it MUST derive v
 - **AND** the associated process details come from the persisted completed turn timeline instead of a separate stale pending bubble
 
 ### Requirement: Chat composer MUST expose Codex reasoning effort control
-The chat page MUST render a reasoning effort selector inside the composer control rail.
+The chat page MUST support selecting runtime/model per message and, for Codex CLI turns, sending the selected `reasoning_effort` to the daemon.
 
-The selector MUST offer `low`, `medium`, `high`, and `xhigh` when the current runtime is Codex CLI.
+The `reasoning_effort` selector MUST remain a Codex-only control and MUST NOT be enabled for other CLI families, including OpenCode.
 
-The selector MUST remain visible but disabled when the current runtime is not Codex CLI.
-
-#### Scenario: User sends a Codex turn with selected effort
-- **WHEN** the active composer runtime is Codex CLI
-- **AND** the user selects `high`
-- **AND** sends a message
-- **THEN** the UI includes `reasoning_effort=high` in the turn request
-
-#### Scenario: User switches away from Codex
-- **WHEN** the active composer runtime is not Codex CLI
-- **THEN** the reasoning effort selector remains visible
-- **AND** the selector is disabled
+#### Scenario: OpenCode runtime disables reasoning effort selector
+- **WHEN** the active composer runtime is `OpenCode CLI`
+- **THEN** the reasoning effort selector remains visible but disabled
+- **AND** the turn request does not include `reasoning_effort`
 
 ### Requirement: Chat composer MUST use a compact right-side control rail
 The chat composer MUST use a left-right layout where the text input occupies the dominant area and the control rail occupies a narrower fixed-width column.

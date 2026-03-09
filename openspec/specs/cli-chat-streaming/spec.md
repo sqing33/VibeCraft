@@ -3,29 +3,24 @@
 ## Purpose
 
 Define how CLI-backed chat turns stream assistant output and structured runtime activity, especially for Codex-backed sessions.
-
 ## Requirements
 ### Requirement: CLI chat MUST stream assistant output incrementally
 When a chat turn is executed through a CLI tool, the system MUST emit assistant output incrementally instead of waiting for the entire CLI process to finish before sending the first delta.
 
 For Codex-backed chat turns, the system MUST prefer a fine-grained transport that exposes message delta notifications when available.
+For OpenCode-backed chat turns, the system MUST parse best-effort JSON line events from `opencode run --format json` when available.
 
 If the fine-grained Codex transport cannot be started or initialized, the system MUST fall back to the legacy parseable wrapper stream instead of failing the turn before any model output is produced.
 
-#### Scenario: CLI assistant output streams during execution
-- **WHEN** a CLI-backed chat turn starts producing assistant text
-- **THEN** the daemon emits one or more `chat.turn.delta` events before the turn completes
+#### Scenario: OpenCode emits assistant output through JSON events
+- **WHEN** an OpenCode-backed chat turn is started through the wrapper with `--format json`
+- **THEN** the daemon emits one or more `chat.turn.delta` events when assistant text is present in the JSON event stream
 - **AND** the final assistant message still matches the completed turn result
 
-#### Scenario: Codex emits message delta through app-server
-- **WHEN** a Codex-backed chat turn is started successfully through app-server
-- **THEN** the daemon emits one or more `chat.turn.delta` events from `item/agentMessage/delta` before turn completion
-- **AND** the final assistant message still matches the completed turn result
-
-#### Scenario: Codex app-server startup fails early
-- **WHEN** the Codex fine-grained transport fails before turn execution begins
-- **THEN** the system retries the turn through the legacy CLI wrapper path
-- **AND** the user still receives a valid assistant result when the wrapper path succeeds
+#### Scenario: OpenCode runtime falls back to artifact truth source
+- **WHEN** OpenCode JSON events are incomplete or omit the final assistant body
+- **THEN** the completed turn still reads `final_message.md` and `session.json` from the wrapper artifact directory
+- **AND** the user still receives a valid final assistant message
 
 ### Requirement: CLI chat MUST expose a structured runtime feed for Codex turns
 When a Codex-backed chat turn streams runtime activity, the daemon MUST emit `chat.turn.event` entries that keep answer text separate from other runtime activity.
@@ -63,3 +58,4 @@ The persisted timeline MUST be sufficient to reconstruct the currently visible a
 - **WHEN** the final assistant message is stored for a Codex-backed turn
 - **THEN** the persisted `kind=answer` timeline content matches the final assistant message content
 - **AND** the completed turn can be restored from backend state alone
+

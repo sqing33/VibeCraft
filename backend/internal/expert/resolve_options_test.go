@@ -109,3 +109,36 @@ func TestResolveWithOptions_IFLOWUsesOfficialModelSelection(t *testing.T) {
 		t.Fatalf("VIBE_TREE_MODEL_ID = %q, want minimax-m2.5", got)
 	}
 }
+
+func TestResolveWithOptions_OpenCodeSupportsAnthropicModel(t *testing.T) {
+	cfg := config.Default()
+	cfg.LLM = &config.LLMSettings{
+		Sources: []config.LLMSourceConfig{{ID: "anthropic-default", Provider: "anthropic", BaseURL: "https://anthropic.example.com", APIKey: "sk-ant-123"}},
+		Models:  []config.LLMModelConfig{{ID: "claude-sonnet", Provider: "anthropic", Model: "claude-3-7-sonnet", SourceID: "anthropic-default"}},
+	}
+	if err := config.NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
+		t.Fatalf("normalize cli tools: %v", err)
+	}
+	if err := config.RebuildExperts(&cfg); err != nil {
+		t.Fatalf("rebuild experts: %v", err)
+	}
+	res, err := expert.NewRegistry(cfg).ResolveWithOptions("opencode", "hello", ".", expert.ResolveOptions{CLIToolID: "opencode", ModelID: "claude-sonnet"})
+	if err != nil {
+		t.Fatalf("resolve with options: %v", err)
+	}
+	if res.ProtocolFamily != "anthropic" {
+		t.Fatalf("protocol family = %q, want anthropic", res.ProtocolFamily)
+	}
+	if got := res.Spec.Env["ANTHROPIC_API_KEY"]; got != "sk-ant-123" {
+		t.Fatalf("ANTHROPIC_API_KEY = %q, want sk-ant-123", got)
+	}
+	if got := res.Spec.Env["ANTHROPIC_BASE_URL"]; got != "https://anthropic.example.com" {
+		t.Fatalf("ANTHROPIC_BASE_URL = %q, want https://anthropic.example.com", got)
+	}
+	if got := res.Spec.Env["VIBE_TREE_PROTOCOL_FAMILY"]; got != "anthropic" {
+		t.Fatalf("VIBE_TREE_PROTOCOL_FAMILY = %q, want anthropic", got)
+	}
+	if got := res.Model; got != "claude-3-7-sonnet" {
+		t.Fatalf("model = %q, want claude-3-7-sonnet", got)
+	}
+}

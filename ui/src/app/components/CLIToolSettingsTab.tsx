@@ -3,6 +3,7 @@ import { Alert, Button, Chip, Input, Select, SelectItem, Skeleton, Switch, Texta
 
 import {
   cancelIFLOWBrowserAuth,
+  cliToolProtocolFamilies,
   fetchCLIToolSettings,
   fetchIFLOWBrowserAuth,
   putCLIToolSettings,
@@ -13,7 +14,7 @@ import {
   type PutCLITool,
   type PutCLIToolSettingsRequest,
 } from '@/lib/daemon'
-import { cliToolDefaultModelID, buildCLIToolModelProfiles } from '@/lib/cliToolModels'
+import { buildCLIToolModelProfiles, cliToolDefaultModelID } from '@/lib/cliToolModels'
 import { toast } from '@/lib/toast'
 import { useDaemonStore } from '@/stores/daemonStore'
 
@@ -245,6 +246,7 @@ export function CLIToolSettingsTab() {
       <div className="grid gap-4 lg:grid-cols-2">
         {data.tools.map((tool) => {
           const isIFLOW = tool.id === 'iflow' || tool.cli_family === 'iflow'
+          const protocolFamilies = cliToolProtocolFamilies(tool)
           const models = buildCLIToolModelProfiles(tool, data.models ?? [])
           const effectiveDefaultModelId = cliToolDefaultModelID(tool, data.models ?? [])
           const iflowModelText = (tool.iflow_models ?? []).join('\n')
@@ -253,7 +255,9 @@ export function CLIToolSettingsTab() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-sm font-semibold">{tool.label}</div>
-                  <div className="text-xs text-muted-foreground">协议族：{tool.protocol_family} · CLI family：{tool.cli_family}</div>
+                  <div className="text-xs text-muted-foreground">
+                    协议族：{protocolFamilies.join(' / ') || '未配置'} · CLI family：{tool.cli_family}
+                  </div>
                 </div>
                 <Switch isSelected={tool.enabled} onValueChange={(value) => updateTool(tool.id, { enabled: value })}>启用</Switch>
               </div>

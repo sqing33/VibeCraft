@@ -72,11 +72,11 @@
 | `backend/internal/api/nodes.go`            | Node handlers：patch/retry/cancel（`PATCH /api/v1/nodes/:id`、`POST /api/v1/nodes/:id/retry`、`POST /api/v1/nodes/:id/cancel`）       |
 | `backend/internal/config/config.go`        | 配置读取逻辑，处理默认值、XDG 路径、环境变量覆盖                                                                                      |
 | `backend/internal/dotenv/dotenv.go`        | dotenv 加载：daemon 启动时从 repo root/指定路径读取 `.env` 并注入到进程环境变量（用于 `${ENV}`）                                      |
-| `backend/internal/expert/expert.go`        | Expert 注册表：基于 config 解析 `expert_id` -> RunSpec（`{{prompt}}`/`${ENV}` 模板替换、timeout），并提供已知 expert 集合             |
+| `backend/internal/expert/expert.go`        | Expert 注册表：基于 config 解析 `expert_id` -> RunSpec（`{{prompt}}`/`${ENV}` 模板替换、timeout），并为多协议 CLI tool 注入所选模型 source 的运行时连接信息             |
 | `backend/internal/runner/pty_runner.go`    | PTY runner：启动子进程、流式输出、Cancel（SIGTERM→grace→SIGKILL）                                                                     |
 | `backend/internal/execution/manager.go`    | Execution 管理：启动/取消、日志落盘、WS 推送 `execution.*`/`node.log`                                                                 |
 | `backend/internal/orchestration/manager.go` | Orchestration 管理：goal 拆分首轮 agent runs、并发调度 queued agent run、cancel/retry/synthesis 收敛                                 |
-| `backend/internal/chat/manager.go`         | Chat 管理：多轮会话、provider anchor（OpenAI/Anthropic）、附件持久化接入、自动上下文压缩/跳过策略、WS `chat.*` 推送                |
+| `backend/internal/chat/manager.go`         | Chat 管理：多轮会话、provider anchor（OpenAI/Anthropic）、CLI 原生 session resume、Codex/Claude/iFlow/OpenCode 流式事件解析、附件持久化接入与 WS `chat.*` 推送                |
 | `backend/internal/chat/timeline_persistence.go` | Chat timeline 持久化桥接：把 turn 启动、结构化事件、thinking 翻译与完成态回写到 `chat_turns/chat_turn_items` |
 | `backend/internal/chat/codex_appserver.go` | Codex Chat app-server 客户端：JSON-RPC 握手、`thread/start|resume`、细粒度 delta 映射、结构化 `chat.turn.event` 广播、token usage 与 artifact 写入             |
 | `backend/internal/chat/codex_turn_feed.go` | Codex turn feed 归一化：兼容 `item/*` 与 `codex/event/*`，把 answer/thinking/tool/plan/question/system 分层成结构化聊天事件 |
@@ -84,9 +84,9 @@
 | `backend/internal/chat/codex_runtime_settings.go` | Codex 线程运行时注入：按会话注入 `config.mcp_servers`，并仅为“已发现且已启用”的 skills 追加 allowlist/path index |
 | `backend/internal/chat/provider_input.go`    | Chat 多模态重建：基于本地消息 + 附件重建 OpenAI/Anthropic provider 输入                                                                |
 | `backend/internal/chat/thinking_translation.go` | Chat 思考过程翻译：按分段阈值缓冲 reasoning、调用翻译模型并广播中文 delta / 失败事件                                             |
-| `backend/internal/config/clitools.go`                | CLI 工具配置：维护 `Codex CLI` / `Claude Code` / `iFlow CLI` 的协议绑定；其中 iFlow 额外维护官方认证方式、官方 Base URL、专属模型列表与默认模型 |
+| `backend/internal/config/clitools.go`                | CLI 工具配置：维护 `Codex CLI` / `Claude Code` / `iFlow CLI` / `OpenCode CLI` 的主协议、兼容协议列表、默认模型与命令路径；其中 iFlow 额外维护官方认证方式、官方 Base URL、专属模型列表与默认模型 |
 | `backend/internal/config/mcp_skill_settings.go`     | MCP / Skill 配置归一化与运行时筛选：默认启用集合、有效 MCP 映射、Skill 绑定合并与 expert 交集裁剪 |
-| `backend/internal/api/settings_clitools.go`          | CLI 工具设置 API：读取/保存工具配置；iFlow 额外返回 masked API Key、网页登录状态与专属模型列表，供设置页 `CLI 工具` Tab 使用 |
+| `backend/internal/api/settings_clitools.go`          | CLI 工具设置 API：读取/保存工具配置、兼容协议列表与默认模型；iFlow 额外返回 masked API Key、网页登录状态与专属模型列表，供设置页 `CLI 工具` Tab 使用 |
 | `backend/internal/api/settings_iflow_auth.go`        | iFlow 官方网页登录 API：启动 PTY 登录、读取实时状态、提交授权码与取消网页登录 |
 | `backend/internal/iflow/home.go`                     | iFlow managed home：在 daemon 数据目录下维护独立 `iflow-home` 与最小 bootstrap settings |
 | `backend/internal/iflow/auth_manager.go`             | iFlow 登录会话管理器：自动选择网页登录、解析终端 OAuth 链接、检测登录完成并维护状态 |
@@ -129,7 +129,7 @@
 | `ui/src/lib/chatAttachmentPreview.ts`      | Chat 附件预览判断：按文件后缀/MIME 推断图片/PDF/Markdown/代码/纯文本预览模式                                                         |
 | `ui/src/components/DAGView.tsx`            | React Flow DAG 视图：dagre 自动布局 + 节点按状态上色 + 点击节点联动终端                                                               |
 | `ui/src/components/TerminalPane.tsx`       | xterm.js 封装组件（fit + write/reset 接口）                                                                                           |
-| `ui/src/app/components/CLIToolSettingsTab.tsx` | 系统设置「CLI 工具」Tab：管理 `Codex CLI` / `Claude Code` / `iFlow CLI`；其中 iFlow 提供官方网页登录、授权码提交、API Key、专属模型列表与默认模型配置 |
+| `ui/src/app/components/CLIToolSettingsTab.tsx` | 系统设置「CLI 工具」Tab：管理 `Codex CLI` / `Claude Code` / `iFlow CLI` / `OpenCode CLI` 的启用状态、默认模型与命令路径；其中 iFlow 提供官方网页登录、授权码提交、API Key、专属模型列表与默认模型配置 |
 | `ui/src/app/components/MCPSettingsTab.tsx`     | 系统设置「MCP」Tab：以 JSON 编辑 MCP 注册表、双列卡片展示，并紧凑维护各 CLI 工具的默认启用集合 |
 | `ui/src/app/components/SkillSettingsTab.tsx`   | 系统设置「技能」Tab：展示已发现 skills、维护单一启用开关，并支持 zip / 文件夹安装 |
 | `ui/src/app/components/LLMSettingsTab.tsx` | 系统设置「模型」Tab：编辑 Sources 与 Models 组成的模型池，供 CLI 工具与 helper SDK 复用                                              |
@@ -137,6 +137,7 @@
 | `ui/src/app/components/ExpertSettingsTab.tsx` | 系统设置「专家」Tab：专家列表、AI 生成专家、生成会话历史、快照发布                                                                   |
 | `.iflow/settings.json`, `.iflow/hooks/session_start.sh`                    | iFlow 项目级默认配置：声明上下文文件名，使 CLI 优先读取仓库内 `AGENTS.md`                                                              |
 | `scripts/agent-runtimes/iflow_exec.sh`     | iFlow CLI wrapper：桥接 `--prompt/--resume/--output-file/--yolo` 与标准 artifact/session contract                                      |
+| `scripts/agent-runtimes/opencode_exec.sh`  | OpenCode CLI wrapper：桥接 `opencode run --format json/--session/--model provider/model`、临时 XDG config 注入与标准 artifact/session contract |
 | `ui/src/lib/daemon.ts`                     | daemon URL/WS URL 解析与 health/workflow/execution/chat attachment/chat turns API 封装                                                 |
 | `ui/src/stores/chatStore.ts`               | Chat 前端状态：sessions/messages、后端可恢复 turn timeline、轻量视图态与 chat API actions                                            |
 | `scripts/dev.sh`                           | 本地开发一键启动脚本（并行拉起 backend 与 UI）                                                                                        |

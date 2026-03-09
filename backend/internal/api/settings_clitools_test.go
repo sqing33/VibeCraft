@@ -20,8 +20,11 @@ func TestCLIToolSettings_GetAndPut(t *testing.T) {
 	}
 	cfg := config.Default()
 	cfg.LLM = &config.LLMSettings{
-		Sources: []config.LLMSourceConfig{{ID: "openai-default", Provider: "openai"}},
-		Models:  []config.LLMModelConfig{{ID: "gpt-5.4", Provider: "openai", Model: "gpt-5.4", SourceID: "openai-default"}},
+		Sources: []config.LLMSourceConfig{{ID: "openai-default", Provider: "openai"}, {ID: "anthropic-default", Provider: "anthropic"}},
+		Models: []config.LLMModelConfig{
+			{ID: "gpt-5.4", Provider: "openai", Model: "gpt-5.4", SourceID: "openai-default"},
+			{ID: "claude-sonnet", Provider: "anthropic", Model: "claude-sonnet", SourceID: "anthropic-default"},
+		},
 	}
 	if err := config.NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
 		t.Fatalf("normalize cli tools: %v", err)
@@ -42,6 +45,7 @@ func TestCLIToolSettings_GetAndPut(t *testing.T) {
 		Tools []struct {
 			ID                 string   `json:"id"`
 			DefaultModelID     string   `json:"default_model_id"`
+			ProtocolFamilies   []string `json:"protocol_families"`
 			IFLOWAuthMode      string   `json:"iflow_auth_mode"`
 			IFLOWModels        []string `json:"iflow_models"`
 			IFLOWDefaultModel  string   `json:"iflow_default_model"`
@@ -56,37 +60,47 @@ func TestCLIToolSettings_GetAndPut(t *testing.T) {
 		t.Fatalf("expected cli tools")
 	}
 	foundIFLOW := false
+	foundOpenCode := false
 	for _, item := range got.Tools {
-		if item.ID != "iflow" {
-			continue
-		}
-		foundIFLOW = true
-		if item.IFLOWAuthMode != config.IFLOWAuthModeBrowser {
-			t.Fatalf("iflow auth mode = %q, want %q", item.IFLOWAuthMode, config.IFLOWAuthModeBrowser)
-		}
-		if item.IFLOWDefaultModel != iflowcli.DefaultModel {
-			t.Fatalf("iflow default model = %q, want %q", item.IFLOWDefaultModel, iflowcli.DefaultModel)
-		}
-		if len(item.IFLOWModels) == 0 {
-			t.Fatalf("expected iflow models in get response")
-		}
-		if item.IFLOWMaskedKey != "" {
-			t.Fatalf("unexpected masked key before save: %q", item.IFLOWMaskedKey)
-		}
-		if item.IFLOWBrowserAuthed {
-			t.Fatalf("expected browser auth false in isolated test env")
+		switch item.ID {
+		case "iflow":
+			foundIFLOW = true
+			if item.IFLOWAuthMode != config.IFLOWAuthModeBrowser {
+				t.Fatalf("iflow auth mode = %q, want %q", item.IFLOWAuthMode, config.IFLOWAuthModeBrowser)
+			}
+			if item.IFLOWDefaultModel != iflowcli.DefaultModel {
+				t.Fatalf("iflow default model = %q, want %q", item.IFLOWDefaultModel, iflowcli.DefaultModel)
+			}
+			if len(item.IFLOWModels) == 0 {
+				t.Fatalf("expected iflow models in get response")
+			}
+			if item.IFLOWMaskedKey != "" {
+				t.Fatalf("unexpected masked key before save: %q", item.IFLOWMaskedKey)
+			}
+			if item.IFLOWBrowserAuthed {
+				t.Fatalf("expected browser auth false in isolated test env")
+			}
+		case "opencode":
+			foundOpenCode = true
+			if len(item.ProtocolFamilies) != 2 || item.ProtocolFamilies[0] != "openai" || item.ProtocolFamilies[1] != "anthropic" {
+				t.Fatalf("opencode protocol_families = %#v, want [openai anthropic]", item.ProtocolFamilies)
+			}
 		}
 	}
 	if !foundIFLOW {
 		t.Fatalf("expected iflow in get response")
 	}
+	if !foundOpenCode {
+		t.Fatalf("expected opencode in get response")
+	}
 
 	apiKey := "sk-iflow-123456"
 	body, _ := json.Marshal(map[string]any{
 		"tools": []map[string]any{
-			{"id": "codex", "label": "Codex CLI", "protocol_family": "openai", "cli_family": "codex", "default_model_id": "gpt-5.4", "enabled": true},
-			{"id": "claude", "label": "Claude Code", "protocol_family": "anthropic", "cli_family": "claude", "default_model_id": "", "enabled": true},
-			{"id": "iflow", "label": "iFlow CLI", "protocol_family": "openai", "cli_family": "iflow", "enabled": true, "iflow_auth_mode": "api_key", "iflow_base_url": iflowcli.DefaultBaseURL, "iflow_models": []string{"glm-4.7", "minimax-m2.5"}, "iflow_default_model": "minimax-m2.5", "iflow_api_key": apiKey},
+			{"id": "codex", "label": "Codex CLI", "protocol_family": "openai", "protocol_families": []string{"openai"}, "cli_family": "codex", "default_model_id": "gpt-5.4", "enabled": true},
+			{"id": "claude", "label": "Claude Code", "protocol_family": "anthropic", "protocol_families": []string{"anthropic"}, "cli_family": "claude", "default_model_id": "", "enabled": true},
+			{"id": "iflow", "label": "iFlow CLI", "protocol_family": "openai", "protocol_families": []string{"openai"}, "cli_family": "iflow", "enabled": true, "iflow_auth_mode": "api_key", "iflow_base_url": iflowcli.DefaultBaseURL, "iflow_models": []string{"glm-4.7", "minimax-m2.5"}, "iflow_default_model": "minimax-m2.5", "iflow_api_key": apiKey},
+			{"id": "opencode", "label": "OpenCode CLI", "protocol_family": "openai", "protocol_families": []string{"openai", "anthropic"}, "cli_family": "opencode", "default_model_id": "claude-sonnet", "enabled": true},
 		},
 	})
 	req, err := http.NewRequest(http.MethodPut, env.httpSrv.URL+"/api/v1/settings/cli-tools", bytes.NewReader(body))
@@ -106,6 +120,7 @@ func TestCLIToolSettings_GetAndPut(t *testing.T) {
 		Tools []struct {
 			ID                string   `json:"id"`
 			DefaultModelID    string   `json:"default_model_id"`
+			ProtocolFamilies  []string `json:"protocol_families"`
 			IFLOWAuthMode     string   `json:"iflow_auth_mode"`
 			IFLOWModels       []string `json:"iflow_models"`
 			IFLOWDefaultModel string   `json:"iflow_default_model"`
@@ -117,36 +132,49 @@ func TestCLIToolSettings_GetAndPut(t *testing.T) {
 		t.Fatalf("decode put response: %v", err)
 	}
 	foundIFLOW = false
+	foundOpenCode = false
 	for _, item := range updated.Tools {
-		if item.ID == "codex" && item.DefaultModelID != "gpt-5.4" {
-			t.Fatalf("codex default model = %q, want gpt-5.4", item.DefaultModelID)
-		}
-		if item.ID != "iflow" {
-			continue
-		}
-		foundIFLOW = true
-		if item.IFLOWAuthMode != config.IFLOWAuthModeAPIKey {
-			t.Fatalf("iflow auth mode = %q, want %q", item.IFLOWAuthMode, config.IFLOWAuthModeAPIKey)
-		}
-		if !item.IFLOWHasKey {
-			t.Fatalf("expected iflow_has_key true")
-		}
-		if item.IFLOWMaskedKey != "****3456" {
-			t.Fatalf("iflow masked key = %q, want ****3456", item.IFLOWMaskedKey)
-		}
-		if item.IFLOWDefaultModel != "minimax-m2.5" {
-			t.Fatalf("iflow default model = %q, want minimax-m2.5", item.IFLOWDefaultModel)
-		}
-		if len(item.IFLOWModels) != 2 {
-			t.Fatalf("iflow models len = %d, want 2", len(item.IFLOWModels))
+		switch item.ID {
+		case "codex":
+			if item.DefaultModelID != "gpt-5.4" {
+				t.Fatalf("codex default model = %q, want gpt-5.4", item.DefaultModelID)
+			}
+		case "iflow":
+			foundIFLOW = true
+			if item.IFLOWAuthMode != config.IFLOWAuthModeAPIKey {
+				t.Fatalf("iflow auth mode = %q, want %q", item.IFLOWAuthMode, config.IFLOWAuthModeAPIKey)
+			}
+			if !item.IFLOWHasKey {
+				t.Fatalf("expected iflow_has_key true")
+			}
+			if item.IFLOWMaskedKey != "****3456" {
+				t.Fatalf("iflow masked key = %q, want ****3456", item.IFLOWMaskedKey)
+			}
+			if item.IFLOWDefaultModel != "minimax-m2.5" {
+				t.Fatalf("iflow default model = %q, want minimax-m2.5", item.IFLOWDefaultModel)
+			}
+			if len(item.IFLOWModels) != 2 {
+				t.Fatalf("iflow models len = %d, want 2", len(item.IFLOWModels))
+			}
+		case "opencode":
+			foundOpenCode = true
+			if item.DefaultModelID != "claude-sonnet" {
+				t.Fatalf("opencode default model = %q, want claude-sonnet", item.DefaultModelID)
+			}
+			if len(item.ProtocolFamilies) != 2 || item.ProtocolFamilies[0] != "openai" || item.ProtocolFamilies[1] != "anthropic" {
+				t.Fatalf("opencode protocol_families = %#v, want [openai anthropic]", item.ProtocolFamilies)
+			}
 		}
 	}
 	if !foundIFLOW {
 		t.Fatalf("expected iflow in put response")
 	}
+	if !foundOpenCode {
+		t.Fatalf("expected opencode in put response")
+	}
 }
 
-func TestCLIToolSettings_GetBackfillsIFLOWFromLegacyConfig(t *testing.T) {
+func TestCLIToolSettings_GetBackfillsBuiltinsFromLegacyConfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
@@ -187,19 +215,26 @@ func TestCLIToolSettings_GetBackfillsIFLOWFromLegacyConfig(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(got.Tools) != 3 {
-		t.Fatalf("cli tools len = %d, want 3", len(got.Tools))
+	if len(got.Tools) != 4 {
+		t.Fatalf("cli tools len = %d, want 4", len(got.Tools))
 	}
 	foundIFLOW := false
+	foundOpenCode := false
 	for _, item := range got.Tools {
-		if item.ID == "iflow" {
+		switch item.ID {
+		case "iflow":
 			foundIFLOW = true
 			if item.IFLOWDefaultModel == "" {
 				t.Fatalf("expected backfilled iflow default model")
 			}
+		case "opencode":
+			foundOpenCode = true
 		}
 	}
 	if !foundIFLOW {
 		t.Fatalf("expected iflow in get response")
+	}
+	if !foundOpenCode {
+		t.Fatalf("expected opencode in get response")
 	}
 }

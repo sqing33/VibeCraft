@@ -8,6 +8,8 @@ import { goToChat } from '@/app/routes'
 import { onWsEnvelope } from '@/lib/wsBus'
 import {
   chatAttachmentContentUrl,
+  cliToolPrimaryProtocolFamily,
+  cliToolProtocolFamilies,
   fetchCLIToolSettings,
   fetchMCPSettings,
   type ChatAttachment,
@@ -97,6 +99,7 @@ type ChatRuntimeOption = {
   label: string
   kind: 'cli' | 'sdk'
   provider: string
+  providers: string[]
   cliToolId?: string
   defaultModelId?: string
 }
@@ -235,7 +238,8 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       key: `cli:${tool.id}`,
       label: tool.label,
       kind: 'cli',
-      provider: (tool.protocol_family || '').trim(),
+      provider: cliToolPrimaryProtocolFamily(tool),
+      providers: cliToolProtocolFamilies(tool),
       cliToolId: tool.id,
       defaultModelId: (tool.cli_family || '').trim() === 'iflow' ? tool.iflow_default_model : tool.default_model_id,
     }))
@@ -246,6 +250,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
         label: sdkRuntimeLabels[provider],
         kind: 'sdk',
         provider,
+        providers: [provider],
       })
     }
     return options
@@ -280,8 +285,6 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       if ((provider === 'openai' || provider === 'anthropic') && runtimeOptionsByKey.has(`sdk:${provider}`)) {
         return `sdk:${provider}`
       }
-      if (provider === 'anthropic' && runtimeOptionsByKey.has('cli:claude')) return 'cli:claude'
-      if (provider === 'openai' && runtimeOptionsByKey.has('cli:codex')) return 'cli:codex'
       return defaultSelectableRuntimeKey
     },
     [defaultSelectableRuntimeKey, expertsById, runtimeKeyForCLIFamily, runtimeOptionsByKey],
@@ -379,13 +382,13 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       if (!meta) return ''
       const expertId = meta.expert_id?.trim() || ''
       const runtime = runtimeOptionsByKey.get(inferRuntimeKey(meta))
-      const tool = expertId ? toolsById.get(expertId) : undefined
+      const tool = runtime?.cliToolId ? toolsById.get(runtime.cliToolId) : expertId ? toolsById.get(expertId) : undefined
       const expert = expertId ? expertsById.get(expertId) : undefined
       const label = runtime?.kind === 'cli'
         ? tool?.label || runtime.label || expert?.label || expertId
         : expert?.label || runtime?.label || tool?.label || expertId
       const toolFamily = (tool?.cli_family || expert?.cli_family || '').trim()
-      const provider = toolFamily === 'iflow' ? 'iflow' : (meta.provider?.trim() || tool?.protocol_family || expert?.provider || '').trim()
+      const provider = toolFamily === 'iflow' ? 'iflow' : (meta.provider?.trim() || cliToolPrimaryProtocolFamily(tool) || expert?.provider || '').trim()
       const model = (meta.model?.trim() || expert?.model || '').trim()
       const parts: string[] = []
       if (label) parts.push(label)

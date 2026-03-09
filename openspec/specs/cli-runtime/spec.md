@@ -3,9 +3,7 @@
 ## Purpose
 
 CLI runtime 定义 `vibe-tree` 默认 AI 执行路径的统一 contract：主 chat / workflow / orchestration 通过外部 CLI agent 执行，SDK 仅保留为 helper-only 能力。
-
 ## Requirements
-
 ### Requirement: CLI runtime MUST be the default AI execution path
 The system MUST execute the following primary AI surfaces through CLI runtime by default:
 
@@ -98,27 +96,34 @@ The runtime MUST support exactly these official iFlow auth inputs:
 - browser-auth state persisted in the managed iFlow home
 - explicit official iFlow API key from the CLI tool settings card
 
-#### Scenario: iFlow API key auth injects official env
-- **WHEN** a chat or repo analysis request selects `iflow` and the tool is configured for `api_key`
-- **THEN** the runtime injects official iFlow auth env values
-- **AND** it does not inject OpenAI-compatible auth env values
+The runtime MUST NOT accept or rely on shared LLM source API keys / base URLs for iFlow.
 
-#### Scenario: iFlow browser auth reuses managed home
-- **WHEN** a chat or repo analysis request selects `iflow` and the tool is configured for `browser`
-- **THEN** the runtime uses the daemon-managed iFlow home for auth reuse
-- **AND** it relies on the persisted official browser login state
+#### Scenario: iFlow turn uses official browser auth
+- **WHEN** a chat turn selects the `iflow` CLI tool and the settings indicate browser auth
+- **THEN** the runtime injects the managed iFlow home into the wrapper environment
+- **AND** the wrapper reuses the official browser-auth state without consulting generic LLM source credentials
 
-### Requirement: iFlow runtime MUST support per-turn MCP and skill injection
-The `iflow` runtime MUST inject the effective MCP and skill selection derived from vibe-tree settings and the chat session.
-
-#### Scenario: iFlow turn receives effective MCP allow-list
-- **WHEN** an iFlow chat turn runs with selected/default MCP server ids
-- **THEN** the runtime syncs those MCP definitions into project scope
-- **AND** passes only the effective subset through `--allowed-mcp-server-names`
+#### Scenario: iFlow turn uses official API key
+- **WHEN** a chat turn selects the `iflow` CLI tool and the settings indicate API-key auth
+- **THEN** the runtime injects the official iFlow API key and official base URL from the CLI tool settings
+- **AND** the wrapper does not require a matching shared LLM source entry
 
 #### Scenario: iFlow turn receives effective skills
 - **WHEN** an iFlow chat turn runs with enabled skill bindings
 - **THEN** the runtime appends effective skill instructions to the system prompt before launching the CLI
+
+For OpenAI-compatible CLI tools, the runtime MUST provide the selected source's base URL and API key without requiring users to duplicate those values in a separate CLI-tool-specific config block.
+For Anthropic-compatible CLI tools, the runtime MUST provide the selected source's base URL and API key without requiring users to duplicate those values in a separate CLI-tool-specific config block.
+
+#### Scenario: OpenCode tool receives OpenAI source-backed connection settings
+- **WHEN** a chat or repo analysis request selects the `opencode` CLI tool with an OpenAI-compatible `model_id`
+- **THEN** the resolved CLI run spec includes the selected source's base URL and API key in environment variables or derived wrapper config usable by OpenCode
+- **AND** the wrapper can authenticate without extra manual configuration
+
+#### Scenario: OpenCode tool receives Anthropic source-backed connection settings
+- **WHEN** a chat or repo analysis request selects the `opencode` CLI tool with an Anthropic-compatible `model_id`
+- **THEN** the resolved CLI run spec includes the selected source's base URL and API key in environment variables or derived wrapper config usable by OpenCode
+- **AND** the wrapper can authenticate without extra manual configuration
 
 ### Requirement: IFLOW wrapper MUST implement the standard CLI artifact contract
 The `iflow` wrapper MUST write `summary.json` and `artifacts.json` for every completed run.
@@ -180,3 +185,16 @@ The runtime MUST NOT require tool-level skill binding configuration for a discov
 #### Scenario: Expert restriction narrows effective skills
 - **WHEN** the active expert declares `enabled_skills` containing only one of several discovered skills
 - **THEN** the injected skill allowlist contains only that intersected skill set
+
+### Requirement: OpenCode wrapper MUST implement the standard CLI artifact contract
+The `opencode` wrapper MUST write `summary.json` and `artifacts.json` for every completed run.
+
+When the underlying CLI exposes a resumable session identifier, the wrapper MUST also write `session.json`.
+When stdout or JSON events produce a final assistant response, the wrapper MUST persist it as `final_message.md`.
+
+#### Scenario: OpenCode non-interactive run writes session and final message artifacts
+- **WHEN** the `opencode` wrapper completes a non-interactive run
+- **THEN** the wrapper writes `summary.json` and `artifacts.json`
+- **AND** it writes `session.json` when a session id is present in OpenCode events
+- **AND** it writes `final_message.md` from the final assistant output or result text
+

@@ -249,6 +249,18 @@ func Default() Config {
 				Env:           map[string]string{},
 				TimeoutMs:     30 * 60 * 1000,
 			},
+			{
+				ID:            "opencode",
+				Label:         "OpenCode",
+				ManagedSource: ManagedSourceBuiltin,
+				Provider:      "cli",
+				RuntimeKind:   "cli",
+				CLIFamily:     "opencode",
+				Model:         "openai/gpt-5-codex",
+				SystemPrompt:  "You are OpenCode. Respond in plain text suitable for a terminal. Do not use markdown unless explicitly requested.",
+				Env:           map[string]string{},
+				TimeoutMs:     30 * 60 * 1000,
+			},
 		},
 	}
 }

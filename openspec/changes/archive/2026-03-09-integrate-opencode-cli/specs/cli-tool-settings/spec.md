@@ -1,10 +1,4 @@
-# cli-tool-settings Specification
-
-## Purpose
-
-CLI tool settings define the primary execution tools for `vibe-tree`, binding protocol families to concrete CLI runtimes, default models, and tool-specific defaults.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: System MUST expose CLI tool settings for primary execution tools
 The system MUST expose configurable primary CLI tools for at least `codex`, `claude`, `iflow`, and `opencode`.
@@ -16,37 +10,19 @@ Each CLI tool MUST declare:
 - optional `protocol_families` (the complete compatible protocol list)
 - `cli_family`
 - `enabled`
+- `default_model_id`
 - optional executable path override
-
-For `iflow`, the settings model MUST also include:
-- official auth mode (`browser` or `api_key`)
-- official base URL
-- persisted masked API key support
-- ordered iFlow model list
-- default iFlow model
-- browser-auth state derived from the managed iFlow home
 
 When `protocol_families` is omitted, the system MUST treat `protocol_family` as the tool's only compatible protocol.
 When `protocol_families` is present, `protocol_family` MUST remain a stable primary/default family for backward compatibility.
 
-#### Scenario: Read CLI tools including iFlow and OpenCode
+#### Scenario: Read CLI tools including OpenCode
 - **WHEN** client requests CLI tool settings
 - **THEN** the daemon returns the configured `codex`, `claude`, `iflow`, and `opencode` tools
 - **AND** each tool includes a backward-compatible `protocol_family`
 - **AND** multi-protocol tools also include `protocol_families`
-- **AND** `iflow` includes official auth, masked-key, browser-auth, and model-list metadata
-
-#### Scenario: Update iFlow official settings
-- **WHEN** client saves CLI tool settings with a new `iflow_auth_mode`, `iflow_models`, or `iflow_default_model`
-- **THEN** the daemon persists the new iFlow settings
-- **AND** later iFlow runtime resolution uses those values unless overridden per request
 
 #### Scenario: Update OpenCode default model
 - **WHEN** client saves CLI tool settings with a new default model for `opencode`
 - **THEN** the daemon persists the new default model
 - **AND** later CLI resolution for `opencode` uses that model unless overridden per request
-
-#### Scenario: Update non-iFlow tool defaults
-- **WHEN** client saves CLI tool settings with a new default model for `codex` or `claude`
-- **THEN** the daemon persists the new default model
-- **AND** later CLI resolution for that tool uses the saved default unless overridden per request

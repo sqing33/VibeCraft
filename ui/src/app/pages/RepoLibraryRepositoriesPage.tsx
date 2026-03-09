@@ -8,6 +8,7 @@ import {
   goToRepoLibraryRepository,
 } from '@/app/routes'
 import {
+  cliToolProtocolFamilies,
   createRepoLibraryAnalysis,
   fetchCLIToolSettings,
   fetchRepoLibraryRepositories,
@@ -350,7 +351,7 @@ export function RepoLibraryRepositoriesPage() {
             aria-label="CLI 工具"
             label="CLI 工具"
             placeholder={selectableTools.length === 0 ? '暂无可用 CLI 工具' : '选择分析工具'}
-            description={effectiveCliToolId ? `当前协议：${toolsById.get(effectiveCliToolId)?.protocol_family || '未知'}` : '沿用 Settings → CLI 工具 中启用的工具'}
+            description={effectiveCliToolId ? `当前协议：${cliToolProtocolFamilies(toolsById.get(effectiveCliToolId)).join(' / ') || '未知'}` : '沿用 Settings → CLI 工具 中启用的工具'}
             selectedKeys={effectiveCliToolId ? new Set([effectiveCliToolId]) : new Set()}
             selectionMode="single"
             disallowEmptySelection
