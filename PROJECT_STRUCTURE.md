@@ -34,6 +34,7 @@
 | `.codex/skills/github-feature-analyzer/scripts/prepare_workspace.py` | 分析路径准备：统一输出到 `<project-root>/.github-feature-analyzer/{owner-repo}/`（`source`/`artifacts`/`report.md`） |
 | `.codex/skills/github-feature-analyzer/scripts/merge_agent_results.py` | 子代理 JSON 结果合并脚本：规范化/去重/冲突与缺失注记后输出单一合并工件                                       |
 | `.codex/skills/github-feature-analyzer/scripts/render_report.py` | 原理优先报告渲染：README 特点提炼与实现机制说明 + 五维机制分析（控制流/数据流/状态生命周期/失败恢复/并发时序）+ `file:line` 证据链 |
+| `backend/internal/chat/codex_runtime_pool.go` | Codex Chat 暖运行时池：按 `chat_session_id` 复用 app-server、做运行时签名匹配、空闲回收与显式释放 |
 | `.codex/skills/github-feature-analyzer/scripts/reference_retrieval.py` | 历史分析检索脚本：从 `.github-feature-analyzer/` 下 `report.md + subagent_results.json` 构建本地向量索引，并按查询输出 `compact/semi/full` 参考摘录 |
 | `.codex/skills/github-feature-analyzer/scripts/ensure_uv_unix.sh` | UV 引导脚本：在 Linux/macOS 上检测或安装 uv（二进制不入库），为检索脚本提供统一运行前置 |
 | `.codex/skills/github-feature-analyzer/scripts/setup_reference_venv.sh` | UV 环境初始化：强制 uv-managed Python 3.12，创建并同步固定 `.venv-reference` |

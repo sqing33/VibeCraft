@@ -26,6 +26,7 @@ type codexAppServerClient interface {
 	ResumeThread(ctx context.Context, req codexAppServerThreadRequest) (string, error)
 	StartTurn(ctx context.Context, threadID string, prompt string, reasoningEffort *string) (string, error)
 	Notifications() <-chan codexAppServerNotification
+	Done() <-chan struct{}
 	Wait() error
 	Close() error
 }
@@ -94,32 +95,46 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 	attemptResume := strings.TrimSpace(pointerStringValue(sess.CLISessionID))
 
 	runOnce := func(prompt string, contextMode string, resumeThreadID string) (TurnResult, error) {
-		client, err := newCodexAppServerClient(ctx, spec)
-		if err != nil {
-			return TurnResult{}, &codexAppServerEarlyFailure{err: err}
-		}
-		defer client.Close()
-
-		if err := client.Initialize(ctx); err != nil {
-			return TurnResult{}, &codexAppServerEarlyFailure{err: err}
-		}
-
 		threadReq, err := m.buildCodexThreadRequest(sess, spec, expertID, cliToolID, resumeThreadID)
 		if err != nil {
 			return TurnResult{}, err
 		}
-
-		threadID := ""
-		if strings.TrimSpace(resumeThreadID) != "" {
-			threadID, err = client.ResumeThread(ctx, threadReq)
-		} else {
-			threadID, err = client.StartThread(ctx, threadReq)
-		}
+		lease, err := m.codexRuntimePool.Acquire(ctx, sess.ID, spec, threadReq)
 		if err != nil {
 			return TurnResult{}, &codexAppServerEarlyFailure{err: err}
 		}
+		released := false
+		defer func() {
+			if !released {
+				lease.Release()
+			}
+		}()
 
-		if _, err := client.StartTurn(ctx, threadID, prompt, reasoningEffort); err != nil {
+		client := lease.Client()
+		if err := drainCodexAppServerNotifications(client); err != nil {
+			released = true
+			_ = lease.Discard()
+			return TurnResult{}, &codexAppServerEarlyFailure{err: err}
+		}
+		threadID := lease.ThreadID()
+		if strings.TrimSpace(threadID) == "" {
+			if strings.TrimSpace(resumeThreadID) != "" {
+				threadID, err = client.ResumeThread(ctx, threadReq)
+			} else {
+				threadID, err = client.StartThread(ctx, threadReq)
+			}
+			if err != nil {
+				released = true
+				_ = lease.Discard()
+				return TurnResult{}, &codexAppServerEarlyFailure{err: err}
+			}
+			lease.SetThreadID(threadID)
+		}
+
+		activeTurnID, err := client.StartTurn(ctx, threadID, prompt, reasoningEffort)
+		if err != nil {
+			released = true
+			_ = lease.Discard()
 			return TurnResult{}, &codexAppServerEarlyFailure{err: err}
 		}
 
@@ -139,10 +154,15 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 				return TurnResult{}, ctx.Err()
 			case note, ok := <-client.Notifications():
 				if !ok {
+					released = true
+					_ = lease.Discard()
 					if err := client.Wait(); err != nil {
 						return TurnResult{}, err
 					}
 					return TurnResult{}, fmt.Errorf("codex app-server closed before turn completion")
+				}
+				if noteTurnID := codexAppServerNotificationTurnID(note.Params); noteTurnID != "" && strings.TrimSpace(activeTurnID) != "" && noteTurnID != strings.TrimSpace(activeTurnID) {
+					continue
 				}
 
 				switch note.Method {
@@ -269,6 +289,7 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 					case "session":
 						if strings.TrimSpace(event.SessionID) != "" {
 							threadID = strings.TrimSpace(event.SessionID)
+							lease.SetThreadID(threadID)
 						}
 					case "assistant_delta":
 						if event.Delta == "" {
@@ -711,6 +732,10 @@ func (c *stdioCodexAppServerClient) Notifications() <-chan codexAppServerNotific
 	return c.notifications
 }
 
+func (c *stdioCodexAppServerClient) Done() <-chan struct{} {
+	return c.waitDone
+}
+
 func (c *stdioCodexAppServerClient) Wait() error {
 	<-c.waitDone
 	if c.readErr != nil {
@@ -899,4 +924,33 @@ func mergeCodexAppServerEnv(base []string, override map[string]string) []string 
 		out = append(out, key+"="+envMap[key])
 	}
 	return out
+}
+
+func drainCodexAppServerNotifications(client codexAppServerClient) error {
+	if client == nil {
+		return nil
+	}
+	for {
+		select {
+		case _, ok := <-client.Notifications():
+			if !ok {
+				return client.Wait()
+			}
+		default:
+			return nil
+		}
+	}
+}
+
+func codexAppServerNotificationTurnID(params json.RawMessage) string {
+	var raw map[string]any
+	if err := json.Unmarshal(params, &raw); err != nil {
+		return ""
+	}
+	return firstNonEmptyTrimmed(
+		stringValue(raw["turnId"]),
+		stringValue(raw["turn_id"]),
+		nestedString(raw, "turn", "id"),
+		nestedString(raw, "params", "turnId"),
+	)
 }

@@ -24,11 +24,13 @@ import (
 )
 
 const (
-	defaultContextWindow = int64(128_000)
-	defaultSoftRatio     = 0.82
-	defaultForceRatio    = 0.92
-	defaultHardRatio     = 0.97
-	defaultKeepRecent    = 12
+	defaultContextWindow        = int64(128_000)
+	defaultSoftRatio            = 0.82
+	defaultForceRatio           = 0.92
+	defaultHardRatio            = 0.97
+	defaultKeepRecent           = 12
+	defaultCodexRuntimeIdleTTL  = 10 * time.Minute
+	defaultCodexRuntimeReapTick = time.Minute
 )
 
 type Options struct {
@@ -62,6 +64,7 @@ type Manager struct {
 	thinkingTranslationForceChars int
 	thinkingTranslationIdle       time.Duration
 	thinkingTranslator            ThinkingTranslatorFunc
+	codexRuntimePool              *codexRuntimePool
 }
 
 type TurnParams struct {
@@ -160,7 +163,30 @@ func NewManager(st *store.Store, hub *ws.Hub, opts Options) *Manager {
 		thinkingTranslationForceChars: thinkingTranslationForceChars,
 		thinkingTranslationIdle:       thinkingTranslationIdle,
 		thinkingTranslator:            opts.ThinkingTranslator,
+		codexRuntimePool:              newCodexRuntimePool(defaultCodexRuntimeIdleTTL, defaultCodexRuntimeReapTick),
 	}
+}
+
+// Close 功能：释放 chat manager 持有的暖运行时资源。
+// 参数/返回：无入参；成功返回 nil。
+// 失败场景：底层 Codex app-server 关闭失败时返回 error。
+// 副作用：关闭所有仍在内存池中的 Codex app-server 子进程。
+func (m *Manager) Close() error {
+	if m == nil || m.codexRuntimePool == nil {
+		return nil
+	}
+	return m.codexRuntimePool.Close()
+}
+
+// ReleaseSessionRuntime 功能：主动释放指定 chat session 的暖运行时。
+// 参数/返回：sessionID 为 chat session id；成功返回 nil。
+// 失败场景：底层 Codex app-server 关闭失败时返回 error。
+// 副作用：从内存池中移除并关闭该 session 绑定的 Codex app-server 子进程。
+func (m *Manager) ReleaseSessionRuntime(sessionID string) error {
+	if m == nil || m.codexRuntimePool == nil {
+		return nil
+	}
+	return m.codexRuntimePool.Invalidate(sessionID)
 }
 
 func (m *Manager) RunTurn(ctx context.Context, params TurnParams) (TurnResult, error) {

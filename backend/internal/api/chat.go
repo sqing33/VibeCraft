@@ -248,7 +248,8 @@ func patchChatSessionHandler(deps Deps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		sess, err := deps.Store.PatchChatSession(c.Request.Context(), c.Param("id"), store.PatchChatSessionParams{
+		sessionID := c.Param("id")
+		sess, err := deps.Store.PatchChatSession(c.Request.Context(), sessionID, store.PatchChatSessionParams{
 			Title:        req.Title,
 			Status:       req.Status,
 			MCPServerIDs: normalizeSelectedMCPServerIDPointer(req.MCPServerIDs),
@@ -264,6 +265,16 @@ func patchChatSessionHandler(deps Deps) gin.HandlerFunc {
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
+		}
+		status := firstNonEmptyTrimmed(sess.Status)
+		if req.Status != nil {
+			status = firstNonEmptyTrimmed(*req.Status, status)
+		}
+		if deps.Chat != nil && strings.EqualFold(status, "archived") {
+			if err := deps.Chat.ReleaseSessionRuntime(sessionID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		c.JSON(http.StatusOK, sess)
 	}

@@ -93,6 +93,11 @@ func main() {
 	execMgr := execution.NewManager(execRunner, grace, hub)
 	experts := expert.NewRegistry(cfg)
 	chatMgr := chat.NewManager(stateStore, hub, chat.Options{Runner: execRunner})
+	defer func() {
+		if err := chatMgr.Close(); err != nil {
+			logx.Warn("daemon", "close-chat-runtime", "关闭 Chat 暖运行时失败", "err", err)
+		}
+	}()
 	repoLibSvc, err := repolib.NewService(stateStore, execMgr, chatMgr, experts)
 	if err != nil {
 		logx.Error("daemon", "repo-library", "初始化 Repo Library service 失败", "err", err)
