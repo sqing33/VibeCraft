@@ -1,20 +1,19 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { Alert, Button, Chip, Input, Skeleton, Textarea } from '@heroui/react'
-import { FolderSearch, RefreshCcw } from 'lucide-react'
+import { FolderSearch, Plus, RefreshCcw } from 'lucide-react'
 
-import { goToRepoLibraryRepository } from '@/app/routes'
+import { goToRepoLibraryRepositories, goToRepoLibraryRepository } from '@/app/routes'
+import { LoadingVeil } from '@/app/components/LoadingVeil'
+import { RepoLibraryShell, RepoLibrarySidebarRepositoryItem } from '@/app/components/RepoLibraryShell'
 import {
   fetchRepoLibraryRepositories,
   searchRepoLibrary,
-  type RepoLibraryRepositorySummary,
   type RepoLibrarySearchRequest,
-  type RepoLibrarySearchResult,
 } from '@/lib/daemon'
 import { formatRelativeTime } from '@/lib/time'
 import { toast } from '@/lib/toast'
 import { useDaemonStore } from '@/stores/daemonStore'
-
-import { RepoLibraryLayout } from './RepoLibraryLayout'
+import { useRepoLibraryUIStore } from '@/stores/repoLibraryUIStore'
 
 function formatScore(score?: number): string {
   if (typeof score !== 'number') return '—'
@@ -32,63 +31,64 @@ function PatternSearchSkeleton() {
 }
 
 /**
- * 功能：提供 Repo Library 的语义模式搜索，并支持按仓库过滤结果。
- * 参数/返回：无入参；返回模式搜索页面。
- * 失败场景：搜索或仓库过滤列表加载失败时展示错误提示，并允许用户重试。
+ * 功能：提供 Repo Library 的语义知识库检索，并支持按仓库跳转结果。
+ * 参数/返回：无入参；返回知识库检索页面。
+ * 失败场景：搜索或仓库列表加载失败时展示错误提示，并允许用户重试。
  * 副作用：发起仓库列表与搜索请求；点击结果会跳转到相关仓库详情页。
  */
 export function RepoLibraryPatternSearchPage() {
   const daemonUrl = useDaemonStore((s) => s.daemonUrl)
-  const health = useDaemonStore((s) => s.health)
 
-  const [repositories, setRepositories] = useState<RepoLibraryRepositorySummary[]>([])
-  const [repositoriesLoading, setRepositoriesLoading] = useState(false)
-  const [repositoriesError, setRepositoriesError] = useState<string | null>(null)
+  const repositories = useRepoLibraryUIStore((s) => s.repositories)
+  const repositoriesLoaded = useRepoLibraryUIStore((s) => s.repositoriesLoaded)
+  const repositoriesLoading = useRepoLibraryUIStore((s) => s.repositoriesRefreshing)
+  const repositoriesError = useRepoLibraryUIStore((s) => s.repositoriesError)
+  const setRepositoriesState = useRepoLibraryUIStore((s) => s.setRepositoriesState)
 
-  const [query, setQuery] = useState('认证流程是如何落地的？')
-  const [limit, setLimit] = useState('8')
-  const [selectedRepositoryIds, setSelectedRepositoryIds] = useState<string[]>([])
-  const [submitting, setSubmitting] = useState(false)
-  const [results, setResults] = useState<RepoLibrarySearchResult[]>([])
-  const [searchError, setSearchError] = useState<string | null>(null)
-  const [lastQueryAt, setLastQueryAt] = useState<number | null>(null)
+  const query = useRepoLibraryUIStore((s) => s.searchQuery)
+  const limit = useRepoLibraryUIStore((s) => s.searchLimit)
+  const results = useRepoLibraryUIStore((s) => s.searchResults)
+  const searchLoaded = useRepoLibraryUIStore((s) => s.searchLoaded)
+  const submitting = useRepoLibraryUIStore((s) => s.searchSubmitting)
+  const searchError = useRepoLibraryUIStore((s) => s.searchError)
+  const lastQueryAt = useRepoLibraryUIStore((s) => s.searchLastQueryAt)
+  const setSearchDraft = useRepoLibraryUIStore((s) => s.setSearchDraft)
+  const setSearchState = useRepoLibraryUIStore((s) => s.setSearchState)
+
+  const hasRepositoryCache = useMemo(
+    () => repositoriesLoaded || repositories.length > 0,
+    [repositories.length, repositoriesLoaded],
+  )
+  const hasSearchCache = useMemo(
+    () => searchLoaded || results.length > 0,
+    [results.length, searchLoaded],
+  )
+
+  const loadRepositories = useCallback(async (options?: { force?: boolean }) => {
+    const force = options?.force ?? false
+    if (!force && useRepoLibraryUIStore.getState().repositoriesRefreshing) return
+
+    setRepositoriesState({ refreshing: true, error: null })
+    try {
+      setRepositoriesState({
+        repositories: await fetchRepoLibraryRepositories(daemonUrl),
+        loaded: true,
+        refreshing: false,
+        error: null,
+      })
+    } catch (err: unknown) {
+      setRepositoriesState({ refreshing: false, error: err instanceof Error ? err.message : String(err) })
+    }
+  }, [daemonUrl, setRepositoriesState])
 
   useEffect(() => {
-    let cancelled = false
-
-    const loadRepositories = async () => {
-      setRepositoriesLoading(true)
-      setRepositoriesError(null)
-      try {
-        const list = await fetchRepoLibraryRepositories(daemonUrl)
-        if (cancelled) return
-        setRepositories(list)
-      } catch (err: unknown) {
-        if (cancelled) return
-        setRepositoriesError(err instanceof Error ? err.message : String(err))
-      } finally {
-        if (!cancelled) setRepositoriesLoading(false)
-      }
-    }
-
     void loadRepositories()
-    return () => {
-      cancelled = true
-    }
-  }, [daemonUrl])
+  }, [loadRepositories])
 
   const repositoriesById = useMemo(
     () => new Map(repositories.map((item) => [item.repository_id, item])),
     [repositories],
   )
-
-  const toggleRepositoryFilter = (repositoryId: string) => {
-    setSelectedRepositoryIds((current) =>
-      current.includes(repositoryId)
-        ? current.filter((item) => item !== repositoryId)
-        : [...current, repositoryId],
-    )
-  }
 
   const onSearch = async () => {
     if (!query.trim()) {
@@ -98,220 +98,200 @@ export function RepoLibraryPatternSearchPage() {
 
     const req: RepoLibrarySearchRequest = {
       query: query.trim(),
-      repository_ids: selectedRepositoryIds.length > 0 ? selectedRepositoryIds : undefined,
       limit: Number(limit) > 0 ? Number(limit) : 8,
     }
 
-    setSubmitting(true)
-    setSearchError(null)
+    setSearchState({ submitting: true, error: null })
     try {
       const next = await searchRepoLibrary(daemonUrl, req)
-      setResults(next.results)
-      setLastQueryAt(Date.now())
+      setSearchState({
+        results: next.results,
+        loaded: true,
+        submitting: false,
+        error: null,
+        lastQueryAt: Date.now(),
+      })
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
-      setSearchError(message)
-      setResults([])
-    } finally {
-      setSubmitting(false)
+      setSearchState({ submitting: false, error: message })
     }
   }
 
+  const sidebarContent = (
+    <div className="relative min-h-[120px]">
+      {repositoriesError && !hasRepositoryCache ? <Alert color="danger" title="加载仓库失败" description={repositoriesError} /> : null}
+      {!hasRepositoryCache && repositoriesLoading ? (
+        <div className="space-y-2">
+          <Skeleton className="h-[58px] w-full rounded-[22px]" />
+          <Skeleton className="h-[58px] w-full rounded-[22px]" />
+          <Skeleton className="h-[58px] w-full rounded-[22px]" />
+        </div>
+      ) : repositories.length === 0 ? (
+        <div className="rounded-2xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
+          暂无仓库。完成至少一次分析后，这里会出现仓库列表。
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {repositories.map((item) => (
+            <RepoLibrarySidebarRepositoryItem
+              key={item.repository_id}
+              title={item.full_name || item.name || item.repo_url}
+              subtitle={item.repo_url}
+              meta={formatRelativeTime(item.created_at || item.updated_at || 0)}
+              onPress={() => goToRepoLibraryRepository(item.repository_id)}
+            />
+          ))}
+        </div>
+      )}
+      <LoadingVeil visible={repositoriesLoading && hasRepositoryCache} compact label="正在刷新仓库列表…" />
+    </div>
+  )
+
   return (
-    <RepoLibraryLayout
-      activeNav="search"
-      title="Repo Library 模式搜索"
-      description="用自然语言跨仓库查找相似实现模式。搜索结果会保留仓库、快照、卡片和 evidence 上下文，方便快速回到源头。"
-      meta={
-        <Chip variant="flat" color={health.status === 'ok' ? 'success' : 'default'}>
-          {health.status === 'ok' ? 'Daemon 已连接' : 'Daemon 未就绪'}
-        </Chip>
+    <RepoLibraryShell
+      title="知识库检索"
+      headerMeta={
+        <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+          <span>知识库检索</span>
+          <span>·</span>
+          <span>全仓库范围</span>
+        </div>
       }
-      actions={
+      headerActions={
+        <>
+          <Button variant="flat" size="sm" onPress={goToRepoLibraryRepositories}>
+            添加仓库
+          </Button>
+          <Button variant="light" size="sm" startContent={<RefreshCcw className="h-4 w-4" />} onPress={() => void loadRepositories({ force: true })}>
+            刷新仓库
+          </Button>
+        </>
+      }
+      sidebarTitle="仓库"
+      sidebarCount={repositories.length}
+      sidebarAction={
         <Button
-          variant="light"
+          color="primary"
           size="sm"
-          startContent={<RefreshCcw className="h-4 w-4" />}
-          onPress={() => window.location.reload()}
+          className="w-[25%] min-w-[86px] rounded-2xl"
+          startContent={<Plus className="h-4 w-4 shrink-0 stroke-[3]" />}
+          onPress={goToRepoLibraryRepositories}
         >
-          刷新页面
+          添加仓库
         </Button>
       }
+      sidebarContent={sidebarContent}
     >
-      <section className="rounded-2xl border bg-card p-5 shadow-sm">
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2 text-lg font-semibold">
-              <FolderSearch className="h-5 w-5" />
-              Pattern Search
+      <div className="relative">
+        {repositoriesError && hasRepositoryCache ? <Alert color="danger" title="刷新失败，已保留上次内容" description={repositoriesError} className="mb-4" /> : null}
+
+        <section className="rounded-2xl border bg-card p-5 shadow-sm">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-lg font-semibold">
+                <FolderSearch className="h-5 w-5" />
+                知识库检索
+              </div>
+              <div className="mt-1 text-sm text-muted-foreground">
+                输入一个自然语言问题，例如“多租户权限如何建模”或“认证流程如何组织”，系统会返回带仓库上下文的相关卡片。
+              </div>
             </div>
-            <div className="mt-1 text-sm text-muted-foreground">
-              输入一个自然语言问题，例如“多租户权限如何建模”或“认证流程如何组织”，系统会返回带仓库上下文的相关卡片。
-            </div>
+            <Chip variant="bordered" size="sm">
+              支持语义检索
+            </Chip>
           </div>
-          <Chip variant="bordered" size="sm">
-            支持语义检索
-          </Chip>
-        </div>
 
-        <div className="grid gap-3 md:grid-cols-[1fr_180px]">
-          <Textarea
-            label="查询语句"
-            minRows={3}
-            placeholder="例如：认证流程是如何落地的？"
-            value={query}
-            onValueChange={setQuery}
-          />
-          <Input label="结果数" placeholder="8" value={limit} onValueChange={setLimit} />
-        </div>
+          <div className="grid gap-3 md:grid-cols-[1fr_180px]">
+            <Textarea
+              label="查询语句"
+              minRows={3}
+              placeholder="例如：认证流程是如何落地的？"
+              value={query}
+              onValueChange={(value) => setSearchDraft({ query: value })}
+            />
+            <Input label="结果数" placeholder="8" value={limit} onValueChange={(value) => setSearchDraft({ limit: value })} />
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button color="primary" isLoading={submitting} onPress={onSearch}>
+              开始搜索
+            </Button>
+          </div>
+        </section>
 
-        <div className="mt-4 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-sm font-medium">仓库筛选</div>
-            {selectedRepositoryIds.length > 0 ? (
-              <Button variant="light" size="sm" onPress={() => setSelectedRepositoryIds([])}>
-                清空筛选
-              </Button>
+        <section className="mt-5 space-y-3">
+          <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-muted-foreground">
+            搜索结果
+            {lastQueryAt ? (
+              <Chip variant="bordered" size="sm">
+                更新于 {formatRelativeTime(lastQueryAt)}
+              </Chip>
             ) : null}
           </div>
 
-          {repositoriesError ? (
-            <Alert color="danger" title="加载仓库筛选失败" description={repositoriesError} />
-          ) : repositoriesLoading ? (
-            <div className="flex flex-wrap gap-2">
-              <Skeleton className="h-8 w-28 rounded-full" />
-              <Skeleton className="h-8 w-28 rounded-full" />
-              <Skeleton className="h-8 w-28 rounded-full" />
-            </div>
-          ) : repositories.length === 0 ? (
-            <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-              暂无可筛选的仓库。完成至少一次分析后，这里会出现仓库标签。
+          {searchError && !hasSearchCache ? (
+            <Alert color="danger" title="知识库检索失败" description={searchError} />
+          ) : !hasSearchCache && submitting ? (
+            <PatternSearchSkeleton />
+          ) : results.length === 0 ? (
+            <div className="rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
+              还没有搜索结果。先输入一个自然语言问题试试。
             </div>
           ) : (
-            <div className="flex flex-wrap gap-2">
-              {repositories.map((item) => {
-                const active = selectedRepositoryIds.includes(item.repository_id)
+            <div className="space-y-3">
+              {results.map((item, index) => {
+                const repository = item.repository ?? repositoriesById.get(item.repository_id)
                 return (
-                  <Button
-                    key={item.repository_id}
-                    variant={active ? 'flat' : 'light'}
-                    size="sm"
-                    onPress={() => toggleRepositoryFilter(item.repository_id)}
-                  >
-                    {item.full_name || item.repository_id}
-                  </Button>
+                  <div key={item.result_id || `${item.repository_id}-${item.card_id || index}`} className="rounded-2xl border bg-card p-5 shadow-sm">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-base font-semibold">{item.title || item.card?.title || '未命名结果'}</div>
+                          <Chip variant="flat" size="sm">
+                            相关度 {formatScore(item.score)}
+                          </Chip>
+                          {item.card?.card_type ? (
+                            <Chip variant="bordered" size="sm">
+                              {item.card.card_type}
+                            </Chip>
+                          ) : null}
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          {item.summary || item.card?.summary || item.rationale || '暂无摘要'}
+                        </div>
+                      </div>
+
+                      <Button variant="flat" size="sm" onPress={() => goToRepoLibraryRepository(item.repository_id)}>
+                        打开仓库详情
+                      </Button>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
+                      <div className="rounded-xl border bg-muted/20 p-3">
+                        <div className="text-xs uppercase tracking-wide text-muted-foreground/80">仓库</div>
+                        <div className="mt-1 font-medium text-foreground">
+                          {repository?.full_name || item.repository_id}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border bg-muted/20 p-3">
+                        <div className="text-xs uppercase tracking-wide text-muted-foreground/80">快照</div>
+                        <div className="mt-1 font-medium text-foreground">
+                          {item.snapshot?.resolved_ref || item.snapshot?.commit_sha?.slice(0, 12) || item.snapshot_id || '—'}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border bg-muted/20 p-3">
+                        <div className="text-xs uppercase tracking-wide text-muted-foreground/80">卡片</div>
+                        <div className="mt-1 font-medium text-foreground">{item.card?.title || item.card_id || '—'}</div>
+                      </div>
+                    </div>
+                  </div>
                 )
               })}
             </div>
           )}
-        </div>
+        </section>
 
-        <div className="mt-4 flex justify-end">
-          <Button color="primary" isLoading={submitting} onPress={onSearch}>
-            开始搜索
-          </Button>
-        </div>
-      </section>
-
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-muted-foreground">
-          搜索结果
-          {lastQueryAt ? (
-            <Chip variant="bordered" size="sm">
-              更新于 {formatRelativeTime(lastQueryAt)}
-            </Chip>
-          ) : null}
-        </div>
-
-        {searchError ? (
-          <Alert color="danger" title="模式搜索失败" description={searchError} />
-        ) : submitting ? (
-          <PatternSearchSkeleton />
-        ) : results.length === 0 ? (
-          <div className="rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
-            还没有搜索结果。先输入一个自然语言问题试试。
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {results.map((item, index) => {
-              const repository = item.repository ?? repositoriesById.get(item.repository_id)
-              return (
-                <div key={item.result_id || `${item.repository_id}-${item.card_id || index}`} className="rounded-2xl border bg-card p-5 shadow-sm">
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-base font-semibold">{item.title || item.card?.title || '未命名结果'}</div>
-                        <Chip variant="flat" size="sm">
-                          相关度 {formatScore(item.score)}
-                        </Chip>
-                        {item.card?.card_type ? (
-                          <Chip variant="bordered" size="sm">
-                            {item.card.card_type}
-                          </Chip>
-                        ) : null}
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        {item.summary || item.card?.summary || item.rationale || '暂无摘要'}
-                      </div>
-                    </div>
-
-                    <Button variant="flat" size="sm" onPress={() => goToRepoLibraryRepository(item.repository_id)}>
-                      打开仓库详情
-                    </Button>
-                  </div>
-
-                  <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
-                    <div className="rounded-xl border bg-muted/20 p-3">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground/80">仓库</div>
-                      <div className="mt-1 font-medium text-foreground">
-                        {repository?.full_name || item.repository_id}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border bg-muted/20 p-3">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground/80">快照</div>
-                      <div className="mt-1 font-medium text-foreground">
-                        {item.snapshot?.resolved_ref || item.snapshot?.commit_sha?.slice(0, 12) || item.snapshot_id || '—'}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border bg-muted/20 p-3">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground/80">卡片</div>
-                      <div className="mt-1 font-medium text-foreground">{item.card?.title || item.card_id || '—'}</div>
-                    </div>
-                  </div>
-
-                  {item.evidence_preview && item.evidence_preview.length > 0 ? (
-                    <div className="mt-4 space-y-2">
-                      <div className="text-sm font-medium">Evidence 预览</div>
-                      {item.evidence_preview.slice(0, 2).map((evidence) => (
-                        <div
-                          key={evidence.evidence_id || `${evidence.source_path}-${evidence.start_line ?? 'na'}`}
-                          className="rounded-xl border bg-muted/20 p-4"
-                        >
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            <code>{evidence.source_path}</code>
-                            {typeof evidence.start_line === 'number' ? (
-                              <Chip variant="bordered" size="sm">
-                                {evidence.start_line}
-                                {typeof evidence.end_line === 'number' && evidence.end_line !== evidence.start_line ? `-${evidence.end_line}` : ''}
-                              </Chip>
-                            ) : null}
-                            {evidence.label ? <Chip variant="flat" size="sm">{evidence.label}</Chip> : null}
-                          </div>
-                          {evidence.excerpt ? (
-                            <pre className="mt-3 whitespace-pre-wrap rounded-lg border bg-background p-3 text-xs leading-6">
-                              {evidence.excerpt}
-                            </pre>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </section>
-    </RepoLibraryLayout>
+        <LoadingVeil visible={submitting && hasSearchCache} label="正在刷新检索结果…" />
+      </div>
+    </RepoLibraryShell>
   )
 }

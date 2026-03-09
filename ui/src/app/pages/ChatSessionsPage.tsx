@@ -1,10 +1,16 @@
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Chip, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Select, SelectItem, Switch } from '@heroui/react'
-import { ArrowUp, Eye, Plus, Trash2, X } from 'lucide-react'
+import { Alert, Button, Chip, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Input, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, Select, SelectItem, Switch } from '@heroui/react'
+import { ArrowUp, ChevronUp, Eye, Plus, Trash2, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 import { goToChat } from '@/app/routes'
+import { RuntimeIdentityMark } from '@/app/components/RuntimeIdentityMark'
+import { OpenAIIcon } from '@/app/components/OpenAIIcon'
+import { AnthropicIcon } from '@/app/components/AnthropicIcon'
+import { OpenCodeIcon } from '@/app/components/OpenCodeIcon'
+import { IFlowIcon } from '@/app/components/IFlowIcon'
+import { WorkspacePortal } from '@/app/components/WorkspaceShell'
 import { onWsEnvelope } from '@/lib/wsBus'
 import {
   chatAttachmentContentUrl,
@@ -39,6 +45,7 @@ function shouldUseFullWidth(text: string): boolean {
     value.includes('\t')
   )
 }
+
 
 function formatTokenUsage(opts: {
   tokenIn?: number
@@ -91,6 +98,13 @@ type ChatSessionsPageProps = {
 type RuntimeSelectionMeta = {
   expert_id?: string
   provider?: string
+  cli_tool_id?: string
+} | null | undefined
+
+type IdentityMeta = {
+  expert_id?: string
+  provider?: string
+  model?: string
   cli_tool_id?: string
 } | null | undefined
 
@@ -335,6 +349,16 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const activeSessionCliToolId =
     activeSession?.cli_tool_id?.trim() ||
     (effectiveTurnRuntime?.kind === 'cli' ? effectiveTurnRuntime.cliToolId?.trim() || '' : '')
+  const isCodexIdentity = useCallback(
+    (meta?: IdentityMeta) => {
+      const cliToolId = meta?.cli_tool_id?.trim() || ''
+      if (cliToolId) return isCodexToolId(cliToolId)
+      const runtime = runtimeOptionsByKey.get(inferRuntimeKey(meta))
+      if (!runtime || runtime.kind !== 'cli') return false
+      return isCodexToolId(runtime.cliToolId)
+    },
+    [inferRuntimeKey, isCodexToolId, runtimeOptionsByKey],
+  )
   const effectiveTurnReasoningEffort = useMemo(
     () => normalizeCodexReasoningEffort(turnReasoningEffort || activeSession?.reasoning_effort),
     [activeSession?.reasoning_effort, turnReasoningEffort],
@@ -1056,31 +1080,32 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
 
   return (
     <>
-      <div className="grid h-full min-h-0 w-full grid-cols-1 gap-3 lg:grid-cols-[272px_minmax(0,1fr)]">
-        <section className="flex min-h-0 flex-col overflow-hidden rounded-[28px] border bg-card/70 p-3 shadow-sm">
-          <div className="mb-3 flex items-start justify-between gap-3 px-1">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold">会话</div>
-              <div className="mt-1 text-xs text-muted-foreground">选择或创建一个对话工作区</div>
-            </div>
-            <Chip size="sm" variant="flat">
+      <WorkspacePortal target="sidebarHeader">
+        <div className="mb-3 flex items-center justify-between gap-3 px-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="text-sm font-semibold">会话</div>
+            <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-default-100 px-2 text-xs font-medium text-muted-foreground">
               {visibleSessions.length}
-            </Chip>
+            </span>
           </div>
 
           <Button
             color="primary"
             size="sm"
-            className="w-full"
-            startContent={<Plus className="h-4 w-4" />}
+            className="w-[25%] min-w-[86px] rounded-2xl"
+            startContent={<Plus className="h-4 w-4 shrink-0 stroke-[3]" />}
             onPress={() => setNewSessionModalOpen(true)}
           >
             新建会话
           </Button>
+        </div>
+      </WorkspacePortal>
 
-          {error ? <Alert color="danger" title="加载失败" description={error} className="mt-3" /> : null}
+      <WorkspacePortal target="sidebarBody">
+        <>
+          {error ? <Alert color="danger" title="加载失败" description={error} className="mb-3" /> : null}
 
-          <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-auto pr-1">
+          <div className="space-y-2">
             {loading ? (
               <div className="rounded-2xl border border-dashed px-3 py-4 text-xs text-muted-foreground">加载中…</div>
             ) : visibleSessions.length === 0 ? (
@@ -1098,61 +1123,77 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                     selectSession(s)
                   }}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">{s.title}</div>
-                      <div className="mt-1 truncate text-[11px] text-muted-foreground">{s.session_id}</div>
+                  <>
+                    <div className="flex items-center gap-2">
+                      <RuntimeIdentityMark
+                        codex={isCodexIdentity(s)}
+                        provider={s.provider}
+                        cliFamily={s.cli_tool_id ? (toolsById.get(s.cli_tool_id)?.cli_family || '') : ''}
+                        className="h-4 w-4 shrink-0 text-muted-foreground"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium">{s.title}</div>
+                          </div>
+                          <span
+                            className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-danger/10 hover:text-danger"
+                            title="删除会话"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void onDeleteSession(s.session_id)
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" focusable="false" />
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <span
-                      className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-danger/10 hover:text-danger"
-                      title="删除会话"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        void onDeleteSession(s.session_id)
-                      }}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" focusable="false" />
-                    </span>
-                  </div>
-                  <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                    <span className="truncate">{s.provider}/{s.model}</span>
-                    <span className="shrink-0">{formatRelativeTime(s.updated_at)}</span>
-                  </div>
+                    <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <span className="truncate">{s.provider}/{s.model}</span>
+                      <span className="shrink-0">{formatRelativeTime(s.updated_at)}</span>
+                    </div>
+                  </>
                 </button>
               ))
             )}
           </div>
-        </section>
+        </>
+      </WorkspacePortal>
 
-        <section className="flex min-h-0 flex-col overflow-hidden rounded-[30px] border bg-card/70 shadow-sm">
-          <div className="flex shrink-0 items-start justify-between gap-3 border-b bg-background/60 px-5 py-4 md:px-6">
-            <div className="min-w-0">
-              <div className="truncate text-base font-semibold">
-                {activeSession ? activeSession.title : '请选择或创建会话'}
-              </div>
-              <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-                {activeSession ? (
-                  <>
-                    <span className="truncate">{activeSession.session_id}</span>
-                    {activeSessionIdentity ? <span>· {activeSessionIdentity}</span> : null}
-                  </>
-                ) : (
-                  <span>左侧创建会话后即可开始对话</span>
-                )}
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {activeSession ? (
-                <Chip size="sm" variant="flat">
-                  {activeSession.status}
-                </Chip>
-              ) : null}
-              <Button size="sm" variant="light" isDisabled={!activeSessionId} onPress={() => void onFork()}>
-                分叉
-              </Button>
-            </div>
-          </div>
+      <WorkspacePortal target="headerMeta">
+        <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+          {activeSession ? (
+            <>
+              <span className="truncate">{activeSession.session_id}</span>
+              {activeSessionIdentity ? <span className="truncate">· {activeSessionIdentity}</span> : null}
+            </>
+          ) : (
+            <span>左侧创建会话后即可开始对话</span>
+          )}
+        </div>
+      </WorkspacePortal>
 
+      <WorkspacePortal target="headerTitle">
+        <div className="truncate text-base font-semibold">
+          {activeSession ? activeSession.title : '请选择或创建会话'}
+        </div>
+      </WorkspacePortal>
+
+      <WorkspacePortal target="headerActions">
+        <div className="flex min-w-0 items-center justify-self-end gap-2">
+          {activeSession ? (
+            <Chip size="sm" variant="flat">
+              {activeSession.status}
+            </Chip>
+          ) : null}
+          <Button size="sm" variant="light" isDisabled={!activeSessionId} onPress={() => void onFork()}>
+            分叉
+          </Button>
+        </div>
+      </WorkspacePortal>
+
+      <WorkspacePortal target="content">
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background/30">
             <div ref={messageScrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8">
               <div className="mx-auto flex w-full max-w-[880px] flex-col gap-5">
@@ -1209,8 +1250,24 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                         } ${fullWidth ? 'w-full' : isUser ? 'max-w-[78%]' : 'max-w-[90%]'}`}
                       >
                         <div className="mb-1 text-[11px] font-medium text-muted-foreground">
-                          {isUser ? '你' : 'AI'}
-                          {identity ? ` · ${identity}` : ''}
+                          {isUser ? (
+                            <>
+                              你{identity ? ` · ${identity}` : ''}
+                            </>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <RuntimeIdentityMark
+                                codex={isCodexIdentity({
+                                  expert_id: m.expert_id,
+                                  provider: m.provider,
+                                  model: m.model,
+                                })}
+                                provider={m.provider}
+                                className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                              />
+                              <span>{identity || '助手'}</span>
+                            </div>
+                          )}
                         </div>
                         {showThinkingDrawer ? (
                           <details className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
@@ -1299,8 +1356,13 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                         <ChatTurnFeedView feed={activeTurnFeed} pending identity={pendingIdentity} />
                       ) : (
                         <>
-                          <div className="mb-1 text-[11px] font-medium text-muted-foreground">
-                            AI{pendingIdentity ? ` · ${pendingIdentity}` : ''} {streaming ? '回复中' : '思考中'}
+                          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                            <RuntimeIdentityMark
+                              codex={isCodexIdentity(pendingMeta)}
+                              provider={pendingMeta?.provider}
+                              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                            />
+                            <span>{pendingIdentity || '助手'} · {streaming ? '回复中' : '思考中'}</span>
                           </div>
                           {displayedThinking.trim() ? (
                             <details className="mb-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs">
@@ -1331,7 +1393,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
               </div>
             </div>
 
-            <div className="shrink-0 border-t bg-background/80 px-4 py-2.5 backdrop-blur md:px-8">
+            <div className="shrink-0 bg-background/80 px-4 py-2.5 backdrop-blur md:px-8">
               <div className="mx-auto w-full max-w-[880px]">
                 <div
                   className={`rounded-[28px] border bg-background p-2 shadow-sm transition ${dragActive ? 'border-primary bg-primary/5' : 'border-default-200/80'}`}
@@ -1386,100 +1448,170 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                     </div>
                   ) : null}
 
-                  <div className="grid items-stretch gap-2 md:grid-cols-[minmax(0,1fr)_190px]">
-                    <div className="min-w-0 md:flex md:min-h-0 md:h-full md:self-stretch">
-                      <textarea
-                        value={input}
-                        onChange={(event) => setInput(event.currentTarget.value)}
-                        placeholder="输入消息或上传附件..."
-                        disabled={!activeSessionId || sending}
-                        aria-label="消息输入框"
-                        className="min-h-[96px] w-full resize-none overflow-y-auto rounded-[22px] border border-default-200/80 bg-background px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60 md:h-full md:min-h-0 md:flex-1"
-                      />
-                    </div>
+                  <div className="flex flex-col gap-2">
+                    <textarea
+                      value={input}
+                      onChange={(event) => setInput(event.currentTarget.value)}
+                      placeholder="输入消息或上传附件..."
+                      disabled={!activeSessionId || sending}
+                      aria-label="消息输入框"
+                      className="min-h-[96px] w-full resize-none overflow-y-auto rounded-[22px] border border-default-200/80 bg-background px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+                    />
 
-                    <div className="flex flex-col gap-1.5 md:w-[190px] md:min-w-[190px]">
-                      <Select
-                        aria-label="本条运行时"
-                        placeholder="选择运行时"
-                        selectedKeys={effectiveTurnRuntimeKey ? new Set([effectiveTurnRuntimeKey]) : new Set()}
-                        onSelectionChange={(keys) => {
-                          if (keys === 'all') return
-                          const first = keys.values().next().value
-                          if (typeof first === 'string') setTurnExpertId(first)
-                        }}
-                        size="sm"
-                        disallowEmptySelection
-                        isDisabled={!activeSessionId || sending || runtimeOptions.length === 0}
-                        className="w-full"
-                      >
-                        {runtimeOptions.map((runtime) => (
-                          <SelectItem key={runtime.key}>{runtime.label}</SelectItem>
-                        ))}
-                      </Select>
+                    <div className="relative flex items-center gap-2">
+                      {/* CLI/SDK 圆形图标选择器（固定总宽，容纳展开动画） */}
+                      <div className="flex w-[320px] shrink-0 items-center gap-1">
+                        {runtimeOptions.map((runtime) => {
+                          const isSelected = effectiveTurnRuntimeKey === runtime.key
+                          const isDisabled = !activeSessionId || sending
+                          const isCodex = runtime.kind === 'cli' && runtime.cliToolId ? isCodexToolId(runtime.cliToolId) : false
+                          const isClaude = runtime.kind === 'cli' && (runtime.provider || '').trim() === 'anthropic'
+                          const isSdkOpenAI = runtime.kind === 'sdk' && runtime.provider === 'openai'
+                          const isSdkAnthropic = runtime.kind === 'sdk' && runtime.provider === 'anthropic'
+                          const cliFamily = runtime.kind === 'cli' ? (runtime.cliToolId ? (toolsById.get(runtime.cliToolId)?.cli_family || '') : '') : ''
+                          const isIFlow = cliFamily === 'iflow' || (runtime.kind === 'cli' && runtime.provider === 'iflow')
+                          const isOpenCode = cliFamily === 'opencode'
+                          return (
+                            <button
+                              key={runtime.key}
+                              type="button"
+                              title={runtime.label}
+                              disabled={isDisabled}
+                              onClick={() => { if (!isDisabled) setTurnExpertId(runtime.key) }}
+                              style={{ transition: 'width 0.25s ease, background 0.2s ease, border-color 0.2s ease' }}
+                              className={`flex h-8 shrink-0 items-center overflow-hidden rounded-full border-2 ${
+                                isSelected ? 'gap-1.5 px-2' : 'w-8 justify-center px-0'
+                              } ${
+                                isSelected
+                                  ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-400/50 dark:bg-blue-950/40'
+                                  : 'border-default-200/80 bg-background hover:border-blue-400/60 hover:bg-blue-50/50 dark:hover:bg-blue-950/20'
+                              } ${isDisabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}
+                            >
+                              <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                                {isOpenCode ? (
+                                  <OpenCodeIcon className="h-4 w-4" />
+                                ) : isIFlow ? (
+                                  <IFlowIcon className="h-4 w-4" />
+                                ) : isCodex || isSdkOpenAI ? (
+                                  <OpenAIIcon className="h-4 w-4" />
+                                ) : isClaude || isSdkAnthropic ? (
+                                  <AnthropicIcon className="h-4 w-4" />
+                                ) : (
+                                  <span className="text-[10px] font-semibold leading-none text-muted-foreground">
+                                    {(runtime.label || '?').slice(0, 2).toUpperCase()}
+                                  </span>
+                                )}
+                              </span>
+                              <span
+                                style={{
+                                  maxWidth: isSelected ? '100px' : '0px',
+                                  opacity: isSelected ? 1 : 0,
+                                  transition: 'max-width 0.25s ease, opacity 0.2s ease',
+                                }}
+                                className="flex-1 overflow-hidden whitespace-nowrap text-center text-xs font-medium text-blue-700 dark:text-blue-300"
+                              >
+                                {runtime.label.replace(/\s*CLI\s*/i, '').trim() || runtime.label}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
 
-                      <Select
-                        aria-label="本条模型"
-                        placeholder="选择模型"
-                        selectedKeys={effectiveTurnModelId ? new Set([effectiveTurnModelId]) : new Set()}
-                        renderValue={() => {
-                          const selected = modelsForRuntime(effectiveTurnRuntimeKey).find((model) => model.id === effectiveTurnModelId)
-                          return selected ? `${selected.label || selected.id} · ${selected.model}` : ''
-                        }}
-                        onSelectionChange={(keys) => {
-                          if (keys === 'all') return
-                          const first = keys.values().next().value
-                          if (typeof first === 'string') setTurnModelId(first)
-                        }}
-                        size="sm"
-                        disallowEmptySelection
-                        isDisabled={!activeSessionId || sending || modelsForRuntime(effectiveTurnRuntimeKey).length === 0}
-                        className="w-full"
-                      >
-                        {modelsForRuntime(effectiveTurnRuntimeKey).map((model) => (
-                          <SelectItem key={model.id}>{model.label || model.id} · {model.model}</SelectItem>
-                        ))}
-                      </Select>
+                      {/* 模型选择 + 思考程度（绝对居中于整个输入区）*/}
+                      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                        <div className="pointer-events-auto">
+                        {/* 模型+思考程度 合并下拉 */}
+                        <Dropdown placement="top">
+                          <DropdownTrigger>
+                            <Button
+                              variant="flat"
+                              size="sm"
+                              endContent={<ChevronUp className="h-3.5 w-3.5 shrink-0" />}
+                              isDisabled={!activeSessionId || sending || modelsForRuntime(effectiveTurnRuntimeKey).length === 0}
+                              className="h-8 w-[200px] shrink-0 justify-center rounded-full px-3 text-xs"
+                            >
+                              <span className="truncate">
+                                {(() => {
+                                  const selected = modelsForRuntime(effectiveTurnRuntimeKey).find((m) => m.id === effectiveTurnModelId)
+                                  const modelLabel = selected ? (selected.label || selected.id) : '选择模型'
+                                  return isTurnCodexRuntime ? `${modelLabel} · ${effectiveTurnReasoningEffort}` : modelLabel
+                                })()}
+                              </span>
+                            </Button>
+                          </DropdownTrigger>
+                          <DropdownMenu
+                            aria-label="模型与思考程度选择"
+                            classNames={{ base: 'p-0', list: 'p-0' }}
+                            itemClasses={{ base: 'p-0 data-[hover=true]:bg-transparent rounded-none' }}
+                          >
+                            <DropdownItem key="model-thinking-panel" textValue="模型与思考程度">
+                              <div className="flex min-w-[360px] divide-x divide-default-200">
+                                {/* 左：模型列表 */}
+                                <div className="flex flex-1 flex-col py-1">
+                                  <div className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground">模型</div>
+                                  {modelsForRuntime(effectiveTurnRuntimeKey).map((model) => (
+                                    <button
+                                      key={model.id}
+                                      type="button"
+                                      onClick={() => setTurnModelId(model.id)}
+                                      className={`flex w-full flex-col px-3 py-1.5 text-left text-xs transition hover:bg-default-100 ${
+                                        effectiveTurnModelId === model.id ? 'bg-primary/8 font-medium text-primary' : 'text-foreground'
+                                      }`}
+                                    >
+                                      <span>{model.label || model.id}</span>
+                                      <span className="text-[10px] text-muted-foreground">{model.model}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                                {/* 右：思考程度（仅 Codex） */}
+                                {isTurnCodexRuntime && (
+                                  <div className="flex w-[110px] shrink-0 flex-col py-1">
+                                    <div className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground">思考程度</div>
+                                    {codexReasoningEffortOptions.map((effort) => (
+                                      <button
+                                        key={effort}
+                                        type="button"
+                                        onClick={() => setTurnReasoningEffort(effort)}
+                                        className={`flex w-full items-center px-3 py-1.5 text-xs transition hover:bg-default-100 ${
+                                          effectiveTurnReasoningEffort === effort ? 'bg-primary/8 font-medium text-primary' : 'text-foreground'
+                                        }`}
+                                      >
+                                        {effort}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </DropdownItem>
+                          </DropdownMenu>
+                        </Dropdown>
+                        </div>
+                      </div>
 
-                      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1.5">
-                        <Select
-                          aria-label="思考程度"
-                          placeholder="思考"
-                          selectedKeys={new Set([effectiveTurnReasoningEffort])}
-                          onSelectionChange={(keys) => {
-                            if (keys === 'all') return
-                            const first = keys.values().next().value
-                            if (typeof first === 'string') setTurnReasoningEffort(first)
-                          }}
-                          size="sm"
-                          disallowEmptySelection
-                          isDisabled={!activeSessionId || sending || !isTurnCodexRuntime}
-                          title={isTurnCodexRuntime ? '思考程度' : '仅 Codex CLI 支持思考程度'}
-                          className="min-w-0"
-                        >
-                          {codexReasoningEffortOptions.map((effort) => (
-                            <SelectItem key={effort}>{effort}</SelectItem>
-                          ))}
-                        </Select>
+                      {/* 添加附件 + 发送（绝对定位到最右侧）*/}
+                      <div className="ml-auto flex shrink-0 items-center gap-2">
+                        {/* 添加附件 */}
                         <Button
                           variant="flat"
                           size="sm"
                           radius="full"
-                          isIconOnly
-                          className="h-8 min-w-8"
-                          aria-label="上传附件"
-                          title="上传附件"
+                          className="h-8 shrink-0 px-3"
+                          aria-label="添加附件"
+                          title="添加附件"
                           isDisabled={!activeSessionId || sending}
                           onPress={openFilePicker}
+                          startContent={<Plus className="h-3.5 w-3.5" />}
                         >
-                          <Plus className="h-4 w-4" />
+                          添加附件
                         </Button>
+
+                        {/* 发送 */}
                         <Button
                           color="primary"
                           size="sm"
                           radius="full"
                           isIconOnly
-                          className="h-8 min-w-8"
+                          className="h-8 min-w-8 shrink-0"
                           aria-label={sending ? '发送中' : '发送消息'}
                           title={sending ? '发送中…' : '发送消息'}
                           isLoading={sending}
@@ -1497,8 +1629,9 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
               </div>
             </div>
           </div>
-        </section>
-      </div>
+
+      </WorkspacePortal>
+
       <AttachmentPreviewModal preview={preview} onClose={closePreview} />
 
       <Modal isOpen={newSessionModalOpen} onOpenChange={setNewSessionModalOpen} classNames={{ base: 'w-[550px] max-w-[550px] h-[550px] max-h-[550px]' }}>
@@ -1553,10 +1686,10 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                     ))}
                   </Select>
                 </div>
-                {newSessionMCPServers.length > 0 ? (
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">MCP 服务器</div>
-                    <div className="grid gap-2 grid-cols-2">
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">MCP 服务器</div>
+                  {newSessionMCPServers.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-2">
                       {newSessionMCPServers.map((server) => {
                         const selected = normalizedNewSessionMCPServerIDs.includes(server.id)
                         return (
@@ -1575,8 +1708,12 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                         )
                       })}
                     </div>
-                  </div>
-                ) : null}
+                  ) : (
+                    <div className="rounded-xl border border-dashed bg-background/40 px-3 py-3 text-sm text-muted-foreground">
+                      当前未添加任何 MCP
+                    </div>
+                  )}
+                </div>
               </ModalBody>
               <ModalFooter>
                 <Button variant="light" onPress={() => setNewSessionModalOpen(false)}>取消</Button>

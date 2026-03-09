@@ -54,6 +54,11 @@
 | `ui/src/app/pages/RepoLibraryRepositoriesPage.tsx` | Repo Library 仓库列表与 Analyze Repo 表单 |
 | `ui/src/app/pages/RepoLibraryRepositoryDetailPage.tsx` | Repo Library 仓库详情：snapshots、analysis runs、report、cards、evidence、execution log |
 | `ui/src/app/pages/RepoLibraryPatternSearchPage.tsx` | Repo Library Pattern Search：自然语言搜索与结果跳转 |
+| `ui/src/app/components/WorkspaceShell.tsx` | 顶级共享工作区壳：固定左侧主导航与状态区，提供右侧标题/内容 portal 挂载点，承接 Chat / Orchestrations / Repo Library |
+| `ui/src/app/components/RepoLibraryShell.tsx` | Repo Library 共享壳适配层：把仓库侧栏、页头与右侧内容通过 portal 挂载到 `WorkspaceShell` |
+| `ui/src/app/components/LoadingVeil.tsx` | 共享轻量刷新遮罩：在保留旧内容时给侧栏/主内容区提供非打断式 loading 反馈 |
+| `ui/src/stores/repoLibraryUIStore.ts` | Repo Library 跨路由 UI 缓存：保留仓库列表、检索结果与仓库详情快照，支撑 stale-while-revalidate 过渡 |
+| `ui/src/stores/orchestrationUIStore.ts` | Orchestrations 跨路由 UI 缓存：保留最近编排列表与详情快照，避免切换时闪空 |
 | `backend/cmd/vibe-tree-daemon/main.go`     | daemon 进程入口，负责加载配置、启动 HTTP Server、处理优雅退出                                                                         |
 | `backend/internal/server/server.go`        | Gin Engine 装配：恢复中间件、请求日志、dev CORS，并挂载 `internal/api` 路由；可选挂载 UI 静态资源（`ui/dist` 或 `VIBE_TREE_UI_DIST`） |
 | `backend/internal/api/api.go`              | HTTP/WS handlers：health、workflow CRUD、execution start/log/cancel、WebSocket 升级入口                                               |
@@ -121,6 +126,8 @@
 | `backend/internal/version/version.go`      | 版本信息（Commit/BuiltAt，可用 ldflags 注入；用于 `/api/v1/info`）                                                                    |
 | `ui/src/App.tsx`                           | 前端入口：daemon health + WS 连接管理 + 路由（`#/orchestrations` 主入口、`#/chat`、隐藏兼容的 legacy workflow 路由）                 |
 | `ui/src/app/pages/OrchestrationsPage.tsx`  | Orchestrations 首页：顶部 goal 输入区 + orchestration 列表                                                                            |
+| `ui/src/app/components/OrchestrationsShell.tsx` | Orchestrations 共享壳适配层：把最近编排侧栏、页头与内容通过 portal 挂载到 `WorkspaceShell` |
+| `ui/src/stores/orchestrationUIStore.ts` | Orchestrations 跨路由 UI 缓存：保留最近编排列表与详情快照，避免页面切换时闪空 |
 | `ui/src/app/pages/OrchestrationDetailPage.tsx` | Orchestration 详情页：按 round 展示并行 agent 卡片、详情面板、日志、artifact、continue/retry/cancel 控制                    |
 | `ui/src/app/pages/ChatSessionsPage.tsx`    | Chat 会话页：会话列表、结构化 turn feed 渲染、消息流式渲染、发送消息/上传附件、拖拽上传、附件预览、手动压缩/分叉/归档，以及新建/当前会话的 MCP 选择与保存 |
 | `ui/src/app/components/chat/ChatTurnFeed.tsx` | Chat turn feed 组件：按 thinking/tool/plan/question/progress/answer 分层渲染 Codex 运行时条目 |
@@ -210,7 +217,7 @@
 | Workflow DAG 视图（React Flow）    | `ui/src/components/DAGView.tsx`, `ui/src/App.tsx`                                                                                                                                                                                          |
 | health/workflow/execution API 封装 | `ui/src/lib/daemon.ts`                                                                                                                                                                                                                     |
 | 终端渲染与路由                     | `ui/src/components/TerminalPane.tsx`, `ui/src/App.tsx`                                                                                                                                                                                     |
-| Chat 会话 UI                       | `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/app/components/chat/ChatTurnFeed.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/chatTurnFeed.ts`, `ui/src/App.tsx`, `ui/src/app/components/Topbar.tsx`                                                                                                                       |
+| Chat 会话 UI                       | `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/app/components/WorkspaceShell.tsx`, `ui/src/app/components/chat/ChatTurnFeed.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/chatTurnFeed.ts`, `ui/src/App.tsx`, `ui/src/app/components/Topbar.tsx`                                                                                                                       |
 | 本地一键启动                       | `scripts/dev.sh`                                                                                                                                                                                                                           |
 | Web 单进程启动（daemon 托管 UI）   | `scripts/web.sh`, `backend/internal/server/server.go`                                                                                                                                                                                      |
 | UI 开发端口代理与构建配置          | `ui/vite.config.ts`, `ui/package.json`                                                                                                                                                                                                     |

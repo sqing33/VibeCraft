@@ -1,7 +1,8 @@
 import { useEffect } from 'react'
 
-import { useHashRoute } from '@/app/routes'
+import { type Route, useHashRoute } from '@/app/routes'
 import { Topbar } from '@/app/components/Topbar'
+import { WorkspaceShell } from '@/app/components/WorkspaceShell'
 import { ChatSessionsPage } from '@/app/pages/ChatSessionsPage'
 import { OrchestrationDetailPage } from '@/app/pages/OrchestrationDetailPage'
 import { OrchestrationsPage } from '@/app/pages/OrchestrationsPage'
@@ -15,6 +16,44 @@ import { emitWsEnvelope } from '@/lib/wsBus'
 import { parseWsEnvelope } from '@/lib/ws'
 import { useDaemonStore } from '@/stores/daemonStore'
 
+function isWorkspaceRoute(route: Route): boolean {
+  return (
+    route.name === 'chat' ||
+    route.name === 'orchestrations' ||
+    route.name === 'orchestration_detail' ||
+    route.name === 'repo_library_repositories' ||
+    route.name === 'repo_library_repository_detail' ||
+    route.name === 'repo_library_pattern_search'
+  )
+}
+
+function workspaceNavForRoute(route: Route): 'chat' | 'orchestrations' | 'repo_library' {
+  if (route.name === 'chat') return 'chat'
+  if (
+    route.name === 'repo_library_repositories' ||
+    route.name === 'repo_library_repository_detail' ||
+    route.name === 'repo_library_pattern_search'
+  ) {
+    return 'repo_library'
+  }
+  return 'orchestrations'
+}
+
+function renderRoute(route: Route) {
+  if (route.name === 'orchestrations') return <OrchestrationsPage />
+  if (route.name === 'orchestration_detail') {
+    return <OrchestrationDetailPage orchestrationId={route.orchestrationId} />
+  }
+  if (route.name === 'repo_library_repositories') return <RepoLibraryRepositoriesPage />
+  if (route.name === 'repo_library_pattern_search') return <RepoLibraryPatternSearchPage />
+  if (route.name === 'repo_library_repository_detail') {
+    return <RepoLibraryRepositoryDetailPage repositoryId={route.repositoryId} />
+  }
+  if (route.name === 'workflows') return <WorkflowsPage />
+  if (route.name === 'chat') return <ChatSessionsPage sessionId={route.sessionId} />
+  return <WorkflowDetailPage workflowId={route.workflowId} />
+}
+
 /**
  * 功能：应用入口（App Shell + 路由），并集中维护 daemon health 与 WS 连接状态。
  * 参数/返回：无入参；返回 React 组件树。
@@ -23,7 +62,7 @@ import { useDaemonStore } from '@/stores/daemonStore'
  */
 export default function App() {
   const route = useHashRoute()
-  const isChatRoute = route.name === 'chat'
+  const workspaceRoute = isWorkspaceRoute(route)
 
   const daemonUrl = useDaemonStore((s) => s.daemonUrl)
   const wsUrl = useDaemonStore((s) => s.wsUrl)
@@ -136,31 +175,15 @@ export default function App() {
   }, [wsUrl, setWsState])
 
   return (
-    <div className={isChatRoute ? 'h-screen overflow-hidden' : 'min-h-screen'}>
-      <Topbar />
-      <main
-        className={
-          isChatRoute
-            ? 'h-[calc(100vh-3.5rem)] w-full overflow-hidden px-3 py-3 md:px-4 md:py-4'
-            : 'mx-auto max-w-6xl p-4'
-        }
-      >
-        {route.name === 'orchestrations' ? (
-          <OrchestrationsPage />
-        ) : route.name === 'repo_library_repositories' ? (
-          <RepoLibraryRepositoriesPage />
-        ) : route.name === 'repo_library_pattern_search' ? (
-          <RepoLibraryPatternSearchPage />
-        ) : route.name === 'repo_library_repository_detail' ? (
-          <RepoLibraryRepositoryDetailPage repositoryId={route.repositoryId} />
-        ) : route.name === 'workflows' ? (
-          <WorkflowsPage />
-        ) : route.name === 'chat' ? (
-          <ChatSessionsPage sessionId={route.sessionId} />
-        ) : route.name === 'orchestration_detail' ? (
-          <OrchestrationDetailPage orchestrationId={route.orchestrationId} />
+    <div className={workspaceRoute ? 'h-screen overflow-hidden' : 'min-h-screen'}>
+      {workspaceRoute ? null : <Topbar />}
+      <main className={workspaceRoute ? 'h-full w-full overflow-hidden p-[5px]' : 'mx-auto max-w-6xl p-4'}>
+        {workspaceRoute ? (
+          <WorkspaceShell activeNav={workspaceNavForRoute(route)}>
+            {renderRoute(route)}
+          </WorkspaceShell>
         ) : (
-          <WorkflowDetailPage workflowId={route.workflowId} />
+          renderRoute(route)
         )}
       </main>
     </div>

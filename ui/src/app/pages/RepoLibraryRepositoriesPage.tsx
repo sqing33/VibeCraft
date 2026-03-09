@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Selection } from '@react-types/shared'
 import { Alert, Button, Chip, Input, Select, SelectItem, Skeleton, Textarea } from '@heroui/react'
-import { FolderGit2, RefreshCcw, Search, Sparkles } from 'lucide-react'
+import { Plus, RefreshCcw, Search, Sparkles } from 'lucide-react'
 
-import {
-  goToRepoLibraryPatternSearch,
-  goToRepoLibraryRepository,
-} from '@/app/routes'
+import { goToRepoLibraryPatternSearch, goToRepoLibraryRepository } from '@/app/routes'
 import {
   cliToolProtocolFamilies,
   createRepoLibraryAnalysis,
@@ -16,16 +13,17 @@ import {
   type LLMModelProfile,
   type RepoLibraryAnalysisRequest,
   type RepoLibraryAnalysisRun,
-  type RepoLibraryDepth,
   type RepoLibraryCreateAnalysisResponse,
-  type RepoLibraryRepositorySummary,
+  type RepoLibraryDepth,
 } from '@/lib/daemon'
 import { buildCLIToolModelProfiles, cliToolDefaultModelID } from '@/lib/cliToolModels'
 import { formatRelativeTime } from '@/lib/time'
 import { toast } from '@/lib/toast'
 import { useDaemonStore } from '@/stores/daemonStore'
+import { useRepoLibraryUIStore } from '@/stores/repoLibraryUIStore'
 
-import { RepoLibraryLayout } from './RepoLibraryLayout'
+import { LoadingVeil } from '@/app/components/LoadingVeil'
+import { RepoLibraryShell, RepoLibrarySidebarRepositoryItem } from '@/app/components/RepoLibraryShell'
 
 function selectionToString(keys: Selection) {
   if (keys === 'all') return ''
@@ -57,79 +55,11 @@ function analysisStatusColor(status: string): 'default' | 'success' | 'danger' |
 
 function EmptyRepositories() {
   return (
-    <div className="space-y-3">
-      <Skeleton className="h-28 w-full rounded-xl" />
-      <Skeleton className="h-28 w-full rounded-xl" />
-      <Skeleton className="h-28 w-full rounded-xl" />
+    <div className="space-y-2">
+      <Skeleton className="h-[58px] w-full rounded-[22px]" />
+      <Skeleton className="h-[58px] w-full rounded-[22px]" />
+      <Skeleton className="h-[58px] w-full rounded-[22px]" />
     </div>
-  )
-}
-
-function RepositoryCard(props: { item: RepoLibraryRepositorySummary }) {
-  const { item } = props
-  const latestAnalysis = item.latest_analysis ?? null
-  const latestSnapshot = item.latest_snapshot ?? null
-
-  return (
-    <button
-      type="button"
-      className="w-full rounded-2xl border bg-card p-4 text-left shadow-sm transition hover:border-primary/40 hover:bg-muted/20"
-      onClick={() => goToRepoLibraryRepository(item.repository_id)}
-    >
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="text-base font-semibold">{item.full_name || item.repo_url}</div>
-            {latestAnalysis ? (
-              <Chip color={analysisStatusColor(latestAnalysis.status)} variant="flat" size="sm">
-                {formatAnalysisStatus(latestAnalysis.status)}
-              </Chip>
-            ) : null}
-          </div>
-          <div className="text-sm text-muted-foreground">{item.repo_url}</div>
-          {item.description ? <div className="text-sm text-muted-foreground">{item.description}</div> : null}
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          {typeof item.snapshot_count === 'number' ? (
-            <Chip variant="bordered" size="sm">
-              快照 {item.snapshot_count}
-            </Chip>
-          ) : null}
-          {typeof item.card_count === 'number' ? (
-            <Chip variant="bordered" size="sm">
-              卡片 {item.card_count}
-            </Chip>
-          ) : null}
-          {item.default_branch ? (
-            <Chip variant="bordered" size="sm">
-              默认分支 {item.default_branch}
-            </Chip>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-3 text-sm text-muted-foreground md:grid-cols-3">
-        <div className="rounded-xl border bg-muted/20 p-3">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground/80">最新 Ref</div>
-          <div className="mt-1 font-medium text-foreground">
-            {latestSnapshot?.resolved_ref || latestSnapshot?.ref || item.latest_ref || '暂无'}
-          </div>
-        </div>
-        <div className="rounded-xl border bg-muted/20 p-3">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground/80">最近提交</div>
-          <div className="mt-1 font-medium text-foreground">
-            {latestSnapshot?.commit_sha?.slice(0, 12) || item.latest_commit_sha?.slice(0, 12) || '暂无'}
-          </div>
-        </div>
-        <div className="rounded-xl border bg-muted/20 p-3">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground/80">最近活动</div>
-          <div className="mt-1 font-medium text-foreground">
-            {formatRelativeTime(item.updated_at || latestAnalysis?.updated_at || latestSnapshot?.created_at || 0)}
-          </div>
-        </div>
-      </div>
-    </button>
   )
 }
 
@@ -141,11 +71,12 @@ function RepositoryCard(props: { item: RepoLibraryRepositorySummary }) {
  */
 export function RepoLibraryRepositoriesPage() {
   const daemonUrl = useDaemonStore((s) => s.daemonUrl)
-  const health = useDaemonStore((s) => s.health)
 
-  const [items, setItems] = useState<RepoLibraryRepositorySummary[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const items = useRepoLibraryUIStore((s) => s.repositories)
+  const repositoriesLoaded = useRepoLibraryUIStore((s) => s.repositoriesLoaded)
+  const loading = useRepoLibraryUIStore((s) => s.repositoriesRefreshing)
+  const error = useRepoLibraryUIStore((s) => s.repositoriesError)
+  const setRepositoriesState = useRepoLibraryUIStore((s) => s.setRepositoriesState)
 
   const [repoUrl, setRepoUrl] = useState('')
   const [ref, setRef] = useState('HEAD')
@@ -160,17 +91,27 @@ export function RepoLibraryRepositoriesPage() {
   const [selectedCliToolId, setSelectedCliToolId] = useState('')
   const [selectedModelId, setSelectedModelId] = useState('')
 
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+  const hasRepositoryCache = useMemo(
+    () => repositoriesLoaded || items.length > 0,
+    [items.length, repositoriesLoaded],
+  )
+
+  const refresh = useCallback(async (options?: { force?: boolean }) => {
+    const force = options?.force ?? false
+    if (!force && useRepoLibraryUIStore.getState().repositoriesRefreshing) return
+
+    setRepositoriesState({ refreshing: true, error: null })
     try {
-      setItems(await fetchRepoLibraryRepositories(daemonUrl))
+      setRepositoriesState({
+        repositories: await fetchRepoLibraryRepositories(daemonUrl),
+        loaded: true,
+        refreshing: false,
+        error: null,
+      })
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
+      setRepositoriesState({ refreshing: false, error: err instanceof Error ? err.message : String(err) })
     }
-  }, [daemonUrl])
+  }, [daemonUrl, setRepositoriesState])
 
   useEffect(() => {
     void refresh()
@@ -262,28 +203,77 @@ export function RepoLibraryRepositoriesPage() {
   const createdAnalysis: RepoLibraryAnalysisRun | null = created?.analysis ?? null
   const createdRepositoryId = created?.repository?.repository_id ?? null
 
+  const sidebarContent = (
+    <div className="relative min-h-[120px]">
+      {error && !hasRepositoryCache ? <Alert color="danger" title="加载失败" description={error} className="mt-0" /> : null}
+      {!hasRepositoryCache && loading ? (
+        <EmptyRepositories />
+      ) : items.length === 0 ? (
+        <div className="rounded-2xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
+          还没有仓库分析结果，先添加一个 GitHub 仓库试试。
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {items.map((item) => (
+            <RepoLibrarySidebarRepositoryItem
+              key={item.repository_id}
+              title={item.full_name || item.name || item.repo_url}
+              subtitle={item.repo_url}
+              meta={formatRelativeTime(item.created_at || item.updated_at || 0)}
+              active={Boolean(createdRepositoryId && item.repository_id === createdRepositoryId)}
+              onPress={() => goToRepoLibraryRepository(item.repository_id)}
+            />
+          ))}
+        </div>
+      )}
+      <LoadingVeil visible={loading && hasRepositoryCache} compact label="正在刷新仓库列表…" />
+    </div>
+  )
+
   return (
-    <RepoLibraryLayout
-      activeNav="repositories"
-      title="Repo Library 仓库"
-      description="集中管理外部仓库分析结果、快照与知识卡片。你可以先提交一个 GitHub 仓库分析，再进入详情查看快照、报告、卡片和执行日志。"
-      meta={
-        <Chip variant="flat" color={health.status === 'ok' ? 'success' : 'default'}>
-          {health.status === 'ok' ? 'Daemon 已连接' : 'Daemon 未就绪'}
-        </Chip>
+    <RepoLibraryShell
+      title="Github 知识库"
+      headerMeta={
+        <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+          <span>Repo Library</span>
+          <span>·</span>
+          <span>{items.length} 个仓库</span>
+        </div>
       }
-      actions={
+      headerActions={
         <>
           <Button variant="flat" size="sm" startContent={<Search className="h-4 w-4" />} onPress={goToRepoLibraryPatternSearch}>
-            去模式搜索
+            知识库检索
           </Button>
-          <Button variant="light" size="sm" startContent={<RefreshCcw className="h-4 w-4" />} onPress={() => void refresh()}>
+          <Button variant="light" size="sm" startContent={<RefreshCcw className="h-4 w-4" />} onPress={() => void refresh({ force: true })}>
             刷新列表
           </Button>
         </>
       }
+      sidebarTitle="仓库"
+      sidebarCount={items.length}
+      sidebarAction={
+        <Button
+          color="primary"
+          size="sm"
+          className="w-[25%] min-w-[86px] rounded-2xl"
+          startContent={<Plus className="h-4 w-4 shrink-0 stroke-[3]" />}
+          onPress={() => {
+            document.getElementById('repo-library-analyze-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            window.requestAnimationFrame(() => {
+              const input = document.getElementById('repo-library-repo-url') as HTMLInputElement | null
+              input?.focus()
+            })
+          }}
+        >
+          添加仓库
+        </Button>
+      }
+      sidebarContent={sidebarContent}
     >
-      <section className="rounded-2xl border bg-card p-5 shadow-sm">
+      <div className="relative">
+        {error && hasRepositoryCache ? <Alert color="danger" title="刷新失败，已保留上次内容" description={error} className="mb-4" /> : null}
+        <section id="repo-library-analyze-form" className="rounded-2xl border bg-card p-5 shadow-sm">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2 text-lg font-semibold">
@@ -301,6 +291,7 @@ export function RepoLibraryRepositoriesPage() {
 
         <div className="grid gap-3 md:grid-cols-[1.4fr_0.8fr_0.6fr]">
           <Input
+            id="repo-library-repo-url"
             label="仓库地址"
             placeholder="https://github.com/owner/repo"
             value={repoUrl}
@@ -432,40 +423,15 @@ export function RepoLibraryRepositoriesPage() {
             </div>
 
             {createdRepositoryId ? (
-              <Button
-                variant="flat"
-                size="sm"
-                onPress={() => goToRepoLibraryRepository(createdRepositoryId)}
-              >
+              <Button variant="flat" size="sm" onPress={() => goToRepoLibraryRepository(createdRepositoryId)}>
                 打开仓库详情
               </Button>
             ) : null}
           </div>
         </section>
       ) : null}
-
-      <section className="space-y-3">
-        <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
-          <FolderGit2 className="h-4 w-4" />
-          已收录仓库
-        </div>
-
-        {error ? (
-          <Alert color="danger" title="加载仓库列表失败" description={error} />
-        ) : loading && items.length === 0 ? (
-          <EmptyRepositories />
-        ) : items.length === 0 ? (
-          <div className="rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
-            还没有仓库分析结果。先从上面的表单提交一个 GitHub 仓库试试。
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {items.map((item) => (
-              <RepositoryCard key={item.repository_id} item={item} />
-            ))}
-          </div>
-        )}
-      </section>
-    </RepoLibraryLayout>
+      <LoadingVeil visible={loading && hasRepositoryCache} label="正在同步知识库内容…" />
+      </div>
+    </RepoLibraryShell>
   )
 }
