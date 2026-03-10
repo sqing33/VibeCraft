@@ -27,6 +27,21 @@ If a tool does not expose stable reasoning text, the system MAY show plan/progre
 - **WHEN** Codex app-server emits `item/plan/delta` but no stable reasoning text yet
 - **THEN** the daemon emits user-visible intermediate updates instead of waiting for `item.completed`
 
+### Requirement: Codex app-server text streaming MUST suppress legacy duplicate deltas
+When Codex app-server exposes structured `item/*` text deltas for assistant, reasoning, or plan content, the system MUST treat those structured notifications as the canonical visible stream for that semantic content.
+
+The system MUST NOT append compatible legacy `codex/event/*` text deltas for the same semantic stream into the visible answer/thinking timeline once the structured transport is available for that connection.
+
+#### Scenario: Structured assistant deltas suppress legacy duplicate assistant text
+- **WHEN** a Codex app-server connection emits `item/agentMessage/delta` notifications for a turn
+- **THEN** the system uses those deltas for visible assistant streaming
+- **AND** matching legacy assistant text notifications do not create duplicate visible answer characters
+
+#### Scenario: Structured reasoning deltas suppress legacy duplicate reasoning text
+- **WHEN** a Codex app-server connection emits `item/reasoning/summaryTextDelta` or `item/reasoning/textDelta`
+- **THEN** the system uses those deltas for visible thinking streaming
+- **AND** matching legacy reasoning text notifications do not create duplicate visible thinking characters
+
 ### Requirement: CLI chat MUST distinguish thinking from tool, plan, and question activity
 When Codex exposes reasoning, command execution, plan updates, user-input requests, or system progress during a chat turn, the daemon MUST map them into distinct structured runtime entries instead of collapsing them into a single thinking string.
 
@@ -75,4 +90,3 @@ The selected effort MUST be persisted as the session's default effort after a su
 - **AND** sends a message
 - **THEN** the daemon sends `effort=xhigh` to Codex app-server `turn/start`
 - **AND** the session stores `reasoning_effort=xhigh` for later turns
-

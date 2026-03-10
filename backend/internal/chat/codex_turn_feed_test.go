@@ -44,6 +44,36 @@ func TestCodexTurnFeedEmitterSplitsThinkingSegments(t *testing.T) {
 	}
 }
 
+// TestCodexTurnFeedEmitterSplitsSameReasoningItemAfterInterleave 功能：校验同一 itemId 在非 thinking 事件打断后会创建新的 thinking 条目。
+// 参数/返回：无外部参数；断言第二段 reasoning 不会复用第一次的 entry_id。
+// 失败场景：若同一 itemId 被错误复用为同一个 thinking 条目，则测试失败。
+// 副作用：无；仅消费内存事件。
+func TestCodexTurnFeedEmitterSplitsSameReasoningItemAfterInterleave(t *testing.T) {
+	emitter := newCodexTurnFeedEmitter(nil, "ct_1", "sess_1", "msg_1", nil)
+	payloads := make([]chatTurnEventPayload, 0, 4)
+	emitter.sink = func(payload chatTurnEventPayload) {
+		payloads = append(payloads, payload)
+	}
+	ctx := context.Background()
+
+	emitter.consume(ctx, "item/reasoning/summaryTextDelta", json.RawMessage(`{"itemId":"rs_1","delta":"第一段"}`))
+	emitter.consume(ctx, "codex/event/exec_command_begin", json.RawMessage(`{"callId":"cmd_1","command":"pwd"}`))
+	emitter.consume(ctx, "item/reasoning/summaryTextDelta", json.RawMessage(`{"itemId":"rs_1","delta":"第二段"}`))
+
+	if len(payloads) != 3 {
+		t.Fatalf("expected 3 payloads, got %d: %+v", len(payloads), payloads)
+	}
+	if payloads[0].EntryID != "thinking:1" || payloads[0].Kind != "thinking" {
+		t.Fatalf("unexpected first payload: %+v", payloads[0])
+	}
+	if payloads[1].EntryID != "tool:cmd_1" || payloads[1].Kind != "tool" {
+		t.Fatalf("unexpected second payload: %+v", payloads[1])
+	}
+	if payloads[2].EntryID != "thinking:2" || payloads[2].Kind != "thinking" {
+		t.Fatalf("expected second reasoning segment to use new entry, got %+v", payloads[2])
+	}
+}
+
 // TestCodexTurnFeedEmitterSkipsToolPlaceholder 功能：校验没有真实命令内容时不会输出 tool 占位条目。
 // 参数/返回：无外部参数；断言空命令 begin 事件不会产生 payload。
 // 失败场景：若仍然发出 `command execution` 之类的占位条目，则测试失败。

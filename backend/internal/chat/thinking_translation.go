@@ -31,15 +31,19 @@ type ThinkingTranslationSpec struct {
 
 type ThinkingTranslatorFunc func(ctx context.Context, spec ThinkingTranslationSpec, text string) (string, error)
 
+type thinkingTranslationPendingEntry struct {
+	buffer    string
+	lastDelta time.Time
+	closed    bool
+}
+
 type thinkingTranslationRuntime struct {
 	manager           *Manager
 	sessionID         string
 	turnID            string
 	spec              *ThinkingTranslationSpec
-	buffer            string
-	bufferEntryID     string
-	lastDelta         time.Time
 	failed            bool
+	pendingByEntry    map[string]*thinkingTranslationPendingEntry
 	translatedByEntry map[string]string
 	entryOrder        []string
 }
@@ -53,10 +57,11 @@ func newThinkingTranslationRuntime(manager *Manager, sessionID, turnID string, s
 		sessionID: sessionID,
 		turnID:    strings.TrimSpace(turnID),
 		spec: &ThinkingTranslationSpec{
-			Provider: strings.ToLower(strings.TrimSpace(spec.Provider)),
-			Model:    strings.TrimSpace(spec.Model),
-			BaseURL:  strings.TrimSpace(spec.BaseURL),
-			Env:      cloneEnvMap(spec.Env),
+			Provider:       strings.ToLower(strings.TrimSpace(spec.Provider)),
+			Model:          strings.TrimSpace(spec.Model),
+			BaseURL:        strings.TrimSpace(spec.BaseURL),
+			Env:            cloneEnvMap(spec.Env),
+			OpenAIAPIStyle: strings.TrimSpace(spec.OpenAIAPIStyle),
 		},
 	}
 }
@@ -115,6 +120,9 @@ func (t *thinkingTranslationRuntime) resetEntry(ctx context.Context, entryID str
 	if t.translatedByEntry != nil {
 		t.translatedByEntry[entryID] = ""
 	}
+	if t.pendingByEntry != nil {
+		delete(t.pendingByEntry, entryID)
+	}
 	if t.manager != nil && strings.TrimSpace(t.turnID) != "" {
 		t.manager.persistTurnTranslationWarn(ctx, t.turnID, entryID, "", true)
 	}
@@ -128,115 +136,154 @@ func (t *thinkingTranslationRuntime) add(ctx context.Context, entryID, delta str
 	if entryID == "" {
 		entryID = "thinking"
 	}
-	delta = strings.TrimSpace(delta)
 	if delta == "" {
 		return
 	}
 	now := time.Now()
-	if !t.lastDelta.IsZero() && now.Sub(t.lastDelta) >= t.manager.thinkingTranslationIdle && strings.TrimSpace(t.buffer) != "" {
-		t.flush(ctx, true)
+	t.rememberEntry(entryID)
+	pending := t.ensurePendingEntry(entryID)
+	pending.buffer += delta
+	pending.lastDelta = now
+	pending.closed = false
+	t.flushReady(ctx, false, now)
+}
+
+func (t *thinkingTranslationRuntime) closeEntry(ctx context.Context, entryID string) {
+	if t == nil || t.spec == nil || t.failed {
+		return
 	}
-	if entryID != "" && t.bufferEntryID != "" && entryID != t.bufferEntryID && strings.TrimSpace(t.buffer) != "" {
-		t.flush(ctx, true)
+	entryID = strings.TrimSpace(entryID)
+	if entryID == "" {
+		entryID = "thinking"
 	}
-	if t.bufferEntryID == "" {
-		t.bufferEntryID = entryID
-	}
-	t.rememberEntry(t.bufferEntryID)
-	t.buffer += delta
-	t.lastDelta = now
-	t.flush(ctx, false)
+	pending := t.ensurePendingEntry(entryID)
+	pending.closed = true
+	t.flushReady(ctx, false, time.Now())
 }
 
 func (t *thinkingTranslationRuntime) complete(ctx context.Context) {
-	if t == nil || t.spec == nil || t.failed || strings.TrimSpace(t.buffer) == "" {
+	if t == nil || t.spec == nil || t.failed {
 		return
 	}
-	t.flush(ctx, true)
+	t.flushReady(ctx, true, time.Now())
 }
 
-func (t *thinkingTranslationRuntime) flush(ctx context.Context, force bool) {
+func (t *thinkingTranslationRuntime) ensurePendingEntry(entryID string) *thinkingTranslationPendingEntry {
+	if t == nil {
+		return nil
+	}
+	if t.pendingByEntry == nil {
+		t.pendingByEntry = map[string]*thinkingTranslationPendingEntry{}
+	}
+	if pending := t.pendingByEntry[entryID]; pending != nil {
+		return pending
+	}
+	pending := &thinkingTranslationPendingEntry{}
+	t.pendingByEntry[entryID] = pending
+	return pending
+}
+
+func (t *thinkingTranslationRuntime) flushReady(ctx context.Context, force bool, now time.Time) {
+	if t == nil || t.spec == nil || t.failed {
+		return
+	}
 	for {
-		entryID := strings.TrimSpace(t.bufferEntryID)
-		segment := t.nextSegment(force)
-		if segment == "" {
-			return
-		}
-		translated, err := t.manager.translateThinking(ctx, *t.spec, segment)
-		if err != nil {
-			t.failed = true
+		emitted := false
+		for _, entryID := range t.entryOrder {
+			segment := t.nextSegment(entryID, force, now)
+			if segment == "" {
+				continue
+			}
+			emitted = true
+			translated, err := t.manager.translateThinking(ctx, *t.spec, segment)
+			if err != nil {
+				t.failed = true
+				payload := map[string]any{
+					"session_id": t.sessionID,
+					"error":      err.Error(),
+				}
+				if entryID != "" {
+					payload["entry_id"] = entryID
+					if t.manager != nil && strings.TrimSpace(t.turnID) != "" {
+						t.manager.persistTurnTranslationFailedWarn(ctx, t.turnID, entryID)
+					}
+				}
+				t.manager.broadcast("chat.turn.thinking.translation.failed", payload)
+				return
+			}
+			translated = strings.TrimSpace(translated)
+			if translated == "" {
+				continue
+			}
+			t.rememberEntry(entryID)
+			if t.translatedByEntry == nil {
+				t.translatedByEntry = map[string]string{}
+			}
+			t.translatedByEntry[entryID] += translated
+			if t.manager != nil && strings.TrimSpace(t.turnID) != "" {
+				t.manager.persistTurnTranslationWarn(ctx, t.turnID, entryID, translated, false)
+			}
 			payload := map[string]any{
 				"session_id": t.sessionID,
-				"error":      err.Error(),
+				"delta":      translated,
 			}
 			if entryID != "" {
 				payload["entry_id"] = entryID
-				if t.manager != nil && strings.TrimSpace(t.turnID) != "" {
-					t.manager.persistTurnTranslationFailedWarn(ctx, t.turnID, entryID)
-				}
 			}
-			t.manager.broadcast("chat.turn.thinking.translation.failed", payload)
+			t.manager.broadcast("chat.turn.thinking.translation.delta", payload)
+		}
+		if !emitted {
 			return
-		}
-		translated = strings.TrimSpace(translated)
-		if translated == "" {
-			if strings.TrimSpace(t.buffer) == "" {
-				t.bufferEntryID = ""
-			}
-			continue
-		}
-		t.rememberEntry(entryID)
-		if t.translatedByEntry == nil {
-			t.translatedByEntry = map[string]string{}
-		}
-		t.translatedByEntry[entryID] += translated
-		if t.manager != nil && strings.TrimSpace(t.turnID) != "" {
-			t.manager.persistTurnTranslationWarn(ctx, t.turnID, entryID, translated, false)
-		}
-		payload := map[string]any{
-			"session_id": t.sessionID,
-			"delta":      translated,
-		}
-		if entryID != "" {
-			payload["entry_id"] = entryID
-		}
-		t.manager.broadcast("chat.turn.thinking.translation.delta", payload)
-		if strings.TrimSpace(t.buffer) == "" {
-			t.bufferEntryID = ""
-		}
-		if force {
-			continue
 		}
 	}
 }
 
-func (t *thinkingTranslationRuntime) nextSegment(force bool) string {
-	if t == nil {
+func (t *thinkingTranslationRuntime) nextSegment(entryID string, force bool, now time.Time) string {
+	if t == nil || t.pendingByEntry == nil {
 		return ""
 	}
-	buffer := strings.TrimSpace(t.buffer)
+	pending := t.pendingByEntry[entryID]
+	if pending == nil {
+		return ""
+	}
+	buffer := strings.TrimSpace(pending.buffer)
 	if buffer == "" {
-		t.buffer = ""
+		pending.buffer = ""
+		pending.closed = false
 		return ""
 	}
 	if force {
-		t.buffer = ""
+		delete(t.pendingByEntry, entryID)
 		return buffer
 	}
 	if utf8.RuneCountInString(buffer) >= t.manager.thinkingTranslationForceChars {
-		t.buffer = ""
+		delete(t.pendingByEntry, entryID)
 		return buffer
 	}
-	if utf8.RuneCountInString(buffer) < t.manager.thinkingTranslationMinChars {
-		return ""
-	}
 	boundaryEnd := lastTranslationBoundaryEnd(buffer)
-	if boundaryEnd <= 0 {
-		return ""
+	if boundaryEnd > 0 {
+		segment := strings.TrimSpace(buffer[:boundaryEnd])
+		if utf8.RuneCountInString(segment) >= t.manager.thinkingTranslationMinChars {
+			pending.buffer = strings.TrimLeft(buffer[boundaryEnd:], " \t\r\n")
+			if strings.TrimSpace(pending.buffer) == "" {
+				delete(t.pendingByEntry, entryID)
+			} else {
+				pending.closed = false
+			}
+			return segment
+		}
 	}
-	segment := strings.TrimSpace(buffer[:boundaryEnd])
-	t.buffer = strings.TrimLeft(buffer[boundaryEnd:], " \t\r\n")
-	return segment
+	if !pending.lastDelta.IsZero() && now.Sub(pending.lastDelta) >= t.manager.thinkingTranslationIdle {
+		if utf8.RuneCountInString(buffer) >= t.manager.thinkingTranslationMinChars {
+			delete(t.pendingByEntry, entryID)
+			return buffer
+		}
+	}
+	if pending.closed && utf8.RuneCountInString(buffer) >= t.manager.thinkingTranslationMinChars {
+		delete(t.pendingByEntry, entryID)
+		return buffer
+	}
+	return ""
 }
 
 func lastTranslationBoundaryEnd(text string) int {

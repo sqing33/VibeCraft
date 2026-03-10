@@ -31,7 +31,7 @@ type codexToolFeedState struct {
 }
 
 type codexThinkingFeedState struct {
-	SourceKey   string
+	SourceID    string
 	EntryID     string
 	SummarySeen bool
 }
@@ -198,6 +198,9 @@ func (e *codexTurnFeedEmitter) consume(ctx context.Context, method string, param
 		}
 		chunk := extractChunkText(raw["chunk"])
 		if chunk == "" {
+			chunk = extractDeltaText(raw)
+		}
+		if chunk == "" {
 			return
 		}
 		stream := strings.ToLower(firstNonEmptyTrimmed(stringValue(raw["stream"]), "stdout"))
@@ -272,36 +275,39 @@ func (e *codexTurnFeedEmitter) sequenceForEntry(entryID string, seq int) int {
 	return e.nextSeq
 }
 
-func (e *codexTurnFeedEmitter) thinkingSourceKey(raw map[string]any) string {
+func (e *codexTurnFeedEmitter) thinkingSourceID(raw map[string]any) string {
 	if e == nil {
-		return "segment:1"
+		return ""
 	}
-	if sourceID := firstNonEmptyTrimmed(
+	return firstNonEmptyTrimmed(
 		stringValue(raw["itemId"]),
 		stringValue(raw["item_id"]),
 		nestedString(raw, "item", "id"),
 		nestedString(raw, "msg", "itemId"),
 		nestedString(raw, "msg", "item_id"),
-	); sourceID != "" {
-		return "item:" + sourceID
+	)
+}
+
+func (e *codexTurnFeedEmitter) activeThinkingState() *codexThinkingFeedState {
+	if e == nil || strings.TrimSpace(e.activeThinkingKey) == "" {
+		return nil
 	}
-	if strings.TrimSpace(e.activeThinkingKey) != "" {
-		return e.activeThinkingKey
-	}
-	return fmt.Sprintf("segment:%d", e.thinkingIndex+1)
+	return e.thinkingStates[e.activeThinkingKey]
 }
 
 func (e *codexTurnFeedEmitter) ensureThinkingState(raw map[string]any) *codexThinkingFeedState {
 	if e == nil {
-		return &codexThinkingFeedState{SourceKey: "segment:1", EntryID: "thinking:1"}
+		return &codexThinkingFeedState{EntryID: "thinking:1"}
 	}
-	key := e.thinkingSourceKey(raw)
-	if state := e.thinkingStates[key]; state != nil {
-		e.activeThinkingKey = key
-		return state
+	sourceID := e.thinkingSourceID(raw)
+	if state := e.activeThinkingState(); state != nil {
+		if sourceID == "" || state.SourceID == "" || state.SourceID == sourceID {
+			return state
+		}
 	}
 	e.thinkingIndex++
-	state := &codexThinkingFeedState{SourceKey: key, EntryID: fmt.Sprintf("thinking:%d", e.thinkingIndex)}
+	key := fmt.Sprintf("segment:%d", e.thinkingIndex)
+	state := &codexThinkingFeedState{SourceID: sourceID, EntryID: fmt.Sprintf("thinking:%d", e.thinkingIndex)}
 	e.thinkingStates[key] = state
 	e.activeThinkingKey = key
 	return state
@@ -344,7 +350,9 @@ func (e *codexTurnFeedEmitter) closeThinkingSegment(ctx context.Context) {
 		return
 	}
 	if e.translation != nil {
-		e.translation.flush(ctx, true)
+		if state := e.activeThinkingState(); state != nil {
+			e.translation.closeEntry(ctx, state.EntryID)
+		}
 	}
 	e.activeThinkingKey = ""
 }
@@ -416,6 +424,8 @@ func codexEventSuffix(method string) string {
 		return "reasoning_text_delta"
 	case "item/plan/delta":
 		return "plan_delta"
+	case "item/commandExecution/outputDelta":
+		return "exec_command_output_delta"
 	case "item/started":
 		return "item_started"
 	case "item/completed":

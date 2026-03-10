@@ -72,6 +72,17 @@ var newCodexAppServerClient = func(ctx context.Context, spec runner.RunSpec) (co
 	return startCodexAppServerClient(ctx, spec)
 }
 
+var codexAppServerOptOutNotificationMethods = []string{
+	"codex/event/agent_message_content_delta",
+	"codex/event/agent_message_delta",
+	"codex/event/agent_reasoning_delta",
+	"codex/event/reasoning_content_delta",
+	"codex/event/reasoning_raw_content_delta",
+	"codex/event/plan_delta",
+	"codex/event/item_started",
+	"codex/event/item_completed",
+}
+
 func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, cliToolID, modelID, reasoningEffort *string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
 	if runner.NormalizeCLIFamily(spec.Env["VIBE_TREE_CLI_FAMILY"]) == "codex" {
 		result, err := m.runCodexAppServerTurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, cliToolID, modelID, reasoningEffort, thinkingTranslation)
@@ -648,7 +659,8 @@ func (c *stdioCodexAppServerClient) Initialize(ctx context.Context) error {
 			"version": "0.1.0",
 		},
 		"capabilities": map[string]any{
-			"experimentalApi": true,
+			"experimentalApi":           true,
+			"optOutNotificationMethods": codexAppServerOptOutNotificationMethods,
 		},
 	}, &result); err != nil {
 		return err
