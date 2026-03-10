@@ -159,6 +159,41 @@ type ChatRuntimeOption = {
   defaultModelId?: string;
 };
 
+type LiveUpdateBuffer = {
+  streamingBySession: Record<string, string>;
+  thinkingBySession: Record<string, string>;
+  translatedThinkingDeltas: {
+    sessionId: string;
+    delta: string;
+    entryId?: string;
+  }[];
+  thinkingTranslationStateBySession: Record<
+    string,
+    { applied: boolean; failed: boolean }
+  >;
+  turnEvents: ChatTurnEventPayload[];
+};
+
+function createLiveUpdateBuffer(): LiveUpdateBuffer {
+  return {
+    streamingBySession: {},
+    thinkingBySession: {},
+    translatedThinkingDeltas: [],
+    thinkingTranslationStateBySession: {},
+    turnEvents: [],
+  };
+}
+
+function hasLiveUpdateBufferContent(buffer: LiveUpdateBuffer): boolean {
+  return (
+    buffer.turnEvents.length > 0 ||
+    buffer.translatedThinkingDeltas.length > 0 ||
+    Object.keys(buffer.streamingBySession).length > 0 ||
+    Object.keys(buffer.thinkingBySession).length > 0 ||
+    Object.keys(buffer.thinkingTranslationStateBySession).length > 0
+  );
+}
+
 const sdkRuntimeLabels = {
   openai: "OpenAI SDK",
   anthropic: "Anthropic SDK",
@@ -230,11 +265,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const error = useChatStore((s) => s.error);
 
   const setActiveSession = useChatStore((s) => s.setActiveSession);
-  const appendStreamingDelta = useChatStore((s) => s.appendStreamingDelta);
-  const appendThinkingDelta = useChatStore((s) => s.appendThinkingDelta);
-  const appendTranslatedThinkingDelta = useChatStore(
-    (s) => s.appendTranslatedThinkingDelta,
-  );
+  const applyLiveDeltaBatch = useChatStore((s) => s.applyLiveDeltaBatch);
   const setThinking = useChatStore((s) => s.setThinking);
   const setTranslatedThinking = useChatStore((s) => s.setTranslatedThinking);
   const clearStreaming = useChatStore((s) => s.clearStreaming);
@@ -249,7 +280,6 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const setTurnInputMeta = useChatStore((s) => s.setTurnInputMeta);
   const setUsageMeta = useChatStore((s) => s.setUsageMeta);
   const startTurnFeed = useChatStore((s) => s.startTurnFeed);
-  const applyTurnEvent = useChatStore((s) => s.applyTurnEvent);
   const completeTurnFeed = useChatStore((s) => s.completeTurnFeed);
   const clearTurnFeed = useChatStore((s) => s.clearTurnFeed);
   const refreshSessions = useChatStore((s) => s.refreshSessions);
@@ -281,6 +311,11 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const [sessionMCPDraft, setSessionMCPDraft] = useState<string[]>([]);
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
+  const liveUpdateBufferRef = useRef<LiveUpdateBuffer>(
+    createLiveUpdateBuffer(),
+  );
+  const liveUpdateFrameRef = useRef<number | null>(null);
+  const scrollFrameRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef(0);
 
@@ -936,6 +971,41 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const pendingAssistant =
     sending || hasFeedEntries(activeTurnFeed) || streaming.length > 0;
 
+  const flushBufferedLiveUpdates = useCallback(() => {
+    const buffer = liveUpdateBufferRef.current;
+    if (!hasLiveUpdateBufferContent(buffer)) return;
+    liveUpdateBufferRef.current = createLiveUpdateBuffer();
+    applyLiveDeltaBatch({
+      streamingBySession: buffer.streamingBySession,
+      thinkingBySession: buffer.thinkingBySession,
+      translatedThinkingDeltas: buffer.translatedThinkingDeltas,
+      thinkingTranslationStateBySession:
+        buffer.thinkingTranslationStateBySession,
+      turnEvents: buffer.turnEvents,
+    });
+  }, [applyLiveDeltaBatch]);
+
+  const scheduleBufferedLiveUpdates = useCallback(() => {
+    if (liveUpdateFrameRef.current !== null) return;
+    liveUpdateFrameRef.current = window.requestAnimationFrame(() => {
+      liveUpdateFrameRef.current = null;
+      flushBufferedLiveUpdates();
+    });
+  }, [flushBufferedLiveUpdates]);
+
+  const scheduleScrollToBottom = useCallback(() => {
+    if (!shouldAutoScrollRef.current) return;
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+    }
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      const el = messageScrollRef.current;
+      if (!el || !shouldAutoScrollRef.current) return;
+      el.scrollTop = el.scrollHeight;
+    });
+  }, []);
+
   const refresh = useCallback(async () => {
     await refreshSessions(daemonUrl);
   }, [daemonUrl, refreshSessions]);
@@ -962,17 +1032,15 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   }, [activeSessionId, daemonUrl, loadMessages, loadTurns]);
 
   useEffect(() => {
-    const el = messageScrollRef.current;
-    if (!el) return;
-    if (!shouldAutoScrollRef.current) return;
-    el.scrollTop = el.scrollHeight;
+    scheduleScrollToBottom();
   }, [
+    activeTurnFeed,
     messages,
+    scheduleScrollToBottom,
     streaming,
     thinking,
-    translatedThinking,
     thinkingTranslationState.failed,
-    activeTurnFeed,
+    translatedThinking,
   ]);
 
   useEffect(() => {
@@ -982,22 +1050,105 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
       shouldAutoScrollRef.current = distanceToBottom < 64;
     };
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) {
+        shouldAutoScrollRef.current = false;
+      }
+    };
     onScroll();
     el.addEventListener("scroll", onScroll, { passive: true });
+    el.addEventListener("wheel", onWheel, { passive: true });
     return () => {
       el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("wheel", onWheel);
     };
   }, [activeSessionId]);
 
   useEffect(() => {
-    const el = messageScrollRef.current;
-    if (!el) return;
     shouldAutoScrollRef.current = true;
-    el.scrollTop = el.scrollHeight;
-  }, [activeSessionId]);
+    scheduleScrollToBottom();
+  }, [activeSessionId, scheduleScrollToBottom]);
+
+  useEffect(
+    () => () => {
+      if (liveUpdateFrameRef.current !== null) {
+        window.cancelAnimationFrame(liveUpdateFrameRef.current);
+        liveUpdateFrameRef.current = null;
+      }
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
+    const bufferLiveUpdate = (env: {
+      type: string;
+      payload?: unknown;
+    }): boolean => {
+      const buffer = liveUpdateBufferRef.current;
+      if (env.type === "chat.turn.event") {
+        const payload = env.payload as ChatTurnEventPayload | undefined;
+        if (
+          !payload?.session_id ||
+          !payload.user_message_id ||
+          !payload.entry_id
+        ) {
+          return true;
+        }
+        buffer.turnEvents.push(payload);
+        scheduleBufferedLiveUpdates();
+        return true;
+      }
+      if (env.type === "chat.turn.thinking.delta") {
+        const payload = env.payload as
+          | { session_id?: string; delta?: string }
+          | undefined;
+        if (!payload?.session_id || typeof payload.delta !== "string")
+          return true;
+        buffer.thinkingBySession[payload.session_id] =
+          (buffer.thinkingBySession[payload.session_id] ?? "") + payload.delta;
+        scheduleBufferedLiveUpdates();
+        return true;
+      }
+      if (env.type === "chat.turn.thinking.translation.delta") {
+        const payload = env.payload as
+          | { session_id?: string; delta?: string; entry_id?: string }
+          | undefined;
+        if (!payload?.session_id || typeof payload.delta !== "string")
+          return true;
+        buffer.thinkingTranslationStateBySession[payload.session_id] = {
+          applied: true,
+          failed: false,
+        };
+        buffer.translatedThinkingDeltas.push({
+          sessionId: payload.session_id,
+          delta: payload.delta,
+          entryId: payload.entry_id,
+        });
+        scheduleBufferedLiveUpdates();
+        return true;
+      }
+      if (env.type === "chat.turn.delta") {
+        const payload = env.payload as
+          | { session_id?: string; delta?: string }
+          | undefined;
+        if (!payload?.session_id || typeof payload.delta !== "string")
+          return true;
+        buffer.streamingBySession[payload.session_id] =
+          (buffer.streamingBySession[payload.session_id] ?? "") + payload.delta;
+        scheduleBufferedLiveUpdates();
+        return true;
+      }
+      return false;
+    };
+
     return onWsEnvelope((env) => {
+      if (bufferLiveUpdate(env)) return;
+      flushBufferedLiveUpdates();
+
       if (env.type === "chat.turn.started") {
         const payload = env.payload as
           | {
@@ -1030,41 +1181,6 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
         }
         return;
       }
-      if (env.type === "chat.turn.event") {
-        const payload = env.payload as ChatTurnEventPayload | undefined;
-        if (
-          !payload?.session_id ||
-          !payload.user_message_id ||
-          !payload.entry_id
-        )
-          return;
-        applyTurnEvent(payload);
-        return;
-      }
-      if (env.type === "chat.turn.thinking.delta") {
-        const payload = env.payload as
-          | { session_id?: string; delta?: string }
-          | undefined;
-        if (!payload?.session_id || typeof payload.delta !== "string") return;
-        appendThinkingDelta(payload.session_id, payload.delta);
-        return;
-      }
-      if (env.type === "chat.turn.thinking.translation.delta") {
-        const payload = env.payload as
-          | { session_id?: string; delta?: string; entry_id?: string }
-          | undefined;
-        if (!payload?.session_id || typeof payload.delta !== "string") return;
-        setThinkingTranslationState(payload.session_id, {
-          applied: true,
-          failed: false,
-        });
-        appendTranslatedThinkingDelta(
-          payload.session_id,
-          payload.delta,
-          payload.entry_id,
-        );
-        return;
-      }
       if (env.type === "chat.turn.thinking.translation.failed") {
         const payload = env.payload as { session_id?: string } | undefined;
         if (!payload?.session_id) return;
@@ -1072,14 +1188,6 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
           applied: true,
           failed: true,
         });
-        return;
-      }
-      if (env.type === "chat.turn.delta") {
-        const payload = env.payload as
-          | { session_id?: string; delta?: string }
-          | undefined;
-        if (!payload?.session_id || typeof payload.delta !== "string") return;
-        appendStreamingDelta(payload.session_id, payload.delta);
         return;
       }
       if (env.type === "chat.turn.completed") {
@@ -1181,20 +1289,18 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       }
     });
   }, [
-    appendStreamingDelta,
-    appendThinkingDelta,
-    appendTranslatedThinkingDelta,
-    setThinking,
-    setTranslatedThinking,
     clearStreaming,
     clearThinking,
     resetThinkingTranslation,
-    setThinkingTranslationState,
     setTurnMeta,
+    startTurnFeed,
+    flushBufferedLiveUpdates,
+    scheduleBufferedLiveUpdates,
+    setThinkingTranslationState,
+    setThinking,
+    setTranslatedThinking,
     setTurnInputMeta,
     setUsageMeta,
-    startTurnFeed,
-    applyTurnEvent,
     completeTurnFeed,
     clearTurnFeed,
     daemonUrl,
@@ -1802,10 +1908,8 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                             <summary className="cursor-pointer select-none text-muted-foreground">
                               查看完整思考过程
                             </summary>
-                            <div className="chat-markdown mt-2 text-xs text-muted-foreground">
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                {displayedThinking}
-                              </ReactMarkdown>
+                            <div className="mt-2 whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                              {displayedThinking}
                             </div>
                           </details>
                         ) : pendingThinkingTranslation ? (
@@ -1814,10 +1918,8 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                           </div>
                         ) : null}
                         {streaming ? (
-                          <div className="chat-markdown text-sm">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {streaming}
-                            </ReactMarkdown>
+                          <div className="whitespace-pre-wrap break-words text-sm">
+                            {streaming}
                           </div>
                         ) : (
                           <div className="text-sm text-muted-foreground">

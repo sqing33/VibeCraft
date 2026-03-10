@@ -1,3 +1,0 @@
-interface:
-  display_name: "Tmux Codex Orchestrator"
-  short_description: "Plan-review-run parallel Codex workers in tmux and synthesize a final branch"

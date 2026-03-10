@@ -1,4 +1,5 @@
 .env
+.iflow
 .worktree-lite
 /backend/tmp/
 downloads

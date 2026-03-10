@@ -1,126 +1,148 @@
-import { useState } from 'react'
+import { memo, useMemo, useState } from "react";
 
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
-import type { ChatTurnFeed, ChatTurnFeedEntry } from '@/lib/chatTurnFeed'
+import type { ChatTurnFeed, ChatTurnFeedEntry } from "@/lib/chatTurnFeed";
 
 type ChatTurnFeedProps = {
-  feed: ChatTurnFeed
-  pending?: boolean
-  identity?: string
-  compact?: boolean
+  feed: ChatTurnFeed;
+  pending?: boolean;
+  identity?: string;
+  compact?: boolean;
+};
+
+function PlainStreamingText({
+  content,
+  className = "text-sm",
+}: {
+  content: string;
+  className?: string;
+}) {
+  return (
+    <div className={`whitespace-pre-wrap break-words ${className}`}>
+      {content || "..."}
+    </div>
+  );
 }
 
 function isVisibleTimelineEntry(entry: ChatTurnFeedEntry): boolean {
-  if (entry.kind !== 'tool') return true
-  const command = entry.content.trim()
-  return command !== '' && command !== 'command execution'
+  if (entry.kind !== "tool") return true;
+  const command = entry.content.trim();
+  return command !== "" && command !== "command execution";
 }
 
 function entryTitle(entry: ChatTurnFeedEntry): string {
   switch (entry.kind) {
-    case 'thinking':
-      return '思考'
-    case 'answer':
-      return '回答'
-    case 'tool':
-      return '命令执行'
-    case 'plan':
-      return '计划'
-    case 'question':
-      return '等待输入'
-    case 'progress':
-      return '进度'
-    case 'system':
-      return '系统'
-    case 'error':
-      return '错误'
+    case "thinking":
+      return "思考";
+    case "answer":
+      return "回答";
+    case "tool":
+      return "命令执行";
+    case "plan":
+      return "计划";
+    case "question":
+      return "等待输入";
+    case "progress":
+      return "进度";
+    case "system":
+      return "系统";
+    case "error":
+      return "错误";
     default:
-      return '条目'
+      return "条目";
   }
 }
 
 function cardClass(entry: ChatTurnFeedEntry): string {
   switch (entry.kind) {
-    case 'answer':
-      return 'border-primary/30 bg-primary/5'
-    case 'thinking':
-      return 'border-dashed bg-muted/35'
-    case 'tool':
-      return 'border-amber-200 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-950/20'
-    case 'plan':
-      return 'border-sky-200 bg-sky-50/50 dark:border-sky-900 dark:bg-sky-950/20'
-    case 'question':
-      return 'border-violet-200 bg-violet-50/50 dark:border-violet-900 dark:bg-violet-950/20'
-    case 'progress':
-    case 'system':
-      return 'border-default-200/70 bg-background/60'
-    case 'error':
-      return 'border-danger/40 bg-danger/5'
+    case "answer":
+      return "border-primary/30 bg-primary/5";
+    case "thinking":
+      return "border-dashed bg-muted/35";
+    case "tool":
+      return "border-amber-200 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-950/20";
+    case "plan":
+      return "border-sky-200 bg-sky-50/50 dark:border-sky-900 dark:bg-sky-950/20";
+    case "question":
+      return "border-violet-200 bg-violet-50/50 dark:border-violet-900 dark:bg-violet-950/20";
+    case "progress":
+    case "system":
+      return "border-default-200/70 bg-background/60";
+    case "error":
+      return "border-danger/40 bg-danger/5";
     default:
-      return 'border-default-200/70 bg-background/60'
+      return "border-default-200/70 bg-background/60";
   }
 }
 
 function statusLabel(entry: ChatTurnFeedEntry): string {
   switch (entry.status) {
-    case 'streaming':
-      return '进行中'
-    case 'created':
-      return '已创建'
-    case 'pending_approval':
-      return '等待确认'
-    case 'success':
-      return '成功'
-    case 'failed':
-      return '失败'
-    case 'done':
-      return '完成'
+    case "streaming":
+      return "进行中";
+    case "created":
+      return "已创建";
+    case "pending_approval":
+      return "等待确认";
+    case "success":
+      return "成功";
+    case "failed":
+      return "失败";
+    case "done":
+      return "完成";
     default:
-      return entry.status
+      return entry.status;
   }
 }
 
 function outputLineCount(text: string): number {
-  if (!text.trim()) return 0
-  return text.split(/\r?\n/).filter((line) => line.trim()).length
+  if (!text.trim()) return 0;
+  return text.split(/\r?\n/).filter((line) => line.trim()).length;
 }
 
 function toolOutputSummary(entry: ChatTurnFeedEntry): string[] {
-  if (entry.kind !== 'tool') return []
-  const meta = entry.meta ?? {}
-  const stdout = typeof meta.stdout === 'string' ? meta.stdout.trim() : ''
-  const stderr = typeof meta.stderr === 'string' ? meta.stderr.trim() : ''
-  const exitCode = typeof meta.exit_code === 'number' ? meta.exit_code : null
-  const summary: string[] = []
+  if (entry.kind !== "tool") return [];
+  const meta = entry.meta ?? {};
+  const stdout = typeof meta.stdout === "string" ? meta.stdout.trim() : "";
+  const stderr = typeof meta.stderr === "string" ? meta.stderr.trim() : "";
+  const exitCode = typeof meta.exit_code === "number" ? meta.exit_code : null;
+  const summary: string[] = [];
   if (exitCode !== null) {
-    summary.push(`退出码 ${exitCode}`)
+    summary.push(`退出码 ${exitCode}`);
   }
   if (stdout) {
-    summary.push(`stdout ${outputLineCount(stdout)} 行`)
+    summary.push(`stdout ${outputLineCount(stdout)} 行`);
   }
   if (stderr) {
-    summary.push(`stderr ${outputLineCount(stderr)} 行`)
+    summary.push(`stderr ${outputLineCount(stderr)} 行`);
   }
-  if (summary.length === 0 && entry.status === 'streaming') {
-    summary.push('正在采集输出')
+  if (summary.length === 0 && entry.status === "streaming") {
+    summary.push("正在采集输出");
   }
-  return summary
+  return summary;
 }
 
-function renderToolOutput(entry: ChatTurnFeedEntry, expanded: boolean, onToggle: () => void) {
-  if (entry.kind !== 'tool') return null
-  const meta = entry.meta ?? {}
-  const stdout = typeof meta.stdout === 'string' ? meta.stdout.trim() : ''
-  const stderr = typeof meta.stderr === 'string' ? meta.stderr.trim() : ''
-  const summary = toolOutputSummary(entry)
-  const hasOutput = Boolean(stdout || stderr)
+function renderToolOutput(
+  entry: ChatTurnFeedEntry,
+  expanded: boolean,
+  onToggle: () => void,
+) {
+  if (entry.kind !== "tool") return null;
+  const meta = entry.meta ?? {};
+  const stdout = typeof meta.stdout === "string" ? meta.stdout.trim() : "";
+  const stderr = typeof meta.stderr === "string" ? meta.stderr.trim() : "";
+  const summary = toolOutputSummary(entry);
+  const hasOutput = Boolean(stdout || stderr);
   return (
     <div className="mt-3 rounded-xl border border-default-200/70 bg-background/50 p-2 text-xs">
       <div className="flex items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2 text-muted-foreground">
-          {summary.length > 0 ? summary.map((item) => <span key={item}>{item}</span>) : <span>暂无输出</span>}
+          {summary.length > 0 ? (
+            summary.map((item) => <span key={item}>{item}</span>)
+          ) : (
+            <span>暂无输出</span>
+          )}
         </div>
         {hasOutput ? (
           <button
@@ -128,7 +150,7 @@ function renderToolOutput(entry: ChatTurnFeedEntry, expanded: boolean, onToggle:
             className="rounded-md border px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-muted hover:text-foreground"
             onClick={onToggle}
           >
-            {expanded ? '收起输出' : '展开输出'}
+            {expanded ? "收起输出" : "展开输出"}
           </button>
         ) : null}
       </div>
@@ -136,32 +158,44 @@ function renderToolOutput(entry: ChatTurnFeedEntry, expanded: boolean, onToggle:
         <div className="mt-2 space-y-2">
           {stdout ? (
             <div>
-              <div className="mb-1 text-[11px] font-medium text-muted-foreground">stdout</div>
-              <pre className="overflow-x-auto rounded-md bg-background/80 p-2 whitespace-pre-wrap break-words">{stdout}</pre>
+              <div className="mb-1 text-[11px] font-medium text-muted-foreground">
+                stdout
+              </div>
+              <pre className="overflow-x-auto rounded-md bg-background/80 p-2 whitespace-pre-wrap break-words">
+                {stdout}
+              </pre>
             </div>
           ) : null}
           {stderr ? (
             <div>
-              <div className="mb-1 text-[11px] font-medium text-muted-foreground">stderr</div>
-              <pre className="overflow-x-auto rounded-md bg-background/80 p-2 whitespace-pre-wrap break-words text-danger">{stderr}</pre>
+              <div className="mb-1 text-[11px] font-medium text-muted-foreground">
+                stderr
+              </div>
+              <pre className="overflow-x-auto rounded-md bg-background/80 p-2 whitespace-pre-wrap break-words text-danger">
+                {stderr}
+              </pre>
             </div>
           ) : null}
         </div>
       ) : null}
     </div>
-  )
+  );
 }
 
 function renderQuestionOptions(entry: ChatTurnFeedEntry) {
-  if (entry.kind !== 'question') return null
-  const meta = entry.meta ?? {}
-  const questions = Array.isArray(meta.questions) ? meta.questions : []
-  if (questions.length === 0) return null
+  if (entry.kind !== "question") return null;
+  const meta = entry.meta ?? {};
+  const questions = Array.isArray(meta.questions) ? meta.questions : [];
+  if (questions.length === 0) return null;
   return (
     <div className="mt-2 space-y-2 text-xs text-muted-foreground">
       {questions.map((question, idx) => {
-        if (!question || typeof question !== 'object') return null
-        const q = question as { header?: string; question?: string; options?: { label?: string; description?: string }[] }
+        if (!question || typeof question !== "object") return null;
+        const q = question as {
+          header?: string;
+          question?: string;
+          options?: { label?: string; description?: string }[];
+        };
         return (
           <div key={idx} className="rounded-md bg-background/60 p-2">
             {q.header ? <div className="font-medium">{q.header}</div> : null}
@@ -170,80 +204,153 @@ function renderQuestionOptions(entry: ChatTurnFeedEntry) {
               <ul className="mt-2 space-y-1">
                 {q.options.map((option, optionIdx) => (
                   <li key={optionIdx} className="list-disc ml-4">
-                    <span className="font-medium">{option?.label ?? '选项'}</span>
-                    {option?.description ? ` · ${option.description}` : ''}
+                    <span className="font-medium">
+                      {option?.label ?? "选项"}
+                    </span>
+                    {option?.description ? ` · ${option.description}` : ""}
                   </li>
                 ))}
               </ul>
             ) : null}
           </div>
-        )
+        );
       })}
     </div>
-  )
+  );
 }
 
-function renderThinkingVariant(entry: ChatTurnFeedEntry) {
-  if (entry.kind !== 'thinking') return null
-  const translated = typeof entry.meta?.translated_content === 'string' ? entry.meta.translated_content.trim() : ''
-  const content = translated || entry.content
-  if (!content.trim()) return <div className="text-sm text-muted-foreground">正在思考…</div>
+function renderThinkingVariant(entry: ChatTurnFeedEntry, pending = false) {
+  if (entry.kind !== "thinking") return null;
+  const translated =
+    typeof entry.meta?.translated_content === "string"
+      ? entry.meta.translated_content.trim()
+      : "";
+  const content = translated || entry.content;
+  if (!content.trim())
+    return <div className="text-sm text-muted-foreground">正在思考…</div>;
+  if (pending || entry.status === "streaming") {
+    return (
+      <PlainStreamingText
+        content={content}
+        className="text-sm text-muted-foreground"
+      />
+    );
+  }
   return (
     <div className="chat-markdown text-sm text-muted-foreground">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
-  )
+  );
 }
 
-function FeedEntry({ entry, compact = false }: { entry: ChatTurnFeedEntry; compact?: boolean }) {
-  const [toolOutputExpanded, setToolOutputExpanded] = useState(false)
+const FeedEntry = memo(
+  function FeedEntry({
+    entry,
+    compact = false,
+    pending = false,
+  }: {
+    entry: ChatTurnFeedEntry;
+    compact?: boolean;
+    pending?: boolean;
+  }) {
+    const [toolOutputExpanded, setToolOutputExpanded] = useState(false);
 
-  if (entry.kind === 'progress' || entry.kind === 'system') {
+    if (entry.kind === "progress" || entry.kind === "system") {
+      return (
+        <div
+          className={`rounded-full border px-3 py-1 text-xs text-muted-foreground ${cardClass(entry)}`}
+        >
+          {entry.content || entryTitle(entry)}
+        </div>
+      );
+    }
+
     return (
-      <div className={`rounded-full border px-3 py-1 text-xs text-muted-foreground ${cardClass(entry)}`}>
-        {entry.content || entryTitle(entry)}
-      </div>
-    )
-  }
-
-  return (
-    <div className={`rounded-2xl border px-3 py-3 ${cardClass(entry)}`}>
-      <div className="mb-2 flex items-center justify-between gap-3 text-[11px] font-medium text-muted-foreground">
-        <span>{entryTitle(entry)}</span>
-        <span>{statusLabel(entry)}</span>
-      </div>
-      {entry.kind === 'thinking' ? renderThinkingVariant(entry) : null}
-      {entry.kind === 'answer' ? (
-        <div className="chat-markdown text-sm">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content || '...'}</ReactMarkdown>
+      <div className={`rounded-2xl border px-3 py-3 ${cardClass(entry)}`}>
+        <div className="mb-2 flex items-center justify-between gap-3 text-[11px] font-medium text-muted-foreground">
+          <span>{entryTitle(entry)}</span>
+          <span>{statusLabel(entry)}</span>
         </div>
-      ) : null}
-      {entry.kind !== 'thinking' && entry.kind !== 'answer' ? (
-        <div className={entry.kind === 'tool' ? 'text-sm font-mono break-words' : 'chat-markdown text-sm'}>
-          {entry.kind === 'tool' ? entry.content || 'command execution' : <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content || '...'}</ReactMarkdown>}
-        </div>
-      ) : null}
-      {renderToolOutput(entry, toolOutputExpanded, () => setToolOutputExpanded((current) => !current))}
-      {renderQuestionOptions(entry)}
-      {!compact && entry.kind === 'thinking' && typeof entry.meta?.translated_content === 'string' && entry.meta.translated_content ? (
-        <details className="mt-2 text-xs text-muted-foreground">
-          <summary className="cursor-pointer select-none">查看原始 thinking</summary>
-          <div className="chat-markdown mt-2">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content}</ReactMarkdown>
+        {entry.kind === "thinking"
+          ? renderThinkingVariant(entry, pending)
+          : null}
+        {entry.kind === "answer" ? (
+          pending || entry.status === "streaming" ? (
+            <PlainStreamingText content={entry.content} />
+          ) : (
+            <div className="chat-markdown text-sm">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {entry.content || "..."}
+              </ReactMarkdown>
+            </div>
+          )
+        ) : null}
+        {entry.kind !== "thinking" && entry.kind !== "answer" ? (
+          <div
+            className={
+              entry.kind === "tool"
+                ? "text-sm font-mono break-words"
+                : "chat-markdown text-sm"
+            }
+          >
+            {entry.kind === "tool" ? (
+              entry.content || "command execution"
+            ) : (
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {entry.content || "..."}
+              </ReactMarkdown>
+            )}
           </div>
-        </details>
-      ) : null}
-    </div>
-  )
-}
+        ) : null}
+        {renderToolOutput(entry, toolOutputExpanded, () =>
+          setToolOutputExpanded((current) => !current),
+        )}
+        {renderQuestionOptions(entry)}
+        {!compact &&
+        entry.kind === "thinking" &&
+        typeof entry.meta?.translated_content === "string" &&
+        entry.meta.translated_content ? (
+          <details className="mt-2 text-xs text-muted-foreground">
+            <summary className="cursor-pointer select-none">
+              查看原始 thinking
+            </summary>
+            <div className="chat-markdown mt-2">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {entry.content}
+              </ReactMarkdown>
+            </div>
+          </details>
+        ) : null}
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.entry === next.entry &&
+    prev.compact === next.compact &&
+    prev.pending === next.pending,
+);
 
-function AnswerContent({ entry }: { entry: ChatTurnFeedEntry }) {
-  return (
-    <div className="chat-markdown text-sm">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content || '...'}</ReactMarkdown>
-    </div>
-  )
-}
+const AnswerContent = memo(
+  function AnswerContent({
+    entry,
+    pending = false,
+  }: {
+    entry: ChatTurnFeedEntry;
+    pending?: boolean;
+  }) {
+    if (pending || entry.status === "streaming") {
+      return <PlainStreamingText content={entry.content} />;
+    }
+    return (
+      <div className="chat-markdown text-sm">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {entry.content || "..."}
+        </ReactMarkdown>
+      </div>
+    );
+  },
+  (prev, next) => prev.entry === next.entry && prev.pending === next.pending,
+);
 
 /**
  * 功能：把一轮 Codex 运行时 feed 按时间线顺序展示，并让重内容默认折叠。
@@ -251,25 +358,44 @@ function AnswerContent({ entry }: { entry: ChatTurnFeedEntry }) {
  * 失败场景：feed 条目为空时显示等待占位，不抛出异常。
  * 副作用：无；仅负责 UI 渲染。
  */
-export function ChatTurnFeed({ feed, pending = false, identity, compact = false }: ChatTurnFeedProps) {
-  const answerEntry = feed.entries.find((entry) => entry.kind === 'answer' && entry.content.trim())
-  const timelineEntries = feed.entries.filter((entry) => entry.kind !== 'answer' && isVisibleTimelineEntry(entry))
+export function ChatTurnFeed({
+  feed,
+  pending = false,
+  identity,
+  compact = false,
+}: ChatTurnFeedProps) {
+  const { answerEntry, timelineEntries } = useMemo(
+    () => ({
+      answerEntry: feed.entries.find(
+        (entry) => entry.kind === "answer" && entry.content.trim(),
+      ),
+      timelineEntries: feed.entries.filter(
+        (entry) => entry.kind !== "answer" && isVisibleTimelineEntry(entry),
+      ),
+    }),
+    [feed.entries],
+  );
 
   return (
     <div className="space-y-3">
       <div className="text-[11px] font-medium text-muted-foreground">
-        AI{identity ? ` · ${identity}` : ''} {pending ? '处理中' : '本轮时间线'}
+        AI{identity ? ` · ${identity}` : ""} {pending ? "处理中" : "本轮时间线"}
       </div>
       {timelineEntries.length > 0 ? (
         <div className="space-y-2">
           {timelineEntries.map((entry) => (
-            <FeedEntry key={entry.entry_id} entry={entry} compact={compact} />
+            <FeedEntry
+              key={entry.entry_id}
+              entry={entry}
+              compact={compact}
+              pending={pending}
+            />
           ))}
         </div>
       ) : null}
       {!compact && answerEntry ? (
         <div className="border-t border-default-200/70 pt-3">
-          <AnswerContent entry={answerEntry} />
+          <AnswerContent entry={answerEntry} pending={pending} />
         </div>
       ) : null}
       {pending && timelineEntries.length === 0 && !answerEntry ? (
@@ -278,5 +404,5 @@ export function ChatTurnFeed({ feed, pending = false, identity, compact = false 
         </div>
       ) : null}
     </div>
-  )
+  );
 }
