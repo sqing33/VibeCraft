@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
@@ -31,6 +32,14 @@ type ThinkingTranslationSpec struct {
 
 type ThinkingTranslatorFunc func(ctx context.Context, spec ThinkingTranslationSpec, text string) (string, error)
 
+type thinkingTranslationDecision uint8
+
+const (
+	thinkingTranslationDecisionUnknown thinkingTranslationDecision = iota
+	thinkingTranslationDecisionTranslate
+	thinkingTranslationDecisionSkip
+)
+
 type thinkingTranslationPendingEntry struct {
 	buffer    string
 	lastDelta time.Time
@@ -45,7 +54,16 @@ type thinkingTranslationRuntime struct {
 	failed            bool
 	pendingByEntry    map[string]*thinkingTranslationPendingEntry
 	translatedByEntry map[string]string
+	decisionByEntry   map[string]thinkingTranslationDecision
 	entryOrder        []string
+}
+
+type thinkingLanguageStats struct {
+	han          int
+	latin        int
+	kana         int
+	hangul       int
+	otherLetters int
 }
 
 func newThinkingTranslationRuntime(manager *Manager, sessionID, turnID string, spec *ThinkingTranslationSpec) *thinkingTranslationRuntime {
@@ -67,7 +85,15 @@ func newThinkingTranslationRuntime(manager *Manager, sessionID, turnID string, s
 }
 
 func (t *thinkingTranslationRuntime) applied() bool {
-	return t != nil && t.spec != nil
+	if t == nil {
+		return false
+	}
+	for _, entryID := range t.entryOrder {
+		if strings.TrimSpace(t.translatedByEntry[entryID]) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *thinkingTranslationRuntime) failedState() bool {
@@ -89,14 +115,19 @@ func (t *thinkingTranslationRuntime) translatedText() string {
 	return strings.TrimSpace(out.String())
 }
 
+func normalizeTranslationEntryID(entryID string) string {
+	entryID = strings.TrimSpace(entryID)
+	if entryID == "" {
+		return "thinking"
+	}
+	return entryID
+}
+
 func (t *thinkingTranslationRuntime) rememberEntry(entryID string) {
 	if t == nil {
 		return
 	}
-	entryID = strings.TrimSpace(entryID)
-	if entryID == "" {
-		entryID = "thinking"
-	}
+	entryID = normalizeTranslationEntryID(entryID)
 	if t.translatedByEntry == nil {
 		t.translatedByEntry = map[string]string{}
 	}
@@ -112,16 +143,16 @@ func (t *thinkingTranslationRuntime) resetEntry(ctx context.Context, entryID str
 	if t == nil || t.spec == nil || t.failed {
 		return
 	}
-	entryID = strings.TrimSpace(entryID)
-	if entryID == "" {
-		return
-	}
+	entryID = normalizeTranslationEntryID(entryID)
 	t.rememberEntry(entryID)
 	if t.translatedByEntry != nil {
 		t.translatedByEntry[entryID] = ""
 	}
 	if t.pendingByEntry != nil {
 		delete(t.pendingByEntry, entryID)
+	}
+	if t.decisionByEntry != nil {
+		delete(t.decisionByEntry, entryID)
 	}
 	if t.manager != nil && strings.TrimSpace(t.turnID) != "" {
 		t.manager.persistTurnTranslationWarn(ctx, t.turnID, entryID, "", true)
@@ -132,10 +163,7 @@ func (t *thinkingTranslationRuntime) add(ctx context.Context, entryID, delta str
 	if t == nil || t.spec == nil || t.failed {
 		return
 	}
-	entryID = strings.TrimSpace(entryID)
-	if entryID == "" {
-		entryID = "thinking"
-	}
+	entryID = normalizeTranslationEntryID(entryID)
 	if delta == "" {
 		return
 	}
@@ -152,10 +180,7 @@ func (t *thinkingTranslationRuntime) closeEntry(ctx context.Context, entryID str
 	if t == nil || t.spec == nil || t.failed {
 		return
 	}
-	entryID = strings.TrimSpace(entryID)
-	if entryID == "" {
-		entryID = "thinking"
-	}
+	entryID = normalizeTranslationEntryID(entryID)
 	pending := t.ensurePendingEntry(entryID)
 	pending.closed = true
 	t.flushReady(ctx, false, time.Now())
@@ -172,6 +197,7 @@ func (t *thinkingTranslationRuntime) ensurePendingEntry(entryID string) *thinkin
 	if t == nil {
 		return nil
 	}
+	entryID = normalizeTranslationEntryID(entryID)
 	if t.pendingByEntry == nil {
 		t.pendingByEntry = map[string]*thinkingTranslationPendingEntry{}
 	}
@@ -181,6 +207,25 @@ func (t *thinkingTranslationRuntime) ensurePendingEntry(entryID string) *thinkin
 	pending := &thinkingTranslationPendingEntry{}
 	t.pendingByEntry[entryID] = pending
 	return pending
+}
+
+func (t *thinkingTranslationRuntime) entryDecision(entryID, segment string) thinkingTranslationDecision {
+	if t == nil {
+		return thinkingTranslationDecisionSkip
+	}
+	entryID = normalizeTranslationEntryID(entryID)
+	if t.decisionByEntry == nil {
+		t.decisionByEntry = map[string]thinkingTranslationDecision{}
+	}
+	if decision, ok := t.decisionByEntry[entryID]; ok && decision != thinkingTranslationDecisionUnknown {
+		return decision
+	}
+	decision := thinkingTranslationDecisionSkip
+	if needsChineseTranslation(segment) {
+		decision = thinkingTranslationDecisionTranslate
+	}
+	t.decisionByEntry[entryID] = decision
+	return decision
 }
 
 func (t *thinkingTranslationRuntime) flushReady(ctx context.Context, force bool, now time.Time) {
@@ -195,6 +240,9 @@ func (t *thinkingTranslationRuntime) flushReady(ctx context.Context, force bool,
 				continue
 			}
 			emitted = true
+			if t.entryDecision(entryID, segment) != thinkingTranslationDecisionTranslate {
+				continue
+			}
 			translated, err := t.manager.translateThinking(ctx, *t.spec, segment)
 			if err != nil {
 				t.failed = true
@@ -242,6 +290,7 @@ func (t *thinkingTranslationRuntime) nextSegment(entryID string, force bool, now
 	if t == nil || t.pendingByEntry == nil {
 		return ""
 	}
+	entryID = normalizeTranslationEntryID(entryID)
 	pending := t.pendingByEntry[entryID]
 	if pending == nil {
 		return ""
@@ -296,6 +345,58 @@ func lastTranslationBoundaryEnd(text string) int {
 		return -1
 	}
 	return idx + size
+}
+
+func collectThinkingLanguageStats(text string) thinkingLanguageStats {
+	stats := thinkingLanguageStats{}
+	for _, r := range text {
+		switch {
+		case unicode.In(r, unicode.Han):
+			stats.han++
+		case unicode.In(r, unicode.Hiragana, unicode.Katakana):
+			stats.kana++
+		case unicode.In(r, unicode.Hangul):
+			stats.hangul++
+		case unicode.IsLetter(r) && unicode.In(r, unicode.Latin):
+			stats.latin++
+		case unicode.IsLetter(r):
+			stats.otherLetters++
+		}
+	}
+	return stats
+}
+
+func needsChineseTranslation(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	stats := collectThinkingLanguageStats(text)
+	meaningfulLetters := stats.han + stats.latin + stats.kana + stats.hangul + stats.otherLetters
+	if meaningfulLetters == 0 {
+		return false
+	}
+	nonChineseLetters := stats.latin + stats.kana + stats.hangul + stats.otherLetters
+	if stats.han == 0 {
+		return nonChineseLetters > 0
+	}
+	chineseRatio := float64(stats.han) / float64(meaningfulLetters)
+	if (stats.kana+stats.hangul) > 0 && chineseRatio < 0.85 {
+		return true
+	}
+	if stats.han >= nonChineseLetters {
+		return false
+	}
+	if stats.han >= 8 && chineseRatio >= 0.20 {
+		return false
+	}
+	if stats.han >= 4 && chineseRatio >= 0.35 {
+		return false
+	}
+	if stats.han >= 2 && chineseRatio >= 0.65 {
+		return false
+	}
+	return true
 }
 
 func (m *Manager) translateThinking(ctx context.Context, spec ThinkingTranslationSpec, text string) (string, error) {

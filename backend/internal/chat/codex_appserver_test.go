@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 )
 
@@ -71,5 +72,27 @@ func TestParseCodexAppServerTurnMetrics(t *testing.T) {
 	}
 	if metrics.CachedInputTokens == nil || *metrics.CachedInputTokens != 3 {
 		t.Fatalf("cached=%v", metrics.CachedInputTokens)
+	}
+}
+
+func TestShouldFallbackCodexStreamDisconnect_OnlyBeforeVisibleOutput(t *testing.T) {
+	err := errors.New("stream disconnected before completion: stream closed before response.completed")
+	if !shouldFallbackCodexStreamDisconnect(err, "", "", "", "") {
+		t.Fatalf("expected fallback for empty output disconnect")
+	}
+	if shouldFallbackCodexStreamDisconnect(err, "", "partial answer", "", "") {
+		t.Fatalf("expected no fallback after assistant output")
+	}
+	if shouldFallbackCodexStreamDisconnect(err, "", "", "已有思考", "") {
+		t.Fatalf("expected no fallback after reasoning output")
+	}
+}
+
+func TestShouldFallbackCodexClosedBeforeCompletion_RequiresEmptyVisibleOutput(t *testing.T) {
+	if !shouldFallbackCodexClosedBeforeCompletion("", "", "", "") {
+		t.Fatalf("expected fallback when no visible output exists")
+	}
+	if shouldFallbackCodexClosedBeforeCompletion("done", "", "", "") {
+		t.Fatalf("expected no fallback after final text exists")
 	}
 }

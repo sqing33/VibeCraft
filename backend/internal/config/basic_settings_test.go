@@ -6,19 +6,39 @@ import (
 	"vibe-tree/backend/internal/config"
 )
 
+func TestNormalizeBasicSettings_ClearsLegacyFields(t *testing.T) {
+	basic := &config.BasicSettings{
+		ThinkingTranslation: &config.ThinkingTranslationSettings{
+			SourceID:       "legacy-source",
+			Model:          "translator-fast",
+			TargetModelIDs: []string{"gpt-5-codex"},
+		},
+	}
+
+	config.NormalizeBasicSettings(&basic)
+	if basic == nil || basic.ThinkingTranslation == nil {
+		t.Fatalf("expected thinking translation to remain")
+	}
+	if basic.ThinkingTranslation.ModelID != "translator-fast" {
+		t.Fatalf("unexpected model_id: %q", basic.ThinkingTranslation.ModelID)
+	}
+	if basic.ThinkingTranslation.SourceID != "" || basic.ThinkingTranslation.Model != "" {
+		t.Fatalf("expected legacy fields to be cleared: %+v", basic.ThinkingTranslation)
+	}
+	if len(basic.ThinkingTranslation.TargetModelIDs) != 0 {
+		t.Fatalf("expected target_model_ids to be cleared: %#v", basic.ThinkingTranslation.TargetModelIDs)
+	}
+}
+
 func TestValidateBasicSettings_OK(t *testing.T) {
 	llm := &config.LLMSettings{
 		Sources: []config.LLMSourceConfig{{ID: "openai-default", Provider: "openai"}},
 		Models: []config.LLMModelConfig{
 			{ID: "translator-fast", Provider: "openai", Model: "gpt-4.1-mini", SourceID: "openai-default"},
-			{ID: "gpt-5-codex", Provider: "openai", Model: "gpt-5-codex", SourceID: "openai-default"},
 		},
 	}
 	basic := &config.BasicSettings{
-		ThinkingTranslation: &config.ThinkingTranslationSettings{
-			ModelID:        "translator-fast",
-			TargetModelIDs: []string{"GPT-5-CODEX"},
-		},
+		ThinkingTranslation: &config.ThinkingTranslationSettings{ModelID: "translator-fast"},
 	}
 
 	config.NormalizeBasicSettings(&basic)
@@ -27,19 +47,15 @@ func TestValidateBasicSettings_OK(t *testing.T) {
 	}
 }
 
-func TestValidateBasicSettings_RejectsUnknownTargetModel(t *testing.T) {
+func TestValidateBasicSettings_RejectsUnknownModel(t *testing.T) {
 	llm := &config.LLMSettings{
 		Sources: []config.LLMSourceConfig{{ID: "openai-default", Provider: "openai"}},
 		Models: []config.LLMModelConfig{
 			{ID: "translator-fast", Provider: "openai", Model: "gpt-4.1-mini", SourceID: "openai-default"},
-			{ID: "gpt-5-codex", Provider: "openai", Model: "gpt-5-codex", SourceID: "openai-default"},
 		},
 	}
 	basic := &config.BasicSettings{
-		ThinkingTranslation: &config.ThinkingTranslationSettings{
-			ModelID:        "translator-fast",
-			TargetModelIDs: []string{"missing-model"},
-		},
+		ThinkingTranslation: &config.ThinkingTranslationSettings{ModelID: "missing-model"},
 	}
 
 	if err := config.ValidateBasicSettings(basic, llm); err == nil {
@@ -47,27 +63,20 @@ func TestValidateBasicSettings_RejectsUnknownTargetModel(t *testing.T) {
 	}
 }
 
-func TestReconcileBasicSettingsWithLLM_TrimsRemovedModelsAndClearsMissingModel(t *testing.T) {
+func TestReconcileBasicSettingsWithLLM_ClearsMissingModel(t *testing.T) {
 	llm := &config.LLMSettings{
 		Sources: []config.LLMSourceConfig{{ID: "openai-default", Provider: "openai"}},
 		Models: []config.LLMModelConfig{
 			{ID: "translator-fast", Provider: "openai", Model: "gpt-4.1-mini", SourceID: "openai-default"},
-			{ID: "gpt-5-codex", Provider: "openai", Model: "gpt-5-codex", SourceID: "openai-default"},
 		},
 	}
 	basic := &config.BasicSettings{
-		ThinkingTranslation: &config.ThinkingTranslationSettings{
-			ModelID:        "translator-fast",
-			TargetModelIDs: []string{"gpt-5-codex", "claude-3-7-sonnet"},
-		},
+		ThinkingTranslation: &config.ThinkingTranslationSettings{ModelID: "translator-fast"},
 	}
 
 	config.ReconcileBasicSettingsWithLLM(&basic, llm)
 	if basic == nil || basic.ThinkingTranslation == nil {
 		t.Fatalf("expected thinking translation to remain")
-	}
-	if got := basic.ThinkingTranslation.TargetModelIDs; len(got) != 1 || got[0] != "gpt-5-codex" {
-		t.Fatalf("unexpected target_model_ids: %#v", got)
 	}
 
 	basic.ThinkingTranslation.ModelID = "missing-model"
@@ -77,22 +86,18 @@ func TestReconcileBasicSettingsWithLLM_TrimsRemovedModelsAndClearsMissingModel(t
 	}
 }
 
-func TestResolveThinkingTranslation_MatchesTargetModel(t *testing.T) {
+func TestResolveThinkingTranslation_ReturnsConfiguredRuntime(t *testing.T) {
 	llm := &config.LLMSettings{
 		Sources: []config.LLMSourceConfig{{ID: "anthropic-default", Provider: "anthropic", BaseURL: "https://anthropic.example.com", APIKey: "sk-ant-123"}},
 		Models: []config.LLMModelConfig{
 			{ID: "translator-fast", Provider: "anthropic", Model: "claude-3-5-haiku", SourceID: "anthropic-default"},
-			{ID: "claude-3-7-sonnet", Provider: "anthropic", Model: "claude-3-7-sonnet", SourceID: "anthropic-default"},
 		},
 	}
 	basic := &config.BasicSettings{
-		ThinkingTranslation: &config.ThinkingTranslationSettings{
-			ModelID:        "translator-fast",
-			TargetModelIDs: []string{"claude-3-7-sonnet"},
-		},
+		ThinkingTranslation: &config.ThinkingTranslationSettings{ModelID: "translator-fast"},
 	}
 
-	runtime, err := config.ResolveThinkingTranslation(basic, llm, "claude-3-7-sonnet")
+	runtime, err := config.ResolveThinkingTranslation(basic, llm)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -101,13 +106,6 @@ func TestResolveThinkingTranslation_MatchesTargetModel(t *testing.T) {
 	}
 	if runtime.Provider != "anthropic" || runtime.Model != "claude-3-5-haiku" {
 		t.Fatalf("unexpected runtime: %+v", runtime)
-	}
-	miss, err := config.ResolveThinkingTranslation(basic, llm, "other-model")
-	if err != nil {
-		t.Fatalf("unexpected miss error: %v", err)
-	}
-	if miss != nil {
-		t.Fatalf("expected nil runtime for unmatched model")
 	}
 }
 
@@ -134,10 +132,7 @@ func TestValidateBasicSettingsWithRuntime_UsesModelProviderInsteadOfSourceProvid
 		t.Fatalf("normalize runtime settings: %v", err)
 	}
 	basic := &config.BasicSettings{
-		ThinkingTranslation: &config.ThinkingTranslationSettings{
-			ModelID:        "translator-fast",
-			TargetModelIDs: []string{"translator-fast"},
-		},
+		ThinkingTranslation: &config.ThinkingTranslationSettings{ModelID: "translator-fast"},
 	}
 	if err := config.ValidateBasicSettingsWithRuntime(basic, cfg); err != nil {
 		t.Fatalf("unexpected error: %v", err)

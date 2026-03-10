@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"vibe-tree/backend/internal/paths"
+	"vibe-tree/backend/internal/runner"
 )
 
 const defaultManagedOpenAIBaseURL = "https://api.openai.com/v1"
@@ -54,6 +55,7 @@ func WriteCodexProviderConfig(toolID, baseURL string) (string, error) {
 	if baseURL == "" {
 		baseURL = defaultManagedOpenAIBaseURL
 	}
+	baseURL = runner.NormalizeBaseURL("openai", baseURL)
 	content := strings.TrimSpace(fmt.Sprintf(`
 model_provider = "vibe_tree"
 

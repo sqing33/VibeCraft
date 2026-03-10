@@ -471,13 +471,11 @@ export type BasicSettings = {
 
 export type ThinkingTranslationSettings = {
   model_id: string;
-  target_model_ids: string[];
 };
 
 export type PutBasicSettingsRequest = {
   thinking_translation?: {
     model_id: string;
-    target_model_ids: string[];
   };
 };
 

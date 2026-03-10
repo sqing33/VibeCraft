@@ -171,8 +171,15 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 				if !ok {
 					released = true
 					_ = lease.Discard()
-					if err := client.Wait(); err != nil {
-						return TurnResult{}, err
+					waitErr := client.Wait()
+					if shouldFallbackCodexStreamDisconnect(waitErr, finalText, assistantBuf.String(), reasoningSummaryBuf.String(), reasoningContentBuf.String()) {
+						return TurnResult{}, &codexAppServerEarlyFailure{err: fmt.Errorf("stream disconnected before completion: %w", waitErr)}
+					}
+					if waitErr != nil {
+						return TurnResult{}, waitErr
+					}
+					if shouldFallbackCodexClosedBeforeCompletion(finalText, assistantBuf.String(), reasoningSummaryBuf.String(), reasoningContentBuf.String()) {
+						return TurnResult{}, &codexAppServerEarlyFailure{err: errors.New("codex app-server closed before turn completion")}
 					}
 					return TurnResult{}, fmt.Errorf("codex app-server closed before turn completion")
 				}
@@ -458,6 +465,26 @@ func parseCodexAppServerTurnMetrics(params json.RawMessage) codexAppServerTurnMe
 		TokenOut:          pointerInt64(tokenOut),
 		CachedInputTokens: pointerInt64(cached),
 	}
+}
+
+func shouldFallbackCodexClosedBeforeCompletion(finalText, assistantText, reasoningSummary, reasoningContent string) bool {
+	return strings.TrimSpace(finalText) == "" &&
+		strings.TrimSpace(assistantText) == "" &&
+		strings.TrimSpace(reasoningSummary) == "" &&
+		strings.TrimSpace(reasoningContent) == ""
+}
+
+func shouldFallbackCodexStreamDisconnect(err error, finalText, assistantText, reasoningSummary, reasoningContent string) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	if !strings.Contains(message, "stream disconnected before completion") &&
+		!strings.Contains(message, "stream closed before response.completed") &&
+		!strings.Contains(message, "closed before turn completion") {
+		return false
+	}
+	return shouldFallbackCodexClosedBeforeCompletion(finalText, assistantText, reasoningSummary, reasoningContent)
 }
 
 func parseCodexAppServerTurnCompletion(params json.RawMessage) error {

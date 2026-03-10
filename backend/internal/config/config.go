@@ -130,9 +130,12 @@ type BasicSettings struct {
 }
 
 type ThinkingTranslationSettings struct {
-	ModelID        string   `json:"model_id,omitempty"`
-	SourceID       string   `json:"source_id,omitempty"` // 旧字段，仅保留用于 JSON 反序列化兼容，不再写入
-	Model          string   `json:"model,omitempty"`     // 旧字段，仅保留用于 JSON 反序列化兼容，不再写入
+	ModelID string `json:"model_id,omitempty"`
+
+	SourceID string `json:"source_id,omitempty"` // 旧字段，仅保留用于 JSON 反序列化兼容，不再写入
+	Model    string `json:"model,omitempty"`     // 旧字段，仅保留用于 JSON 反序列化兼容，不再写入
+
+	// TargetModelIDs 为旧字段，仅保留用于 JSON 反序列化兼容，不再参与运行时逻辑，也不再写回。
 	TargetModelIDs []string `json:"target_model_ids,omitempty"`
 }
 

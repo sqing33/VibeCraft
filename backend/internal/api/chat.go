@@ -435,7 +435,7 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 			Spec:                resolved.Spec,
 			Provider:            firstNonEmptyTrimmed(resolved.ProtocolFamily, resolved.Provider),
 			Model:               resolved.Model,
-			ThinkingTranslation: buildThinkingTranslationSpec(firstNonEmptyTrimmed(strings.TrimSpace(req.ModelID), resolved.PrimaryModelID, resolved.Model)),
+			ThinkingTranslation: buildThinkingTranslationSpec(),
 		})
 		if err != nil {
 			if errors.Is(err, store.ErrValidation) {
@@ -548,15 +548,12 @@ func cloneStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-func buildThinkingTranslationSpec(primaryModelID string) *chat.ThinkingTranslationSpec {
-	if strings.TrimSpace(primaryModelID) == "" {
-		return nil
-	}
+func buildThinkingTranslationSpec() *chat.ThinkingTranslationSpec {
 	cfg, _, err := config.LoadPersisted()
 	if err != nil {
 		return nil
 	}
-	runtime, err := config.ResolveThinkingTranslationWithRuntime(cfg.Basic, cfg, primaryModelID)
+	runtime, err := config.ResolveThinkingTranslationWithRuntime(cfg.Basic, cfg)
 	if err != nil || runtime == nil {
 		return nil
 	}

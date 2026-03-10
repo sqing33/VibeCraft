@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Provide configurable Chinese translation for reasoning/thinking content emitted by selected AI models during chat turns.
+Provide configurable Chinese translation for reasoning/thinking content emitted during chat turns, while automatically skipping thinking that is already Chinese-dominant.
 
 ## Requirements
 
@@ -11,59 +11,50 @@ Provide configurable Chinese translation for reasoning/thinking content emitted 
 The system MUST persist thinking translation settings under a dedicated basic settings section instead of mixing them into LLM settings.
 
 The thinking translation settings MUST support:
-- `source_id`: an existing LLM Source id used for the translation request
-- `model`: a non-empty manually entered translation model name
-- `target_model_ids`: one or more existing LLM model ids that should have their reasoning translated
+- `model_id`: an existing SDK runtime model id used for the translation request
 
 The system MUST provide `GET /api/v1/settings/basic` and `PUT /api/v1/settings/basic` to read and write this configuration.
 
-If any referenced `source_id` or `target_model_ids` does not exist in the current LLM settings, the daemon MUST reject the write with HTTP 400.
+If the referenced `model_id` does not exist in the current runtime model settings, the daemon MUST reject the write with HTTP 400.
 
 #### Scenario: Save valid thinking translation settings
 
-- **WHEN** the client sends `PUT /api/v1/settings/basic` with an existing `source_id`, a non-empty `model`, and one or more existing `target_model_ids`
+- **WHEN** the client sends `PUT /api/v1/settings/basic` with an existing `model_id`
 - **THEN** the daemon persists the configuration and returns HTTP 200
 
-#### Scenario: Reject unknown source id
+#### Scenario: Reject unknown translation model id
 
-- **WHEN** the client sends `PUT /api/v1/settings/basic` with a `source_id` that does not exist in current LLM settings
+- **WHEN** the client sends `PUT /api/v1/settings/basic` with a `model_id` that does not exist in current runtime model settings
 - **THEN** the daemon returns HTTP 400
 
-#### Scenario: Reject unknown target model id
+### Requirement: Thinking translation configuration SHALL stay consistent with runtime model settings
 
-- **WHEN** the client sends `PUT /api/v1/settings/basic` with a `target_model_ids` entry that does not exist in current LLM settings
-- **THEN** the daemon returns HTTP 400
+When runtime model settings are updated, the system MUST automatically repair or clear the saved thinking translation configuration so it never references a removed translation model id.
 
-### Requirement: Thinking translation configuration SHALL stay consistent with LLM settings
+#### Scenario: Clear translation settings when translation model is removed
 
-When LLM settings are updated, the system MUST automatically repair or clear the saved thinking translation configuration so it never references removed Sources or removed model ids.
-
-#### Scenario: Clear translation settings when source is removed
-
-- **WHEN** the user saves LLM settings and the saved thinking translation `source_id` no longer exists
+- **WHEN** the user saves runtime model settings and the saved thinking translation `model_id` no longer exists
 - **THEN** the system clears the saved thinking translation configuration before persisting config
 
-#### Scenario: Trim removed target model ids
+### Requirement: Chat turns MAY translate reasoning automatically for non-Chinese thinking content
 
-- **WHEN** the user saves LLM settings and some saved `target_model_ids` no longer exist
-- **THEN** the system removes the missing ids from thinking translation settings
-- **AND** if no target model id remains, the system clears the saved thinking translation configuration
+If a chat turn has a saved thinking translation `model_id`, the system MUST evaluate the emitted thinking content and decide automatically whether translation is needed.
 
-### Requirement: Chat turns MAY translate reasoning for selected models
+If the thinking content is already Chinese-dominant, the system MUST skip translation for that thinking entry.
 
-If a chat turn resolves to an expert whose `primary_model_id` matches one of the saved `target_model_ids`, the system MUST apply reasoning translation for that turn using the configured translation source and translation model.
+If the thinking content is not Chinese-dominant, the system MUST invoke the translation model for that thinking entry.
 
 The system MUST continue emitting the original reasoning stream for compatibility and fallback.
 
-#### Scenario: Translation applies to selected model
+#### Scenario: Chinese-dominant thinking skips translation
 
-- **WHEN** a chat turn uses an expert whose `primary_model_id` is included in `target_model_ids`
-- **THEN** the system invokes the translation model for that turn's reasoning text
+- **WHEN** a chat turn emits thinking content that is already Chinese-dominant
+- **THEN** the system does not invoke the translation model for that thinking entry
 
-#### Scenario: Translation does not apply to unselected model
+#### Scenario: Non-Chinese thinking triggers translation
 
-- **WHEN** a chat turn uses an expert whose `primary_model_id` is not included in `target_model_ids`
-- **THEN** the system does not invoke reasoning translation for that turn
+- **WHEN** a chat turn emits thinking content that is not Chinese-dominant
+- **THEN** the system invokes the translation model for that thinking entry
 
 ### Requirement: Reasoning translation SHALL be buffered and streamed in order
 
@@ -97,7 +88,7 @@ For translated turns, the system MUST emit `chat.turn.thinking.translation.delta
 
 If translation fails for a turn, the system MUST emit `chat.turn.thinking.translation.failed` and the client MUST be able to fall back to the original reasoning text.
 
-The final `chat.turn.completed` payload MUST include the translated reasoning text when available, and MUST include explicit flags indicating whether translation was applied and whether translation failed.
+The final `chat.turn.completed` payload MUST include the translated reasoning text when available, and MUST include explicit flags indicating whether translation was actually applied and whether translation failed.
 
 #### Scenario: Translation delta arrives during streaming
 
@@ -109,6 +100,12 @@ The final `chat.turn.completed` payload MUST include the translated reasoning te
 - **WHEN** the translation request fails for a translated turn
 - **THEN** the system emits `chat.turn.thinking.translation.failed`
 - **AND** the original reasoning stream remains available to the client for fallback display
+
+#### Scenario: Turn is configured but no translation is needed
+
+- **WHEN** a turn has thinking translation configured but all thinking entries are judged as Chinese-dominant
+- **THEN** `thinking_translation_applied` is `false`
+- **AND** `translated_reasoning_text` is empty
 
 ### Requirement: Structured runtime feed MUST keep translation scoped to thinking
 When thinking translation is enabled during a Codex turn, translated reasoning MUST remain scoped to the active thinking entry in the runtime feed.

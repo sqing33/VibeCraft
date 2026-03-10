@@ -182,22 +182,21 @@ The `基本设置` tab MUST provide a `思考过程翻译` settings section.
 
 The section MUST contain exactly these configurable fields:
 - `翻译模型`: a selectable SDK runtime model
-- `需要翻译的 AI 模型`: a multi-select list populated from all configured runtime model bindings
 
-If no SDK runtime model exists, the UI MUST disable the translation configuration fields and guide the user to configure a translation model first in the `模型设置` tab.
+The section MUST explain that the system automatically decides whether the model's thinking content needs to be translated into Chinese.
 
-If runtime models do not exist yet, the UI MUST disable the target model selector.
+If no SDK runtime model exists, the UI MUST disable the translation configuration field and guide the user to configure a translation model first in the `模型设置` tab.
 
 Saving the form MUST call `PUT /api/v1/settings/basic` and show success or failure feedback.
 
 #### Scenario: Save thinking translation settings
-- **WHEN** user selects a translation model, selects one or more target AI models, and clicks Save
+- **WHEN** user selects a translation model and clicks Save
 - **THEN** the UI calls `PUT /api/v1/settings/basic`
 - **AND** the UI shows a success toast on success
 
 #### Scenario: Basic settings disabled before SDK model configuration
 - **WHEN** the user opens `基本设置` before configuring any SDK runtime model
-- **THEN** the UI disables the thinking translation fields
+- **THEN** the UI disables the thinking translation field
 - **AND** the UI shows guidance to configure a model in the `模型设置` tab first
 
 ### Requirement: UI can edit and save LLM settings

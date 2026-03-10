@@ -7,6 +7,27 @@ import (
 	"time"
 )
 
+func TestNeedsChineseTranslation(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{name: "english", text: "I will inspect the code path and then fix the bug.", want: true},
+		{name: "chinese", text: "我先检查一下这段逻辑，然后再修复这个问题。", want: false},
+		{name: "mixed chinese dominant", text: "我先检查 gpt-5-codex 的调用链，然后继续处理。", want: false},
+		{name: "japanese", text: "今日は計画を整理してから修正します。", want: true},
+		{name: "blank", text: "   ", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := needsChineseTranslation(tc.text); got != tc.want {
+				t.Fatalf("needsChineseTranslation(%q)=%v want=%v", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestThinkingTranslationRuntime_FlushesOnBoundaryAndComplete(t *testing.T) {
 	mgr := NewManager(nil, nil, Options{
 		ThinkingTranslationMinChars:   5,
@@ -21,6 +42,9 @@ func TestThinkingTranslationRuntime_FlushesOnBoundaryAndComplete(t *testing.T) {
 	if got := runtime.translatedText(); got != "[中]First sentence." {
 		t.Fatalf("unexpected translated text after boundary flush: %q", got)
 	}
+	if !runtime.applied() {
+		t.Fatalf("expected applied state after successful translation")
+	}
 	runtime.add(context.Background(), "", "tail without boundary")
 	if got := runtime.translatedText(); got != "[中]First sentence." {
 		t.Fatalf("unexpected translated text before complete: %q", got)
@@ -28,6 +52,31 @@ func TestThinkingTranslationRuntime_FlushesOnBoundaryAndComplete(t *testing.T) {
 	runtime.complete(context.Background())
 	if got := runtime.translatedText(); got != "[中]First sentence.[中]tail without boundary" {
 		t.Fatalf("unexpected translated text after complete: %q", got)
+	}
+}
+
+func TestThinkingTranslationRuntime_SkipsChineseDominantEntry(t *testing.T) {
+	calls := 0
+	mgr := NewManager(nil, nil, Options{
+		ThinkingTranslationMinChars:   5,
+		ThinkingTranslationForceChars: 50,
+		ThinkingTranslationIdle:       time.Hour,
+		ThinkingTranslator: func(_ context.Context, _ ThinkingTranslationSpec, text string) (string, error) {
+			calls++
+			return "[中]" + text, nil
+		},
+	})
+	runtime := newThinkingTranslationRuntime(mgr, "cs_1", "ct_1", &ThinkingTranslationSpec{Provider: "openai", Model: "translator"})
+	runtime.add(context.Background(), "thinking:1", "我先检查这一段逻辑。")
+	runtime.complete(context.Background())
+	if calls != 0 {
+		t.Fatalf("expected translator not to be called, got %d", calls)
+	}
+	if got := runtime.translatedText(); got != "" {
+		t.Fatalf("expected no translated text, got %q", got)
+	}
+	if runtime.applied() {
+		t.Fatalf("expected applied=false for chinese-dominant thinking")
 	}
 }
 
