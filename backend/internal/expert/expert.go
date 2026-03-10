@@ -34,10 +34,12 @@ type ResolveOptions struct {
 }
 
 type Registry struct {
-	mu       sync.RWMutex
-	experts  map[string]config.ExpertConfig
-	cliTools map[string]config.CLIToolConfig
-	llm      *config.LLMSettings
+	mu            sync.RWMutex
+	experts       map[string]config.ExpertConfig
+	cliTools      map[string]config.CLIToolConfig
+	llm           *config.LLMSettings
+	apiSources    []config.APISourceConfig
+	runtimeModels *config.RuntimeModelSettings
 }
 
 type PublicExpert struct {
@@ -78,7 +80,7 @@ func NewRegistry(cfg config.Config) *Registry {
 		}
 		tools[item.ID] = item
 	}
-	return &Registry{experts: m, cliTools: tools, llm: cfg.LLM}
+	return &Registry{experts: m, cliTools: tools, llm: cfg.LLM, apiSources: append([]config.APISourceConfig(nil), cfg.APISources...), runtimeModels: cloneRuntimeModelSettings(cfg.RuntimeModels)}
 }
 
 // Reload 功能：使用新的运行配置刷新 registry（原子替换 experts map）。
@@ -107,6 +109,8 @@ func (r *Registry) Reload(cfg config.Config) {
 	r.experts = m
 	r.cliTools = tools
 	r.llm = cfg.LLM
+	r.apiSources = append([]config.APISourceConfig(nil), cfg.APISources...)
+	r.runtimeModels = cloneRuntimeModelSettings(cfg.RuntimeModels)
 	r.mu.Unlock()
 }
 
@@ -198,6 +202,8 @@ func (r *Registry) ResolveWithOptions(expertID, prompt, cwd string, opts Resolve
 		tools[id] = item
 	}
 	llm := r.llm
+	apiSources := append([]config.APISourceConfig(nil), r.apiSources...)
+	runtimeModels := cloneRuntimeModelSettings(r.runtimeModels)
 	r.mu.RUnlock()
 	if !ok {
 		return Resolved{}, fmt.Errorf("unknown expert_id %q", expertID)
@@ -234,7 +240,10 @@ func (r *Registry) ResolveWithOptions(expertID, prompt, cwd string, opts Resolve
 				e.Env["VIBE_TREE_CLI_COMMAND_PATH"] = strings.TrimSpace(selectedTool.CommandPath)
 			}
 			if selectedModelID == "" {
-				if runner.NormalizeCLIFamily(selectedTool.CLIFamily) == "iflow" {
+				runtimeID := runtimeModelRuntimeID(toolID, e.CLIFamily)
+				if resolved, ok := config.ResolveRuntimeModelBinding(runtimeModels, apiSources, runtimeID, ""); ok {
+					selectedModelID = strings.TrimSpace(resolved.Model.ID)
+				} else if runner.NormalizeCLIFamily(selectedTool.CLIFamily) == "iflow" {
 					selectedModelID = strings.TrimSpace(selectedTool.IFlowDefaultModel)
 				} else {
 					selectedModelID = strings.TrimSpace(selectedTool.DefaultModelID)
@@ -245,7 +254,20 @@ func (r *Registry) ResolveWithOptions(expertID, prompt, cwd string, opts Resolve
 			selectedModelID = strings.TrimSpace(e.PrimaryModelID)
 		}
 		if strings.TrimSpace(selectedModelID) != "" {
-			if runner.NormalizeCLIFamily(e.CLIFamily) == "iflow" {
+			runtimeID := runtimeModelRuntimeID(toolID, e.CLIFamily)
+			if resolvedRuntime, ok := config.ResolveRuntimeModelBinding(runtimeModels, apiSources, runtimeID, selectedModelID); ok {
+				selectedProvider := configProtocol(resolvedRuntime.Model.Provider)
+				if toolID != "" && !config.CLIToolSupportsProtocolFamily(selectedTool, selectedProvider) && runner.NormalizeCLIFamily(e.CLIFamily) != "iflow" {
+					return Resolved{}, fmt.Errorf("expert %q: model %q is not compatible with cli tool %q", expertID, selectedModelID, toolID)
+				}
+				model = strings.TrimSpace(resolvedRuntime.Model.Model)
+				e.PrimaryModelID = strings.TrimSpace(resolvedRuntime.Model.ID)
+				protocolFamily = selectedProvider
+				if e.Env == nil {
+					e.Env = map[string]string{}
+				}
+				applyCLIRuntimeModelEnv(e.Env, *resolvedRuntime)
+			} else if runner.NormalizeCLIFamily(e.CLIFamily) == "iflow" {
 				model = strings.TrimSpace(selectedModelID)
 				e.PrimaryModelID = strings.TrimSpace(selectedModelID)
 			} else {
@@ -282,7 +304,11 @@ func (r *Registry) ResolveWithOptions(expertID, prompt, cwd string, opts Resolve
 		env[k] = expanded
 	}
 	if provider == "cli" && runner.NormalizeCLIFamily(e.CLIFamily) != "iflow" {
-		applyCLIModelRuntimeEnv(env, llm, selectedModelID)
+		if resolvedRuntime, ok := config.ResolveRuntimeModelBinding(runtimeModels, apiSources, runtimeModelRuntimeID(toolID, e.CLIFamily), selectedModelID); ok {
+			applyCLIRuntimeModelEnv(env, *resolvedRuntime)
+		} else {
+			applyCLIModelRuntimeEnv(env, llm, selectedModelID)
+		}
 	}
 
 	timeout := time.Duration(e.TimeoutMs) * time.Millisecond
@@ -535,6 +561,46 @@ func resolveCLIToolSelection(tools map[string]config.CLIToolConfig, expert confi
 	return config.CLIToolConfig{}, "", nil
 }
 
+func runtimeModelRuntimeID(toolID, cliFamily string) string {
+	if normalized := strings.TrimSpace(toolID); normalized != "" {
+		switch normalized {
+		case config.RuntimeIDCodex:
+			return config.RuntimeIDCodex
+		case config.RuntimeIDClaude:
+			return config.RuntimeIDClaude
+		case config.RuntimeIDIFLOW:
+			return config.RuntimeIDIFLOW
+		case config.RuntimeIDOpenCode:
+			return config.RuntimeIDOpenCode
+		}
+	}
+	switch runner.NormalizeCLIFamily(cliFamily) {
+	case "codex":
+		return config.RuntimeIDCodex
+	case "claude":
+		return config.RuntimeIDClaude
+	case "iflow":
+		return config.RuntimeIDIFLOW
+	case "opencode":
+		return config.RuntimeIDOpenCode
+	default:
+		return ""
+	}
+}
+
+func cloneRuntimeModelSettings(settings *config.RuntimeModelSettings) *config.RuntimeModelSettings {
+	if settings == nil {
+		return nil
+	}
+	out := &config.RuntimeModelSettings{Runtimes: make([]config.RuntimeModelRuntimeConfig, 0, len(settings.Runtimes))}
+	for _, runtime := range settings.Runtimes {
+		item := runtime
+		item.Models = append([]config.RuntimeModelConfig(nil), runtime.Models...)
+		out.Runtimes = append(out.Runtimes, item)
+	}
+	return out
+}
+
 func lookupLLMModel(llm *config.LLMSettings, modelID string) (config.LLMModelConfig, bool) {
 	if llm == nil {
 		return config.LLMModelConfig{}, false
@@ -553,33 +619,61 @@ func applyCLIModelRuntimeEnv(env map[string]string, llm *config.LLMSettings, mod
 	if !ok {
 		return
 	}
-	provider := configProtocol(model.Provider)
+	applyCLIRuntimeModelEnv(env, config.ResolvedRuntimeModel{
+		Model:  config.RuntimeModelConfig{Provider: model.Provider},
+		Source: config.APISourceConfig{Provider: source.Provider, BaseURL: source.BaseURL, APIKey: source.APIKey},
+	})
+}
+
+func applyCLIRuntimeModelEnv(env map[string]string, resolved config.ResolvedRuntimeModel) {
+	provider := configProtocol(resolved.Model.Provider)
 	switch provider {
 	case "openai":
 		delete(env, "OPENAI_API_KEY")
 		delete(env, "OPENAI_BASE_URL")
 		delete(env, "ANTHROPIC_API_KEY")
 		delete(env, "ANTHROPIC_BASE_URL")
-		if strings.TrimSpace(source.APIKey) != "" {
-			env["OPENAI_API_KEY"] = strings.TrimSpace(source.APIKey)
+		if strings.TrimSpace(resolved.Source.APIKey) != "" {
+			env["OPENAI_API_KEY"] = strings.TrimSpace(resolved.Source.APIKey)
 		}
-		if strings.TrimSpace(source.BaseURL) != "" {
-			env["OPENAI_BASE_URL"] = strings.TrimSpace(source.BaseURL)
-			env["VIBE_TREE_BASE_URL"] = strings.TrimSpace(source.BaseURL)
+		if strings.TrimSpace(resolved.Source.BaseURL) != "" {
+			env["OPENAI_BASE_URL"] = strings.TrimSpace(resolved.Source.BaseURL)
+			env["VIBE_TREE_BASE_URL"] = strings.TrimSpace(resolved.Source.BaseURL)
 		}
 	case "anthropic":
 		delete(env, "ANTHROPIC_API_KEY")
 		delete(env, "ANTHROPIC_BASE_URL")
 		delete(env, "OPENAI_API_KEY")
 		delete(env, "OPENAI_BASE_URL")
-		if strings.TrimSpace(source.APIKey) != "" {
-			env["ANTHROPIC_API_KEY"] = strings.TrimSpace(source.APIKey)
+		if strings.TrimSpace(resolved.Source.APIKey) != "" {
+			env["ANTHROPIC_API_KEY"] = strings.TrimSpace(resolved.Source.APIKey)
 		}
-		if strings.TrimSpace(source.BaseURL) != "" {
-			env["ANTHROPIC_BASE_URL"] = strings.TrimSpace(source.BaseURL)
-			env["VIBE_TREE_BASE_URL"] = strings.TrimSpace(source.BaseURL)
+		if strings.TrimSpace(resolved.Source.BaseURL) != "" {
+			env["ANTHROPIC_BASE_URL"] = strings.TrimSpace(resolved.Source.BaseURL)
+			env["VIBE_TREE_BASE_URL"] = strings.TrimSpace(resolved.Source.BaseURL)
+		}
+	case "iflow":
+		env["VIBE_TREE_IFLOW_AUTH_MODE"] = firstNonEmptyValue(strings.TrimSpace(resolved.Source.AuthMode), config.IFLOWAuthModeBrowser)
+		env["VIBE_TREE_IFLOW_BASE_URL"] = firstNonEmptyValue(strings.TrimSpace(resolved.Source.BaseURL), iflowDefaultBaseURL())
+		if env["VIBE_TREE_IFLOW_AUTH_MODE"] == config.IFLOWAuthModeAPIKey {
+			env["VIBE_TREE_IFLOW_API_KEY"] = strings.TrimSpace(resolved.Source.APIKey)
+		} else {
+			delete(env, "VIBE_TREE_IFLOW_API_KEY")
 		}
 	}
+}
+
+func firstNonEmptyTrimmed(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func iflowDefaultBaseURL() string {
+	return firstNonEmptyTrimmed("https://apis.iflow.cn/v1")
 }
 
 func configProtocol(v string) string {
@@ -626,4 +720,12 @@ func uniqueStrings(in []string) []string {
 		prev = s
 	}
 	return out
+}
+func firstNonEmptyValue(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

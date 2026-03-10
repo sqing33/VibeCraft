@@ -136,13 +136,11 @@ func putLLMSettingsHandler(deps Deps) gin.HandlerFunc {
 			return
 		}
 		config.PreserveOpenAIAPIStyles(cfg.LLM, next)
-
-		cfg.LLM = next
-		config.ReconcileBasicSettingsWithLLM(&cfg.Basic, cfg.LLM)
-		if err := config.NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
+		if err := config.SyncSDKRuntimeSettingsFromLLM(&cfg, next); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		config.ReconcileBasicSettingsWithLLM(&cfg.Basic, cfg.LLM)
 		if err := config.RebuildExperts(&cfg); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return

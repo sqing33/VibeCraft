@@ -123,8 +123,11 @@ func putCLIToolSettingsHandler(deps Deps) gin.HandlerFunc {
 				IFlowDefaultModel: strings.TrimSpace(item.IFLOWDefaultModel),
 			})
 		}
-		cfg.CLITools = next
-		if err := config.NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
+		if err := config.SyncCLIToolRuntimeSettings(&cfg, next); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := config.RebuildExperts(&cfg); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}

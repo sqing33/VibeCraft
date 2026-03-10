@@ -7,14 +7,17 @@ import (
 	iflowcli "vibe-tree/backend/internal/iflow"
 )
 
-func TestNormalizeCLITools_RejectsIncompatibleDefaultModel(t *testing.T) {
+func TestNormalizeCLITools_PreservesDefaultModelWithoutLegacyLLMValidation(t *testing.T) {
 	llm := &config.LLMSettings{
 		Sources: []config.LLMSourceConfig{{ID: "anthropic-default", Provider: "anthropic"}},
 		Models:  []config.LLMModelConfig{{ID: "claude-sonnet", Provider: "anthropic", Model: "claude-sonnet", SourceID: "anthropic-default"}},
 	}
 	tools := []config.CLIToolConfig{{ID: "codex", Label: "Codex CLI", ProtocolFamily: "openai", CLIFamily: "codex", DefaultModelID: "claude-sonnet", Enabled: true}}
-	if err := config.NormalizeCLITools(&tools, llm); err == nil {
-		t.Fatalf("expected incompatible model error")
+	if err := config.NormalizeCLITools(&tools, llm); err != nil {
+		t.Fatalf("normalize cli tools: %v", err)
+	}
+	if tools[0].DefaultModelID != "claude-sonnet" {
+		t.Fatalf("default_model_id = %q, want claude-sonnet", tools[0].DefaultModelID)
 	}
 }
 
@@ -26,6 +29,9 @@ func TestNormalizeCLITools_AcceptsMatchingDefaultModel(t *testing.T) {
 	tools := []config.CLIToolConfig{{ID: "codex", Label: "Codex CLI", ProtocolFamily: "openai", CLIFamily: "codex", DefaultModelID: "gpt-5.4", Enabled: true}}
 	if err := config.NormalizeCLITools(&tools, llm); err != nil {
 		t.Fatalf("normalize cli tools: %v", err)
+	}
+	if tools[0].DefaultModelID != "gpt-5.4" {
+		t.Fatalf("default_model_id = %q, want gpt-5.4", tools[0].DefaultModelID)
 	}
 }
 

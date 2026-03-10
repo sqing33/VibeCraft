@@ -162,94 +162,74 @@ When no persisted theme value exists, the UI MUST initialize with light theme.
 - **THEN** the UI loads in light theme
 
 ### Requirement: Settings uses tab navigation and includes LLM configuration
-
 The UI MUST present the existing System Settings as a tabbed view.
-The UI MUST provide at least four tabs:
+The UI MUST provide at least six tabs:
 
 - `基本设置`: contains thinking translation configuration.
 - `连接与诊断`: contains daemon URL switching and diagnostics (version/paths).
-- `模型`: contains LLM Sources / Model Profiles configuration.
+- `API 来源`: contains reusable API source configuration.
+- `模型设置`: contains runtime-scoped model bindings for SDK and CLI runtimes.
+- `CLI 工具`: contains tool-level CLI configuration.
 - `专家`: contains expert list, expert details, and AI creation workflow.
 
 #### Scenario: User switches settings tabs
-
 - **WHEN** user opens System Settings
-- **THEN** the UI shows multiple tabs including `基本设置`, `连接与诊断`, `模型`, and `专家`
+- **THEN** the UI shows multiple tabs including `基本设置`, `连接与诊断`, `API 来源`, `模型设置`, `CLI 工具`, and `专家`
 - **AND** switching tabs updates the visible settings content
 
 ### Requirement: Basic settings tab can configure thinking translation
-
 The `基本设置` tab MUST provide a `思考过程翻译` settings section.
 
 The section MUST contain exactly these configurable fields:
-- `API 源`: selects an existing LLM Source
-- `翻译模型`: a manually entered model string
-- `需要翻译的 AI 模型`: a multi-select list populated from all configured LLM models
+- `翻译模型`: a selectable SDK runtime model
+- `需要翻译的 AI 模型`: a multi-select list populated from all configured runtime model bindings
 
-If no LLM Source exists, the UI MUST disable the translation configuration fields and guide the user to configure sources first in the `模型` tab.
+If no SDK runtime model exists, the UI MUST disable the translation configuration fields and guide the user to configure a translation model first in the `模型设置` tab.
 
-If LLM models do not exist yet, the UI MUST disable the target model selector.
+If runtime models do not exist yet, the UI MUST disable the target model selector.
 
 Saving the form MUST call `PUT /api/v1/settings/basic` and show success or failure feedback.
 
 #### Scenario: Save thinking translation settings
-
-- **WHEN** user selects a source, enters a translation model, selects one or more target AI models, and clicks Save
+- **WHEN** user selects a translation model, selects one or more target AI models, and clicks Save
 - **THEN** the UI calls `PUT /api/v1/settings/basic`
 - **AND** the UI shows a success toast on success
 
-#### Scenario: Basic settings disabled before model configuration
-
-- **WHEN** the user opens `基本设置` before configuring any LLM Source
+#### Scenario: Basic settings disabled before SDK model configuration
+- **WHEN** the user opens `基本设置` before configuring any SDK runtime model
 - **THEN** the UI disables the thinking translation fields
-- **AND** the UI shows guidance to configure API Sources in the `模型` tab first
+- **AND** the UI shows guidance to configure a model in the `模型设置` tab first
 
 ### Requirement: UI can edit and save LLM settings
-
-In the `模型` tab, the UI MUST organize LLM settings by API Source.
+In the `API 来源` tab, the UI MUST organize reusable source settings as independent source cards without nested model rows.
 
 Each Source card MUST manage:
+- Source metadata: `id`, `label`, `base_url`
+- Source secret: `api_key`
+- Optional source-level `auth_mode` metadata for iFlow usage
 
-- Source metadata: `id`, `label`, `base_url`, and source-level SDK provider.
-- Source secret: `api_key`.
-- A nested model list rendered directly under the API Key field.
+The Source card MUST NOT expose a source-level provider/type selector.
 
-The UI MUST NOT present a separate top-level `Models` section.
+The UI MUST save source changes by calling `PUT /api/v1/settings/api-sources`.
 
-Each nested model row MUST allow the user to enter one model ID string. The UI MUST use the entered text as the display label and MUST derive the persisted model `id` and `model` by lowercasing the trimmed input.
-
-The UI MUST save changes by calling `PUT /api/v1/settings/llm`.
-After saving succeeds, the UI MUST refresh experts by calling `GET /api/v1/experts` so that workflow/node dropdowns can use the latest models.
-
-#### Scenario: User adds a source model inside the source card and saves
-
-- **WHEN** user creates or edits an API Source
-- **AND** user adds a model row under that Source card
+#### Scenario: User edits an API source and saves
+- **WHEN** user creates or edits an API source
 - **AND** user clicks Save
-- **THEN** the UI calls `PUT /api/v1/settings/llm`
+- **THEN** the UI calls `PUT /api/v1/settings/api-sources`
+- **AND** the request body omits any source-level provider field
 - **AND** the UI shows a success toast
-- **AND** the UI refreshes the experts list via `GET /api/v1/experts`
-
-#### Scenario: Mixed-case model input is normalized on save
-
-- **WHEN** user enters a mixed-case model ID such as `GPT-5-CODEX` in a Source card
-- **AND** user clicks Save
-- **THEN** the UI submits lowercase `id` and `model` values such as `gpt-5-codex`
-- **AND** the UI keeps the original input as the display label
 
 ### Requirement: Model profiles can be tested from the settings UI
+In the `模型设置` tab, each runtime model card MUST provide a `测试` action when the model binding's effective provider supports SDK test probing.
 
-In the `模型` settings tab, each nested Source model row MUST provide a `测试` button located to the left of the delete button.
+When clicked, the UI MUST call `POST /api/v1/settings/llm/test` using the card's effective provider resolved from the model binding and the card's model ID as the effective model name.
 
-When clicked, the UI MUST call `POST /api/v1/settings/llm/test` using the Source row's current provider/base_url/api_key values and the model row's lowercase-normalized model ID.
+The UI MUST show success or failure feedback to the user.
 
-The UI MUST show success or failure feedback to the user (e.g. toast).
-
-#### Scenario: User tests a source model row
-
-- **WHEN** user clicks `测试` on a model row with complete Source SDK/API Key/model configuration
+#### Scenario: User tests a runtime model card
+- **WHEN** user clicks `测试` on a runtime model card with complete API source and model configuration
 - **THEN** the UI calls `POST /api/v1/settings/llm/test`
-- **AND** the request uses the Source card's SDK and the model row's lowercase-normalized model ID
+- **AND** the request uses the card's model-level provider and model ID
 - **AND** the UI displays the result to the user
 
 ### Requirement: UI SHALL prefer translated reasoning for translated turns
@@ -482,9 +462,11 @@ The chat page MUST provide actions for manual compaction and session fork. The U
 - **AND** the new forked session appears in the session list
 
 ### Requirement: Settings MUST expose a dedicated CLI tools tab
-The UI MUST provide a dedicated `CLI 工具` tab for managing `Codex CLI`, `Claude Code`, `iFlow CLI`, and `OpenCode CLI`, including enablement, default model selection, and optional command path override.
+The UI MUST provide a dedicated `CLI 工具` tab for managing `Codex CLI`, `Claude Code`, `iFlow CLI`, and `OpenCode CLI`, including enablement, optional command path override, and tool-specific health or login actions.
 
-For `iFlow CLI`, the tab MUST expose dedicated official-auth and official-model controls instead of reusing the shared LLM model pool.
+The `CLI 工具` tab MUST NOT be the primary editor for per-runtime model lists or default model bindings.
+
+For `iFlow CLI`, the tab MUST expose browser-login actions and current official browser-auth status.
 
 #### Scenario: User manages four primary CLI tools
 - **WHEN** user opens System Settings
@@ -498,9 +480,9 @@ For `iFlow CLI`, the tab MUST expose dedicated official-auth and official-model 
 - **AND** allows the user to submit the returned authorization code
 
 ### Requirement: Chat UI SHALL support runtime-first model selection
-The chat page MUST let the user select a conversation runtime first and then choose a compatible model from that runtime's model pool.
+The chat page MUST let the user select a conversation runtime first and then choose a compatible model from that runtime's saved model bindings.
 
-The runtime list MUST include enabled CLI tools and available SDK providers in the same selector.
+The runtime list MUST include enabled CLI tools and available SDK runtimes in the same selector.
 
 At minimum, when corresponding models exist, the selector MUST expose:
 
@@ -511,23 +493,17 @@ At minimum, when corresponding models exist, the selector MUST expose:
 - `OpenAI SDK`
 - `Anthropic SDK`
 
-For CLI runtimes, the model selector MUST show only models whose provider is included in that tool's compatible protocol list.
-For SDK runtimes, the model selector MUST only show models belonging to the selected provider.
+For every runtime, the model selector MUST show only the model bindings saved under that runtime.
 
 #### Scenario: User chooses iFlow then iFlow model
 - **WHEN** user selects `iFlow CLI` in the chat composer
-- **THEN** the model selector only shows the `iflow_models` configured in the iFlow CLI card
-- **AND** the default value comes from `iflow_default_model`
+- **THEN** the model selector only shows the models configured under runtime `iflow`
+- **AND** the default value comes from that runtime's `default_model_id`
 
 #### Scenario: User chooses OpenCode then OpenAI model
 - **WHEN** user selects `OpenCode CLI` in the chat composer
-- **AND** the tool advertises OpenAI compatibility
-- **THEN** the model selector includes OpenAI-compatible models
-
-#### Scenario: User chooses OpenCode then Anthropic model
-- **WHEN** user selects `OpenCode CLI` in the chat composer
-- **AND** the tool advertises Anthropic compatibility
-- **THEN** the model selector includes Anthropic-compatible models
+- **THEN** the model selector includes only the models configured under runtime `opencode`
+- **AND** selecting an OpenAI-bound model preserves that bound source at submit time
 
 #### Scenario: Active OpenCode session restores selector state
 - **WHEN** an active session stores `cli_tool_id="opencode"`
@@ -607,4 +583,47 @@ The control rail MUST be arranged in three rows: runtime selector, model selecto
 - **WHEN** the chat page has enough width for the desktop composer layout
 - **THEN** the left textarea occupies the remaining width and height
 - **AND** the right control rail remains visually narrower than before
+
+### Requirement: Runtime model editor MUST use simplified model cards
+In the `模型设置` tab, each runtime MUST render its models as responsive cards in a multi-column grid with up to three columns.
+
+Each model card MUST:
+- show `模型` as the card title
+- provide `设为默认`, `测试`, `删除` actions in the card header
+- expose exactly three editable rows: `模型`, `显示名称`, `API 来源`
+
+The `模型设置` tab MUST NOT expose:
+- a runtime-level `默认模型` dropdown
+- a protocol-family editor
+- a separate actual-model editor
+
+#### Scenario: User sets a runtime default from a model card
+- **WHEN** the user clicks `设为默认` on a model card
+- **THEN** the UI updates that runtime's `default_model_id` to the card's model id
+- **AND** the runtime-level default selector is not shown elsewhere in the tab
+
+#### Scenario: User edits a simplified model card
+- **WHEN** the user edits only `模型`, `显示名称`, and `API 来源` on a model card and saves
+- **THEN** the UI calls `PUT /api/v1/settings/runtime-models`
+- **AND** the save succeeds without requiring separate protocol-family or actual-model inputs
+
+### Requirement: Settings dialog MUST use unified pill navigation and compact controls
+The settings dialog MUST render its tab navigation as pill-shaped controls, including both the tab list container and the active tab indicator.
+
+Primary `Button`, `Input`, and `Select` controls inside settings tabs MUST use a compact height and full-pill rounded shape.
+
+#### Scenario: User switches settings tabs with pill navigation
+- **WHEN** the user opens settings
+- **THEN** the top tab navigation renders as a pill-shaped segmented control
+- **AND** the selected tab also renders with a pill-shaped active state
+
+### Requirement: Settings tabs MUST keep main actions in a fixed footer
+Each settings tab MUST keep its primary actions in a footer region that remains visible while the tab content scrolls vertically.
+
+The tab body MUST be the only vertical scroll area for long settings content.
+
+#### Scenario: User scrolls a long settings tab
+- **WHEN** the tab content exceeds the available height
+- **THEN** only the content area scrolls vertically
+- **AND** the main action footer remains fixed at the bottom of the tab panel
 

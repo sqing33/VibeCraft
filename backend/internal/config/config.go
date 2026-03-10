@@ -10,14 +10,16 @@ import (
 )
 
 type Config struct {
-	Server        ServerConfig         `json:"server"`
-	Execution     ExecutionConfig      `json:"execution"`
-	Experts       []ExpertConfig       `json:"experts"`
-	CLITools      []CLIToolConfig      `json:"cli_tools,omitempty"`
-	MCPServers    []MCPServerConfig    `json:"mcp_servers,omitempty"`
-	SkillBindings []SkillBindingConfig `json:"skill_bindings,omitempty"`
-	Basic         *BasicSettings       `json:"basic,omitempty"`
-	LLM           *LLMSettings         `json:"llm,omitempty"`
+	Server        ServerConfig          `json:"server"`
+	Execution     ExecutionConfig       `json:"execution"`
+	Experts       []ExpertConfig        `json:"experts"`
+	CLITools      []CLIToolConfig       `json:"cli_tools,omitempty"`
+	MCPServers    []MCPServerConfig     `json:"mcp_servers,omitempty"`
+	SkillBindings []SkillBindingConfig  `json:"skill_bindings,omitempty"`
+	Basic         *BasicSettings        `json:"basic,omitempty"`
+	LLM           *LLMSettings          `json:"llm,omitempty"`
+	APISources    []APISourceConfig     `json:"api_sources,omitempty"`
+	RuntimeModels *RuntimeModelSettings `json:"runtime_model_settings,omitempty"`
 }
 
 type MCPServerConfig struct {
@@ -175,7 +177,9 @@ func Default() Config {
 			MaxConcurrency: 6,
 			KillGraceMs:    1500,
 		},
-		CLITools: defaultCLITools(),
+		CLITools:      defaultCLITools(),
+		APISources:    nil,
+		RuntimeModels: nil,
 		Experts: []ExpertConfig{
 			{
 				ID:            "master",
@@ -304,6 +308,9 @@ func Load() (Config, string, error) {
 	if b, err := os.ReadFile(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			applyEnvOverrides(&cfg)
+			if err := HydrateRuntimeSettings(&cfg); err != nil {
+				return Config{}, "", err
+			}
 			if err := NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
 				return Config{}, "", err
 			}
@@ -326,6 +333,15 @@ func Load() (Config, string, error) {
 	}
 
 	applyEnvOverrides(&cfg)
+	if err := NormalizeLLMSettings(cfg.LLM); err != nil {
+		return Config{}, "", err
+	}
+	if err := NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
+		return Config{}, "", err
+	}
+	if err := HydrateRuntimeSettings(&cfg); err != nil {
+		return Config{}, "", err
+	}
 	if err := NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
 		return Config{}, "", err
 	}
@@ -338,7 +354,7 @@ func Load() (Config, string, error) {
 	if err := RebuildExperts(&cfg); err != nil {
 		return Config{}, "", err
 	}
-	ReconcileBasicSettingsWithLLM(&cfg.Basic, cfg.LLM)
+	ReconcileBasicSettingsWithRuntime(&cfg.Basic, cfg)
 	return cfg, path, nil
 }
 
@@ -356,6 +372,9 @@ func LoadPersisted() (Config, string, error) {
 
 	if b, err := os.ReadFile(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if err := HydrateRuntimeSettings(&cfg); err != nil {
+				return Config{}, "", err
+			}
 			if err := NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
 				return Config{}, "", err
 			}
@@ -377,6 +396,9 @@ func LoadPersisted() (Config, string, error) {
 		}
 	}
 
+	if err := HydrateRuntimeSettings(&cfg); err != nil {
+		return Config{}, "", err
+	}
 	if err := NormalizeCLITools(&cfg.CLITools, cfg.LLM); err != nil {
 		return Config{}, "", err
 	}
@@ -389,7 +411,7 @@ func LoadPersisted() (Config, string, error) {
 	if err := RebuildExperts(&cfg); err != nil {
 		return Config{}, "", err
 	}
-	ReconcileBasicSettingsWithLLM(&cfg.Basic, cfg.LLM)
+	ReconcileBasicSettingsWithRuntime(&cfg.Basic, cfg)
 	return cfg, path, nil
 }
 

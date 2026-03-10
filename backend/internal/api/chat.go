@@ -519,10 +519,13 @@ func resolveLLMModelRuntime(modelID string) (*llmModelRuntime, bool, error) {
 	}
 	cfg, _, err := config.LoadPersisted()
 	if err != nil {
-		return nil, false, fmt.Errorf("load persisted llm settings: %w", err)
+		return nil, false, fmt.Errorf("load persisted runtime settings: %w", err)
 	}
-	modelCfg, sourceCfg, _, ok := config.FindLLMModelByID(cfg.LLM, modelID)
+	runtime, modelCfg, sourceCfg, ok := config.FindRuntimeModelByID(cfg, modelID)
 	if !ok {
+		return nil, false, nil
+	}
+	if strings.TrimSpace(runtime.Kind) != config.RuntimeKindSDK {
 		return nil, false, nil
 	}
 	return &llmModelRuntime{
@@ -553,17 +556,17 @@ func buildThinkingTranslationSpec(primaryModelID string) *chat.ThinkingTranslati
 	if err != nil {
 		return nil
 	}
-	runtime, err := config.ResolveThinkingTranslation(cfg.Basic, cfg.LLM, primaryModelID)
+	runtime, err := config.ResolveThinkingTranslationWithRuntime(cfg.Basic, cfg, primaryModelID)
 	if err != nil || runtime == nil {
 		return nil
 	}
 	env := map[string]string{}
 	switch strings.ToLower(strings.TrimSpace(runtime.Provider)) {
-	case "openai":
+	case config.ProviderOpenAI:
 		if strings.TrimSpace(runtime.APIKey) != "" {
 			env["OPENAI_API_KEY"] = strings.TrimSpace(runtime.APIKey)
 		}
-	case "anthropic":
+	case config.ProviderAnthropic:
 		if strings.TrimSpace(runtime.APIKey) != "" {
 			env["ANTHROPIC_API_KEY"] = strings.TrimSpace(runtime.APIKey)
 		}

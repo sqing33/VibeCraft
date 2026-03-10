@@ -330,6 +330,9 @@ func loadSavedStyle(modelID string) (APIStyle, error) {
 	if err != nil {
 		return "", err
 	}
+	if _, model, _, ok := config.FindRuntimeModelByID(cfg, modelID); ok {
+		return NormalizeAPIStyle(model.OpenAIAPIStyle), nil
+	}
 	model, _, _, ok := config.FindLLMModelByID(cfg.LLM, modelID)
 	if !ok {
 		return "", fmt.Errorf("llm model %q not found", modelID)
@@ -347,12 +350,29 @@ func persistModelStyle(modelID string, style APIStyle) error {
 	if err != nil {
 		return err
 	}
-	_, _, idx, ok := config.FindLLMModelByID(cfg.LLM, modelID)
-	if !ok {
+	updated := false
+	if cfg.RuntimeModels != nil {
+		for ri := range cfg.RuntimeModels.Runtimes {
+			for mi := range cfg.RuntimeModels.Runtimes[ri].Models {
+				if strings.TrimSpace(cfg.RuntimeModels.Runtimes[ri].Models[mi].ID) != strings.TrimSpace(modelID) {
+					continue
+				}
+				cfg.RuntimeModels.Runtimes[ri].Models[mi].OpenAIAPIStyle = string(style)
+				cfg.RuntimeModels.Runtimes[ri].Models[mi].OpenAIAPIStyleDetectedAt = time.Now().UnixMilli()
+				updated = true
+			}
+		}
+	}
+	if cfg.LLM != nil {
+		if _, _, idx, ok := config.FindLLMModelByID(cfg.LLM, modelID); ok {
+			cfg.LLM.Models[idx].OpenAIAPIStyle = string(style)
+			cfg.LLM.Models[idx].OpenAIAPIStyleDetectedAt = time.Now().UnixMilli()
+			updated = true
+		}
+	}
+	if !updated {
 		return fmt.Errorf("llm model %q not found", modelID)
 	}
-	cfg.LLM.Models[idx].OpenAIAPIStyle = string(style)
-	cfg.LLM.Models[idx].OpenAIAPIStyleDetectedAt = time.Now().UnixMilli()
 	return config.SaveTo(cfgPath, cfg)
 }
 

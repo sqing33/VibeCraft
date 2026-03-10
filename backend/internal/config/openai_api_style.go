@@ -144,7 +144,6 @@ func clearAllOpenAIAPIStyles(llm *LLMSettings) {
 }
 
 func sameSourceConnection(left, right LLMSourceConfig) bool {
-	return normalizeProvider(left.Provider) == normalizeProvider(right.Provider) &&
-		strings.TrimSpace(left.BaseURL) == strings.TrimSpace(right.BaseURL) &&
+	return strings.TrimSpace(left.BaseURL) == strings.TrimSpace(right.BaseURL) &&
 		strings.TrimSpace(left.APIKey) == strings.TrimSpace(right.APIKey)
 }

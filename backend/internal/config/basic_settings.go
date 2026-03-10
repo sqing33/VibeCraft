@@ -15,20 +15,21 @@ type ThinkingTranslationRuntime struct {
 }
 
 // NormalizeBasicSettings 功能：规范化 basic settings，并在配置为空时清理空容器。
-// 参数/返回：basic 为 `*BasicSettings` 指针；原地 trim/dedupe 后无返回值。
+// 参数/返回：basic 为可空双指针；原地修改。
 // 失败场景：无。
-// 副作用：会原地修改字段，并在配置为空时置 nil。
+// 副作用：会 trim 并去重模型 ID。
 func NormalizeBasicSettings(basic **BasicSettings) {
 	if basic == nil || *basic == nil {
 		return
 	}
 	if (*basic).ThinkingTranslation != nil {
 		tt := (*basic).ThinkingTranslation
-		tt.ModelID = strings.TrimSpace(tt.ModelID)
-		tt.SourceID = ""
-		tt.Model = ""
-		tt.TargetModelIDs = normalizeModelIDList(tt.TargetModelIDs)
-		if tt.ModelID == "" && len(tt.TargetModelIDs) == 0 {
+		tt.ModelID = normalizeModelIdentifier(tt.ModelID)
+		if tt.ModelID == "" {
+			tt.ModelID = normalizeModelIdentifier(tt.Model)
+		}
+		tt.TargetModelIDs = normalizeTargetModelIDList(tt.TargetModelIDs)
+		if len(tt.TargetModelIDs) == 0 {
 			(*basic).ThinkingTranslation = nil
 		}
 	}
@@ -38,8 +39,8 @@ func NormalizeBasicSettings(basic **BasicSettings) {
 }
 
 // ValidateBasicSettings 功能：校验 basic settings 的结构与 LLM 引用关系。
-// 参数/返回：basic 可为 nil；llm 为当前 LLM settings；成功返回 nil。
-// 失败场景：model_id/target_model_ids 不合法时返回 error。
+// 参数/返回：basic 为当前设置；llm 为兼容镜像。返回 error 表示不合法。
+// 失败场景：翻译模型或目标模型不存在时返回 error。
 // 副作用：无。
 func ValidateBasicSettings(basic *BasicSettings, llm *LLMSettings) error {
 	copyValue := cloneBasicSettings(basic)
@@ -57,16 +58,48 @@ func ValidateBasicSettings(basic *BasicSettings, llm *LLMSettings) error {
 	if llm == nil {
 		return fmt.Errorf("llm settings are required for thinking translation")
 	}
-	modelCfg, source, _, ok := FindLLMModelByID(llm, tt.ModelID)
+	modelCfg, _, _, ok := FindLLMModelByID(llm, tt.ModelID)
 	if !ok {
 		return fmt.Errorf("basic.thinking_translation.model_id %q does not exist in llm models", tt.ModelID)
 	}
-	_ = modelCfg
-	provider := normalizeProvider(source.Provider)
-	if provider != "openai" && provider != "anthropic" {
-		return fmt.Errorf("basic.thinking_translation.model_id %q references unsupported provider %q", tt.ModelID, strings.TrimSpace(source.Provider))
+	provider := normalizeProvider(modelCfg.Provider)
+	if provider != ProviderOpenAI && provider != ProviderAnthropic {
+		return fmt.Errorf("basic.thinking_translation.model_id %q references unsupported provider %q", tt.ModelID, strings.TrimSpace(modelCfg.Provider))
 	}
 	modelIDs := llmModelIDSet(llm)
+	for _, modelID := range tt.TargetModelIDs {
+		if _, ok := modelIDs[modelID]; !ok {
+			return fmt.Errorf("basic.thinking_translation.target_model_ids contains unknown model %q", modelID)
+		}
+	}
+	return nil
+}
+
+func ValidateBasicSettingsWithRuntime(basic *BasicSettings, cfg Config) error {
+	copyValue := cloneBasicSettings(basic)
+	NormalizeBasicSettings(&copyValue)
+	if copyValue == nil || copyValue.ThinkingTranslation == nil {
+		return nil
+	}
+	tt := copyValue.ThinkingTranslation
+	if tt.ModelID == "" {
+		return fmt.Errorf("basic.thinking_translation.model_id is required")
+	}
+	if len(tt.TargetModelIDs) == 0 {
+		return fmt.Errorf("basic.thinking_translation.target_model_ids must not be empty")
+	}
+	runtime, modelCfg, _, ok := FindRuntimeModelByID(cfg, tt.ModelID)
+	if !ok {
+		return fmt.Errorf("basic.thinking_translation.model_id %q does not exist", tt.ModelID)
+	}
+	if runtime.Kind != RuntimeKindSDK {
+		return fmt.Errorf("basic.thinking_translation.model_id %q must reference an SDK runtime model", tt.ModelID)
+	}
+	provider := normalizeProvider(modelCfg.Provider)
+	if provider != ProviderOpenAI && provider != ProviderAnthropic {
+		return fmt.Errorf("basic.thinking_translation.model_id %q references unsupported provider %q", tt.ModelID, strings.TrimSpace(modelCfg.Provider))
+	}
+	modelIDs := runtimeModelIDSet(cfg)
 	for _, modelID := range tt.TargetModelIDs {
 		if _, ok := modelIDs[modelID]; !ok {
 			return fmt.Errorf("basic.thinking_translation.target_model_ids contains unknown model %q", modelID)
@@ -89,13 +122,13 @@ func ReconcileBasicSettingsWithLLM(basic **BasicSettings, llm *LLMSettings) {
 		return
 	}
 	tt := (*basic).ThinkingTranslation
-	_, source, _, ok := FindLLMModelByID(llm, tt.ModelID)
+	modelCfg, _, _, ok := FindLLMModelByID(llm, tt.ModelID)
 	if !ok {
 		*basic = nil
 		return
 	}
-	provider := normalizeProvider(source.Provider)
-	if provider != "openai" && provider != "anthropic" {
+	provider := normalizeProvider(modelCfg.Provider)
+	if provider != ProviderOpenAI && provider != ProviderAnthropic {
 		*basic = nil
 		return
 	}
@@ -104,6 +137,37 @@ func ReconcileBasicSettingsWithLLM(basic **BasicSettings, llm *LLMSettings) {
 	for _, modelID := range tt.TargetModelIDs {
 		if _, ok := modelIDs[modelID]; ok {
 			filtered = append(filtered, modelID)
+		}
+	}
+	tt.TargetModelIDs = filtered
+	if len(tt.TargetModelIDs) == 0 {
+		*basic = nil
+		return
+	}
+	NormalizeBasicSettings(basic)
+}
+
+func ReconcileBasicSettingsWithRuntime(basic **BasicSettings, cfg Config) {
+	NormalizeBasicSettings(basic)
+	if basic == nil || *basic == nil || (*basic).ThinkingTranslation == nil {
+		return
+	}
+	tt := (*basic).ThinkingTranslation
+	runtime, modelCfg, _, ok := FindRuntimeModelByID(cfg, tt.ModelID)
+	if !ok || runtime.Kind != RuntimeKindSDK {
+		*basic = nil
+		return
+	}
+	provider := normalizeProvider(modelCfg.Provider)
+	if provider != ProviderOpenAI && provider != ProviderAnthropic {
+		*basic = nil
+		return
+	}
+	modelIDs := runtimeModelIDSet(cfg)
+	filtered := make([]string, 0, len(tt.TargetModelIDs))
+	for _, modelID := range tt.TargetModelIDs {
+		if _, ok := modelIDs[normalizeTargetModelID(modelID)]; ok {
+			filtered = append(filtered, normalizeTargetModelID(modelID))
 		}
 	}
 	tt.TargetModelIDs = filtered
@@ -132,20 +196,41 @@ func ResolveThinkingTranslation(basic *BasicSettings, llm *LLMSettings, targetMo
 		return nil, err
 	}
 	tt := copyValue.ThinkingTranslation
-	hit := false
-	for _, modelID := range tt.TargetModelIDs {
-		if modelID == targetModelID {
-			hit = true
-			break
-		}
-	}
-	if !hit {
+	if !containsNormalizedTarget(tt.TargetModelIDs, targetModelID) {
 		return nil, nil
 	}
 	modelCfg, source, _, _ := FindLLMModelByID(llm, tt.ModelID)
 	return &ThinkingTranslationRuntime{
 		SourceID:       strings.TrimSpace(source.ID),
-		Provider:       normalizeProvider(source.Provider),
+		Provider:       normalizeProvider(modelCfg.Provider),
+		BaseURL:        strings.TrimSpace(source.BaseURL),
+		APIKey:         strings.TrimSpace(source.APIKey),
+		Model:          strings.TrimSpace(modelCfg.Model),
+		OpenAIAPIStyle: modelCfg.OpenAIAPIStyle,
+	}, nil
+}
+
+func ResolveThinkingTranslationWithRuntime(basic *BasicSettings, cfg Config, targetModelID string) (*ThinkingTranslationRuntime, error) {
+	targetModelID = normalizeTargetModelID(targetModelID)
+	if targetModelID == "" {
+		return nil, nil
+	}
+	copyValue := cloneBasicSettings(basic)
+	NormalizeBasicSettings(&copyValue)
+	if copyValue == nil || copyValue.ThinkingTranslation == nil {
+		return nil, nil
+	}
+	if err := ValidateBasicSettingsWithRuntime(copyValue, cfg); err != nil {
+		return nil, err
+	}
+	tt := copyValue.ThinkingTranslation
+	if !containsNormalizedTarget(tt.TargetModelIDs, targetModelID) {
+		return nil, nil
+	}
+	_, modelCfg, source, _ := FindRuntimeModelByID(cfg, tt.ModelID)
+	return &ThinkingTranslationRuntime{
+		SourceID:       strings.TrimSpace(source.ID),
+		Provider:       normalizeProvider(modelCfg.Provider),
 		BaseURL:        strings.TrimSpace(source.BaseURL),
 		APIKey:         strings.TrimSpace(source.APIKey),
 		Model:          strings.TrimSpace(modelCfg.Model),
@@ -192,14 +277,29 @@ func llmModelIDSet(llm *LLMSettings) map[string]struct{} {
 	return out
 }
 
-func normalizeModelIDList(values []string) []string {
+func runtimeModelIDSet(cfg Config) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, runtime := range RuntimeModels(cfg) {
+		for _, model := range runtime.Models {
+			id := normalizeModelIdentifier(model.ID)
+			if id == "" {
+				continue
+			}
+			out[id] = struct{}{}
+			out[normalizeModelIdentifier(runtime.ID+":"+id)] = struct{}{}
+		}
+	}
+	return out
+}
+
+func normalizeTargetModelIDList(values []string) []string {
 	if len(values) == 0 {
 		return nil
 	}
 	seen := make(map[string]struct{}, len(values))
 	out := make([]string, 0, len(values))
 	for _, value := range values {
-		normalized := normalizeModelIdentifier(value)
+		normalized := normalizeTargetModelID(value)
 		if normalized == "" {
 			continue
 		}
@@ -210,4 +310,28 @@ func normalizeModelIDList(values []string) []string {
 		out = append(out, normalized)
 	}
 	return out
+}
+
+func normalizeTargetModelID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if strings.Contains(value, ":") {
+		return normalizeModelIdentifier(value)
+	}
+	return normalizeModelIdentifier(value)
+}
+
+func containsNormalizedTarget(values []string, target string) bool {
+	target = normalizeTargetModelID(target)
+	if target == "" {
+		return false
+	}
+	for _, value := range values {
+		if normalizeTargetModelID(value) == target {
+			return true
+		}
+	}
+	return false
 }

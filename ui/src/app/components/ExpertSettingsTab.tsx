@@ -35,6 +35,14 @@ import {
 } from "@/lib/daemon";
 import { useDaemonStore } from "@/stores/daemonStore";
 
+import {
+  SETTINGS_INPUT_CLASSNAMES,
+  SETTINGS_PANEL_BUTTON_CLASS,
+  SETTINGS_SELECT_CLASSNAMES,
+  SETTINGS_TEXTAREA_CLASSNAMES,
+  SettingsTabLayout,
+} from "./settingsUi";
+
 function selectionToString(keys: "all" | Set<string | number>): string {
   if (keys === "all") return "";
   for (const key of keys) return String(key);
@@ -339,7 +347,24 @@ export function ExpertSettingsTab() {
   }
 
   return (
-    <div className="space-y-4">
+    <SettingsTabLayout
+      footer={
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <Chip variant="flat">只读系统专家：{experts.filter((expert) => !expert.editable).length}</Chip>
+            <Chip variant="flat" color="primary">可编辑专家：{customExperts.length}</Chip>
+          </div>
+          <div className="flex gap-2">
+            <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} variant="flat" startContent={<RefreshCw className="h-4 w-4" />} onPress={() => void loadSettings()} isDisabled={saving}>
+              重新加载
+            </Button>
+            <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} color="primary" startContent={<Plus className="h-4 w-4" />} onPress={() => void openWorkbench(null)}>
+              AI 创建专家
+            </Button>
+          </div>
+        </>
+      }
+    >
       <section className="grid gap-3 rounded-lg border bg-card p-4 sm:grid-cols-4">
         <div>
           <div className="text-xs text-muted-foreground">专家总数</div>
@@ -358,21 +383,6 @@ export function ExpertSettingsTab() {
           <div className="mt-1 text-2xl font-semibold">{skills.length}</div>
         </div>
       </section>
-
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-2">
-          <Chip variant="flat">只读系统专家：{experts.filter((expert) => !expert.editable).length}</Chip>
-          <Chip variant="flat" color="primary">可编辑专家：{customExperts.length}</Chip>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="flat" startContent={<RefreshCw className="h-4 w-4" />} onPress={() => void loadSettings()} isDisabled={saving}>
-            重新加载
-          </Button>
-          <Button color="primary" startContent={<Plus className="h-4 w-4" />} onPress={() => void openWorkbench(null)}>
-            AI 创建专家
-          </Button>
-        </div>
-      </div>
 
       <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <section className="space-y-3">
@@ -465,15 +475,15 @@ export function ExpertSettingsTab() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Button color="primary" variant="flat" startContent={<WandSparkles className="h-4 w-4" />} onPress={() => void openWorkbench(selectedExpert)}>
+                <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} color="primary" variant="flat" startContent={<WandSparkles className="h-4 w-4" />} onPress={() => void openWorkbench(selectedExpert)}>
                   {selectedExpert.builder_session_id ? "继续优化" : "创建优化会话"}
                 </Button>
                 {selectedExpert.editable ? (
                   <>
-                    <Button color={selectedExpert.enabled ? "warning" : "success"} variant="flat" onPress={() => void onToggleEnabled()} isDisabled={saving}>
+                    <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} color={selectedExpert.enabled ? "warning" : "success"} variant="flat" onPress={() => void onToggleEnabled()} isDisabled={saving}>
                       {selectedExpert.enabled ? "停用专家" : "启用专家"}
                     </Button>
-                    <Button color="danger" variant="flat" startContent={<Trash2 className="h-4 w-4" />} onPress={() => void onDelete()} isDisabled={saving}>
+                    <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} color="danger" variant="flat" startContent={<Trash2 className="h-4 w-4" />} onPress={() => void onDelete()} isDisabled={saving}>
                       删除专家
                     </Button>
                   </>
@@ -493,10 +503,10 @@ export function ExpertSettingsTab() {
                 <div className="grid gap-4 xl:grid-cols-[260px_minmax(0,1fr)_360px]">
                   <div className="space-y-4 rounded-lg border bg-card p-4">
                     <div className="space-y-3">
-                      <Select aria-label="生成模型" label="生成模型" selectionMode="single" disallowEmptySelection selectedKeys={builderModelId ? new Set([builderModelId]) : new Set([])} onSelectionChange={(keys) => setBuilderModelId(selectionToString(keys))}>
+                      <Select radius="full" size="sm" classNames={SETTINGS_SELECT_CLASSNAMES} aria-label="生成模型" label="生成模型" selectionMode="single" disallowEmptySelection selectedKeys={builderModelId ? new Set([builderModelId]) : new Set([])} onSelectionChange={(keys) => setBuilderModelId(selectionToString(keys))}>
                         {modelOptions.map((model) => <SelectItem key={model.id}>{model.label} · {formatProvider(model.provider)}/{model.model}</SelectItem>)}
                       </Select>
-                      <Button color="primary" variant="flat" startContent={<Plus className="h-4 w-4" />} onPress={() => { setActiveSessionId(null); setSessionDetail(null); setSelectedSnapshotId(null); }}>
+                      <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} color="primary" variant="flat" startContent={<Plus className="h-4 w-4" />} onPress={() => { setActiveSessionId(null); setSessionDetail(null); setSelectedSnapshotId(null); }}>
                         新建会话（下一条消息创建）
                       </Button>
                     </div>
@@ -548,7 +558,7 @@ export function ExpertSettingsTab() {
                         </div>
                       ))}
                     </div>
-                    <Textarea label="继续描述需求" minRows={6} value={builderInput} onValueChange={setBuilderInput} placeholder="例如：这个专家还不够懂 B 端信息层级，请加强表格、筛选和交互流程方面的能力。" />
+                    <Textarea classNames={SETTINGS_TEXTAREA_CLASSNAMES} label="继续描述需求" minRows={6} value={builderInput} onValueChange={setBuilderInput} placeholder="例如：这个专家还不够懂 B 端信息层级，请加强表格、筛选和交互流程方面的能力。" />
                   </div>
 
                   <div className="space-y-3 rounded-lg border bg-card p-4">
@@ -558,17 +568,17 @@ export function ExpertSettingsTab() {
                     </div>
                     {activeSnapshot ? (
                       <>
-                        <Input isReadOnly label="ID" value={activeSnapshot.draft.id} />
-                        <Input isReadOnly label="名称" value={activeSnapshot.draft.label} />
-                        <Textarea isReadOnly label="描述" minRows={3} value={activeSnapshot.draft.description || ""} />
+                        <Input isReadOnly radius="full" size="sm" classNames={SETTINGS_INPUT_CLASSNAMES} label="ID" value={activeSnapshot.draft.id} />
+                        <Input isReadOnly radius="full" size="sm" classNames={SETTINGS_INPUT_CLASSNAMES} label="名称" value={activeSnapshot.draft.label} />
+                        <Textarea isReadOnly classNames={SETTINGS_TEXTAREA_CLASSNAMES} label="描述" minRows={3} value={activeSnapshot.draft.description || ""} />
                         <div className="grid gap-2 sm:grid-cols-2">
-                          <Input isReadOnly label="主模型" value={activeSnapshot.draft.primary_model_id || ""} />
-                          <Input isReadOnly label="副模型" value={activeSnapshot.draft.secondary_model_id || ""} />
+                          <Input isReadOnly radius="full" size="sm" classNames={SETTINGS_INPUT_CLASSNAMES} label="主模型" value={activeSnapshot.draft.primary_model_id || ""} />
+                          <Input isReadOnly radius="full" size="sm" classNames={SETTINGS_INPUT_CLASSNAMES} label="副模型" value={activeSnapshot.draft.secondary_model_id || ""} />
                         </div>
                         <div className="flex flex-wrap gap-1">
                           {(activeSnapshot.draft.enabled_skills ?? []).length > 0 ? (activeSnapshot.draft.enabled_skills ?? []).map((skill) => <Chip key={skill} size="sm" variant="flat">{skill}</Chip>) : <div className="text-sm text-muted-foreground">暂无技能</div>}
                         </div>
-                        <Textarea isReadOnly label="系统提示词" minRows={8} value={activeSnapshot.draft.system_prompt || ""} />
+                        <Textarea isReadOnly classNames={SETTINGS_TEXTAREA_CLASSNAMES} label="系统提示词" minRows={8} value={activeSnapshot.draft.system_prompt || ""} />
                         {activeSnapshot.warnings && activeSnapshot.warnings.length > 0 ? <Alert color="warning" title="生成提醒" description={activeSnapshot.warnings.join("；")} /> : null}
                       </>
                     ) : (
@@ -578,14 +588,14 @@ export function ExpertSettingsTab() {
                 </div>
               </ModalBody>
               <ModalFooter>
-                <Button variant="flat" onPress={() => setWorkbenchOpen(false)}>关闭</Button>
-                <Button color="primary" variant="flat" onPress={() => void onSendMessage()} isLoading={sessionSending}>{activeSessionId ? "继续生成" : "开始生成"}</Button>
-                <Button color="primary" onPress={() => void onPublishSnapshot()} isDisabled={!activeSessionId || !activeSnapshot || saving}>发布当前快照</Button>
+                <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} variant="flat" onPress={() => setWorkbenchOpen(false)}>关闭</Button>
+                <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} color="primary" variant="flat" onPress={() => void onSendMessage()} isLoading={sessionSending}>{activeSessionId ? "继续生成" : "开始生成"}</Button>
+                <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} color="primary" onPress={() => void onPublishSnapshot()} isDisabled={!activeSessionId || !activeSnapshot || saving}>发布当前快照</Button>
               </ModalFooter>
             </>
           )}
         </ModalContent>
       </Modal>
-    </div>
+    </SettingsTabLayout>
   );
 }

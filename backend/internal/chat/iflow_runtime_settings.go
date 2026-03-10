@@ -34,13 +34,13 @@ func prepareIFLOWRunSpec(sess store.ChatSession, spec runner.RunSpec, expertID s
 	effectiveMCPs := config.EffectiveMCPServers(cfg, toolID, sess.MCPServerIDs)
 	env := cloneEnvMap(spec.Env)
 	env["VIBE_TREE_IFLOW_HOME"] = homeDir
-	env["VIBE_TREE_IFLOW_AUTH_MODE"] = firstNonEmptyTrimmed(tool.IFlowAuthMode, config.IFLOWAuthModeBrowser)
-	env["VIBE_TREE_IFLOW_BASE_URL"] = firstNonEmptyTrimmed(tool.IFlowBaseURL, iflowcli.DefaultBaseURL)
+	env["VIBE_TREE_IFLOW_AUTH_MODE"] = firstNonEmptyTrimmed(env["VIBE_TREE_IFLOW_AUTH_MODE"], tool.IFlowAuthMode, config.IFLOWAuthModeBrowser)
+	env["VIBE_TREE_IFLOW_BASE_URL"] = firstNonEmptyTrimmed(env["VIBE_TREE_IFLOW_BASE_URL"], tool.IFlowBaseURL, iflowcli.DefaultBaseURL)
 	if env["VIBE_TREE_IFLOW_AUTH_MODE"] == config.IFLOWAuthModeAPIKey {
-		if strings.TrimSpace(tool.IFlowAPIKey) == "" {
-			return runner.RunSpec{}, fmt.Errorf("iFlow API Key 未配置，请到 Settings → CLI 工具 → iFlow CLI 填写官方 API Key，或切换到网页登录")
+		env["VIBE_TREE_IFLOW_API_KEY"] = firstNonEmptyTrimmed(env["VIBE_TREE_IFLOW_API_KEY"], tool.IFlowAPIKey)
+		if strings.TrimSpace(env["VIBE_TREE_IFLOW_API_KEY"]) == "" {
+			return runner.RunSpec{}, fmt.Errorf("iFlow API Key 未配置，请到 Settings → API 来源 中填写 iFlow API Key，或切换到网页登录")
 		}
-		env["VIBE_TREE_IFLOW_API_KEY"] = strings.TrimSpace(tool.IFlowAPIKey)
 	} else {
 		delete(env, "VIBE_TREE_IFLOW_API_KEY")
 		status, err := iflowcli.DetectBrowserAuthStatus()
@@ -53,7 +53,7 @@ func prepareIFLOWRunSpec(sess store.ChatSession, spec runner.RunSpec, expertID s
 		if strings.TrimSpace(env["VIBE_TREE_MODEL"]) == "" || strings.TrimSpace(env["VIBE_TREE_MODEL"]) == iflowcli.DefaultModel {
 			if strings.TrimSpace(status.ModelName) != "" {
 				env["VIBE_TREE_MODEL"] = strings.TrimSpace(status.ModelName)
-				env["VIBE_TREE_MODEL_ID"] = strings.TrimSpace(status.ModelName)
+				env["VIBE_TREE_MODEL_ID"] = strings.ToLower(strings.TrimSpace(status.ModelName))
 			}
 		}
 	}

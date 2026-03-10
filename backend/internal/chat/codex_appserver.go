@@ -106,11 +106,15 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 	attemptResume := strings.TrimSpace(pointerStringValue(sess.CLISessionID))
 
 	runOnce := func(prompt string, contextMode string, resumeThreadID string) (TurnResult, error) {
-		threadReq, err := m.buildCodexThreadRequest(sess, spec, expertID, cliToolID, resumeThreadID)
+		runSpec, prepErr := prepareCLIRuntimeRunSpec(sess, spec, expertID)
+		if prepErr != nil {
+			return TurnResult{}, prepErr
+		}
+		threadReq, err := m.buildCodexThreadRequest(sess, runSpec, expertID, cliToolID, resumeThreadID)
 		if err != nil {
 			return TurnResult{}, err
 		}
-		lease, err := m.codexRuntimePool.Acquire(ctx, sess.ID, spec, threadReq)
+		lease, err := m.codexRuntimePool.Acquire(ctx, sess.ID, runSpec, threadReq)
 		if err != nil {
 			return TurnResult{}, &codexAppServerEarlyFailure{err: err}
 		}

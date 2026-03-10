@@ -76,7 +76,7 @@ cd ui && npm run build
 ./scripts/dev.sh
 ```
 
-打开 Vite 输出的本地地址（终端会打印，通常类似 `http://localhost:5174/`）。
+打开 Vite 输出的本地地址（终端会打印，通常类似 `http://localhost:5175/`）。
 
 ### 3) 生产形态验证（必做）
 

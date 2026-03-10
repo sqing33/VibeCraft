@@ -11,6 +11,8 @@ import {
 import { toast } from '@/lib/toast'
 import { useDaemonStore } from '@/stores/daemonStore'
 
+import { SETTINGS_PANEL_BUTTON_CLASS, SETTINGS_TEXTAREA_CLASSNAMES, SettingsTabLayout } from './settingsUi'
+
 const CONTEXT7_MCP_PLACEHOLDER = `{
   "mcpServers": {
     "context7": {
@@ -206,20 +208,21 @@ export function MCPSettingsTab() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-        <div className="text-sm text-muted-foreground">当前共配置 {data.servers.length} 个 MCP。</div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="flat" startContent={<Plus className="h-4 w-4" />} onPress={onAddServer}>
-            新增 MCP JSON
-          </Button>
-          <Button color="primary" isLoading={saving} startContent={<Save className="h-4 w-4" />} onPress={() => void onSave()}>
+    <SettingsTabLayout
+      footer={
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-sm text-muted-foreground">当前共配置 {data.servers.length} 个 MCP。</div>
+            <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} variant="flat" startContent={<Plus className="h-4 w-4" />} onPress={onAddServer}>
+              新增 MCP JSON
+            </Button>
+          </div>
+          <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} color="primary" isLoading={saving} startContent={<Save className="h-4 w-4" />} onPress={() => void onSave()}>
             保存 MCP 设置
           </Button>
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        </>
+      }
+    >
         {data.servers.length === 0 ? (
           <div className="rounded-xl border border-dashed px-4 py-6 text-sm text-muted-foreground">
             还没有 MCP 配置，点击右上角“新增 MCP JSON”开始添加。
@@ -242,6 +245,7 @@ export function MCPSettingsTab() {
                     </div>
                     <Button
                       isIconOnly
+                      radius="full"
                       size="sm"
                       variant="light"
                       color="danger"
@@ -253,6 +257,7 @@ export function MCPSettingsTab() {
                   </div>
 
                   <Textarea
+                    classNames={SETTINGS_TEXTAREA_CLASSNAMES}
                     label="MCP JSON"
                     minRows={10}
                     value={server.raw_json}
@@ -294,7 +299,6 @@ export function MCPSettingsTab() {
             })}
           </div>
         )}
-      </div>
-    </div>
+    </SettingsTabLayout>
   )
 }

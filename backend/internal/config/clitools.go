@@ -32,13 +32,13 @@ func NormalizeCLITools(tools *[]CLIToolConfig, llm *LLMSettings) error {
 	if tools == nil {
 		return nil
 	}
+	_ = llm
 	if len(*tools) == 0 {
 		*tools = defaultCLITools()
 		return nil
 	}
 
 	seen := map[string]struct{}{}
-	modelByID := llmModelByID(llm)
 	for i := range *tools {
 		item := &(*tools)[i]
 		item.ID = strings.TrimSpace(item.ID)
@@ -108,15 +108,6 @@ func NormalizeCLITools(tools *[]CLIToolConfig, llm *LLMSettings) error {
 			item.ProtocolFamilies = []string{item.ProtocolFamily}
 		} else {
 			item.ProtocolFamilies = prioritizeProtocolFamily(item.ProtocolFamilies, item.ProtocolFamily)
-		}
-		if item.DefaultModelID != "" {
-			model, ok := modelByID[item.DefaultModelID]
-			if !ok {
-				return fmt.Errorf("cli_tools[%d].default_model_id %q does not exist", i, item.DefaultModelID)
-			}
-			if !CLIToolSupportsProtocolFamily(*item, normalizeProvider(model.Provider)) {
-				return fmt.Errorf("cli_tools[%d].default_model_id %q is not compatible with protocol families %q", i, item.DefaultModelID, strings.Join(item.ProtocolFamilies, ","))
-			}
 		}
 	}
 

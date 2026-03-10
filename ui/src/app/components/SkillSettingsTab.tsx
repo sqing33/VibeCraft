@@ -25,6 +25,8 @@ import {
 import { toast } from '@/lib/toast'
 import { useDaemonStore } from '@/stores/daemonStore'
 
+import { SETTINGS_PANEL_BUTTON_CLASS, SETTINGS_TEXTAREA_CLASSNAMES, SettingsTabLayout } from './settingsUi'
+
 function normalizeSkills(skills: SkillBindingSetting[]): SkillBindingSetting[] {
   return skills.map((skill) => ({
     id: skill.id,
@@ -217,20 +219,21 @@ export function SkillSettingsTab() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-        <div className="text-sm text-muted-foreground">当前发现 {data.skills.length} 个 Skill。</div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="flat" isLoading={refreshing} onPress={() => void load('refresh')} startContent={<RefreshCw className="h-4 w-4" />}>
-            刷新列表
-          </Button>
-          <Button color="primary" variant="flat" isLoading={installing} onPress={() => setAddOpen(true)} startContent={<PackagePlus className="h-4 w-4" />}>
+    <SettingsTabLayout
+      footer={
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-sm text-muted-foreground">当前发现 {data.skills.length} 个 Skill。</div>
+            <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} variant="flat" isLoading={refreshing} onPress={() => void load('refresh')} startContent={<RefreshCw className="h-4 w-4" />}>
+              刷新列表
+            </Button>
+          </div>
+          <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} color="primary" variant="flat" isLoading={installing} onPress={() => setAddOpen(true)} startContent={<PackagePlus className="h-4 w-4" />}>
             添加 Skill
           </Button>
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        </>
+      }
+    >
         {data.skills.length === 0 ? (
           <div className="rounded-xl border border-dashed px-4 py-6 text-sm text-muted-foreground">
             当前没有发现任何 Skill。你可以点击右上角“添加 Skill”，或在项目目录 / 用户目录下放置 `SKILL.md`。
@@ -257,8 +260,9 @@ export function SkillSettingsTab() {
                 )}
                 <Button
                   size="sm"
+                  radius="full"
+                  className={`${SETTINGS_PANEL_BUTTON_CLASS} w-full`}
                   variant="flat"
-                  className="w-full"
                   onPress={() => openEditModal(skill)}
                 >
                   编辑说明
@@ -267,7 +271,7 @@ export function SkillSettingsTab() {
             ))}
           </div>
         )}
-      </div>
+
 
       <input
         ref={archiveInputRef}
@@ -310,6 +314,8 @@ export function SkillSettingsTab() {
                     <div className="text-xs font-medium text-muted-foreground">自定义说明</div>
                     <Button
                       size="sm"
+                      radius="full"
+                      className={SETTINGS_PANEL_BUTTON_CLASS}
                       variant="flat"
                       isLoading={translating}
                       isDisabled={!editSkill?.description}
@@ -323,6 +329,7 @@ export function SkillSettingsTab() {
                     <div className="text-xs text-muted-foreground">译文已填入编辑区</div>
                   ) : null}
                   <Textarea
+                    classNames={SETTINGS_TEXTAREA_CLASSNAMES}
                     placeholder="输入一句话描述这个 Skill 的功能……"
                     value={editDesc}
                     onValueChange={setEditDesc}
@@ -332,8 +339,8 @@ export function SkillSettingsTab() {
                 </div>
               </ModalBody>
               <ModalFooter>
-                <Button variant="light" onPress={() => setEditSkill(null)}>取消</Button>
-                <Button color="primary" isLoading={savingEdit} onPress={() => void onSaveEdit()}>保存</Button>
+                <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} variant="light" onPress={() => setEditSkill(null)}>取消</Button>
+                <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} color="primary" isLoading={savingEdit} onPress={() => void onSaveEdit()}>保存</Button>
               </ModalFooter>
             </>
           )}
@@ -351,21 +358,21 @@ export function SkillSettingsTab() {
                   你可以上传一个 zip 压缩包，或者直接选择一个 Skill 文件夹。安装后会放到用户目录的 `~/.codex/skills` 下。
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Button className="h-auto justify-start px-4 py-4" variant="flat" onPress={() => archiveInputRef.current?.click()} startContent={<Upload className="h-4 w-4" />}>
+                  <Button radius="full" size="sm" className={`${SETTINGS_PANEL_BUTTON_CLASS} justify-start`} variant="flat" onPress={() => archiveInputRef.current?.click()} startContent={<Upload className="h-4 w-4" />}>
                     上传 ZIP 压缩包
                   </Button>
-                  <Button className="h-auto justify-start px-4 py-4" variant="flat" onPress={() => directoryInputRef.current?.click()} startContent={<FolderOpen className="h-4 w-4" />}>
+                  <Button radius="full" size="sm" className={`${SETTINGS_PANEL_BUTTON_CLASS} justify-start`} variant="flat" onPress={() => directoryInputRef.current?.click()} startContent={<FolderOpen className="h-4 w-4" />}>
                     选择 Skill 文件夹
                   </Button>
                 </div>
               </ModalBody>
               <ModalFooter>
-                <Button variant="light" onPress={() => setAddOpen(false)}>关闭</Button>
+                <Button radius="full" size="sm" className={SETTINGS_PANEL_BUTTON_CLASS} variant="light" onPress={() => setAddOpen(false)}>关闭</Button>
               </ModalFooter>
             </>
           )}
         </ModalContent>
       </Modal>
-    </div>
+    </SettingsTabLayout>
   )
 }

@@ -62,7 +62,7 @@ func translateTextHandler(deps Deps) gin.HandlerFunc {
 			return
 		}
 
-		provider := strings.ToLower(strings.TrimSpace(source.Provider))
+		provider := strings.ToLower(strings.TrimSpace(modelCfg.Provider))
 		env := map[string]string{}
 		switch provider {
 		case "openai":
@@ -73,7 +73,7 @@ func translateTextHandler(deps Deps) gin.HandlerFunc {
 				env["ANTHROPIC_BASE_URL"] = strings.TrimSpace(source.BaseURL)
 			}
 		default:
-			c.JSON(http.StatusBadRequest, gin.H{"error": "翻译模型不支持该 provider：" + source.Provider})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "翻译模型不支持该 provider：" + modelCfg.Provider})
 			return
 		}
 

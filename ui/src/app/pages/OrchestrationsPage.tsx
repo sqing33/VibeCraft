@@ -44,7 +44,6 @@ function EmptyList() {
  */
 export function OrchestrationsPage() {
   const daemonUrl = useDaemonStore((s) => s.daemonUrl)
-  const health = useDaemonStore((s) => s.health)
 
   const items = useOrchestrationUIStore((s) => s.recentItems)
   const recentLoaded = useOrchestrationUIStore((s) => s.recentLoaded)
@@ -174,9 +173,6 @@ export function OrchestrationsPage() {
           <span>Orchestrations</span>
           <span>·</span>
           <span>{items.length} 个编排</span>
-          <Chip variant="flat" color={health.status === 'ok' ? 'success' : 'default'} size="sm">
-            {health.status === 'ok' ? 'Daemon 正常' : 'Daemon 未就绪'}
-          </Chip>
         </div>
       }
       headerActions={

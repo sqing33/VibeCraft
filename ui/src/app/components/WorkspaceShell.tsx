@@ -1,27 +1,15 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Button, Chip } from '@heroui/react'
+import { Button } from '@heroui/react'
 import { Github, MessageSquare, Moon, Sun, Workflow } from 'lucide-react'
 
 import { goHome, goToChat, goToRepoLibraryRepositories } from '@/app/routes'
-import { useDaemonStore } from '@/stores/daemonStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useThemeStore } from '@/stores/themeStore'
 
-import { DevToolsDialog } from './DevToolsDialog'
 import { SettingsDialog } from './SettingsDialog'
 
-function healthText(status: string): string {
-  if (status === 'checking') return '检查中'
-  if (status === 'ok') return '正常'
-  return '异常'
-}
 
-function wsText(state: string): string {
-  if (state === 'connected') return '已连接'
-  if (state === 'connecting') return '连接中'
-  return '未连接'
-}
 
 type WorkspaceNavKey = 'chat' | 'orchestrations' | 'repo_library'
 
@@ -61,8 +49,6 @@ export function WorkspacePortal(props: WorkspacePortalProps) {
  */
 export function WorkspaceShell(props: WorkspaceShellProps) {
   const { activeNav, children } = props
-  const health = useDaemonStore((s) => s.health)
-  const wsState = useDaemonStore((s) => s.wsState)
   const activeChatSessionId = useChatStore((s) => s.activeSessionId)
   const theme = useThemeStore((s) => s.theme)
   const toggleTheme = useThemeStore((s) => s.toggleTheme)
@@ -91,8 +77,25 @@ export function WorkspaceShell(props: WorkspaceShellProps) {
       <div className="grid h-full min-h-0 w-full grid-cols-1 lg:grid-cols-[292px_minmax(0,1fr)]">
         <section className="flex min-h-0 flex-col overflow-hidden px-1 py-2 md:px-2">
           <div className="shrink-0">
-            <div className="mb-4 px-1">
+            <div className="mb-4 flex items-center justify-between gap-2 px-1">
               <div className="text-lg font-semibold tracking-tight">vibe-tree</div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="light"
+                  size="sm"
+                  isIconOnly
+                  onPress={toggleTheme}
+                  aria-label={theme === 'dark' ? '切换为浅色主题' : '切换为深色主题'}
+                  title={theme === 'dark' ? '切换为浅色主题' : '切换为深色主题'}
+                >
+                  {theme === 'dark' ? (
+                    <Sun className="h-4 w-4" aria-hidden="true" focusable="false" />
+                  ) : (
+                    <Moon className="h-4 w-4" aria-hidden="true" focusable="false" />
+                  )}
+                </Button>
+                <SettingsDialog />
+              </div>
             </div>
             <div className="flex flex-col gap-2">
               <Button
@@ -131,42 +134,6 @@ export function WorkspaceShell(props: WorkspaceShellProps) {
           <div className="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden border-t border-default-200/70 pt-4">
             <div ref={setSidebarHeaderEl} className="shrink-0" />
             <div ref={setSidebarBodyEl} className="thin-scrollbar mt-3 min-h-0 flex-1 overflow-auto pr-0" />
-          </div>
-
-          <div className="mt-4 shrink-0 border-t border-default-200/70 pt-4">
-            <div className="flex flex-wrap gap-2">
-              {health.status === 'ok' ? (
-                <Chip color="success" variant="flat" size="sm">
-                  健康状态：{healthText(health.status)}
-                </Chip>
-              ) : (
-                <Chip variant="flat" size="sm">
-                  健康状态：{healthText(health.status)}
-                </Chip>
-              )}
-              <Chip variant="flat" size="sm">
-                连接：{wsText(wsState)}
-              </Chip>
-            </div>
-
-            <div className="mt-3 flex items-center gap-2">
-              <Button
-                variant="light"
-                size="sm"
-                isIconOnly
-                onPress={toggleTheme}
-                aria-label={theme === 'dark' ? '切换为浅色主题' : '切换为深色主题'}
-                title={theme === 'dark' ? '切换为浅色主题' : '切换为深色主题'}
-              >
-                {theme === 'dark' ? (
-                  <Sun className="h-4 w-4" aria-hidden="true" focusable="false" />
-                ) : (
-                  <Moon className="h-4 w-4" aria-hidden="true" focusable="false" />
-                )}
-              </Button>
-              <DevToolsDialog />
-              <SettingsDialog />
-            </div>
           </div>
         </section>
 

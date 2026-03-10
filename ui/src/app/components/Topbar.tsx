@@ -7,49 +7,20 @@ import {
   goToRepoLibraryRepositories,
   useHashRoute,
 } from '@/app/routes'
-import { type HealthState, useDaemonStore } from '@/stores/daemonStore'
 import { useThemeStore } from '@/stores/themeStore'
 
 import { SettingsDialog } from './SettingsDialog'
-import { DevToolsDialog } from './DevToolsDialog'
 
-function healthText(health: HealthState): string {
-  if (health.status === 'checking') return '检查中'
-  if (health.status === 'ok') return '正常'
-  return '异常'
-}
 
-function wsText(state: string): string {
-  if (state === 'connected') return '已连接'
-  if (state === 'connecting') return '连接中'
-  return '未连接'
-}
 
 export function Topbar() {
   const route = useHashRoute()
-  const health = useDaemonStore((s) => s.health)
-  const wsState = useDaemonStore((s) => s.wsState)
   const theme = useThemeStore((s) => s.theme)
   const toggleTheme = useThemeStore((s) => s.toggleTheme)
   const isRepoLibraryRoute =
     route.name === 'repo_library_repositories' ||
     route.name === 'repo_library_repository_detail' ||
     route.name === 'repo_library_pattern_search'
-
-  const healthBadge =
-    health.status === 'ok' ? (
-      <Chip color="success" variant="flat" size="sm">
-        健康状态：{healthText(health)}
-      </Chip>
-    ) : health.status === 'error' ? (
-      <Chip color="danger" variant="flat" size="sm">
-        健康状态：{healthText(health)}
-      </Chip>
-    ) : (
-      <Chip variant="flat" size="sm">
-        健康状态：{healthText(health)}
-      </Chip>
-    )
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
@@ -83,10 +54,6 @@ export function Topbar() {
         </div>
 
         <div className="flex items-center gap-2">
-          {healthBadge}
-          <Chip variant="flat" size="sm">
-            连接：{wsText(wsState)}
-          </Chip>
           <Button
             variant="light"
             size="sm"
@@ -101,7 +68,6 @@ export function Topbar() {
               <Moon className="h-4 w-4" aria-hidden="true" focusable="false" />
             )}
           </Button>
-          <DevToolsDialog />
           <SettingsDialog />
         </div>
       </div>

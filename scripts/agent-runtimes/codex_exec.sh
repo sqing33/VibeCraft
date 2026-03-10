@@ -9,6 +9,10 @@ model_id="${VIBE_TREE_MODEL_ID:-}"
 workspace="${VIBE_TREE_WORKSPACE:-$PWD}"
 cli_cmd="${VIBE_TREE_CLI_COMMAND_PATH:-codex}"
 resume_session_id="${VIBE_TREE_RESUME_SESSION_ID:-}"
+cli_tool_id="${VIBE_TREE_CLI_TOOL_ID:-codex}"
+openai_api_key="${OPENAI_API_KEY:-}"
+openai_base_url="${OPENAI_BASE_URL:-${VIBE_TREE_BASE_URL:-}}"
+codex_home="${CODEX_HOME:-}"
 status="ok"
 summary_text=""
 next_action=""
@@ -32,6 +36,39 @@ if [[ -z "$raw_log" ]]; then
   cleanup_files+=("$raw_log")
 fi
 trap 'for f in "${cleanup_files[@]:-}"; do [[ -n "$f" ]] && rm -f "$f"; done' EXIT
+
+ensure_codex_home() {
+  local tool_id="$1"
+  local base_url="$2"
+  local target_home="$3"
+  if [[ -z "$target_home" ]]; then
+    local xdg_data_home="${XDG_DATA_HOME:-}"
+    if [[ -z "$xdg_data_home" ]]; then
+      xdg_data_home="$HOME/.local/share"
+    fi
+    target_home="$xdg_data_home/vibe-tree/managed-clis/${tool_id:-codex}"
+  fi
+  mkdir -p "$target_home"
+  if [[ -z "$base_url" ]]; then
+    base_url="https://api.openai.com/v1"
+  fi
+  cat > "$target_home/config.toml" <<TOML
+model_provider = "vibe_tree"
+
+[model_providers.vibe_tree]
+name = "vibe-tree-managed"
+base_url = "$base_url"
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"
+TOML
+  chmod 600 "$target_home/config.toml"
+  printf '%s' "$target_home"
+}
+
+if [[ -n "$openai_api_key" || -n "$openai_base_url" ]]; then
+  codex_home="$(ensure_codex_home "$cli_tool_id" "$openai_base_url" "$codex_home")"
+  export CODEX_HOME="$codex_home"
+fi
 
 combined_prompt="$prompt"
 if [[ -n "$system_prompt" ]]; then

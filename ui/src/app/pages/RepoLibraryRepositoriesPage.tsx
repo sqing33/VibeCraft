@@ -9,14 +9,18 @@ import {
   createRepoLibraryAnalysis,
   fetchCLIToolSettings,
   fetchRepoLibraryRepositories,
+  fetchRuntimeModelSettings,
   type CLITool,
-  type LLMModelProfile,
   type RepoLibraryAnalysisRequest,
   type RepoLibraryAnalysisRun,
   type RepoLibraryCreateAnalysisResponse,
   type RepoLibraryDepth,
+  type RuntimeModelSettings,
 } from '@/lib/daemon'
-import { buildCLIToolModelProfiles, cliToolDefaultModelID } from '@/lib/cliToolModels'
+import {
+  runtimeDefaultModelForToolId,
+  runtimeModelsForToolId,
+} from '@/lib/runtimeModels'
 import { formatRelativeTime } from '@/lib/time'
 import { toast } from '@/lib/toast'
 import { useDaemonStore } from '@/stores/daemonStore'
@@ -87,7 +91,7 @@ export function RepoLibraryRepositoriesPage() {
   const [submitting, setSubmitting] = useState(false)
   const [created, setCreated] = useState<RepoLibraryCreateAnalysisResponse | null>(null)
   const [cliTools, setCliTools] = useState<CLITool[]>([])
-  const [toolModels, setToolModels] = useState<LLMModelProfile[]>([])
+  const [runtimeModelSettings, setRuntimeModelSettings] = useState<RuntimeModelSettings | null>(null)
   const [selectedCliToolId, setSelectedCliToolId] = useState('')
   const [selectedModelId, setSelectedModelId] = useState('')
 
@@ -119,16 +123,19 @@ export function RepoLibraryRepositoriesPage() {
 
   useEffect(() => {
     let cancelled = false
-    void fetchCLIToolSettings(daemonUrl)
-      .then((settings) => {
+    void Promise.all([
+      fetchCLIToolSettings(daemonUrl),
+      fetchRuntimeModelSettings(daemonUrl),
+    ])
+      .then(([cliSettings, runtimeSettings]) => {
         if (cancelled) return
-        setCliTools(settings.tools ?? [])
-        setToolModels(settings.models ?? [])
+        setCliTools(cliSettings.tools ?? [])
+        setRuntimeModelSettings(runtimeSettings)
       })
       .catch(() => {
         if (cancelled) return
         setCliTools([])
-        setToolModels([])
+        setRuntimeModelSettings(null)
       })
     return () => {
       cancelled = true
@@ -146,20 +153,16 @@ export function RepoLibraryRepositoriesPage() {
       ? selectedCliToolId
       : selectableTools[0]?.id ?? ''
   const modelsForTool = useCallback(
-    (toolId: string) => {
-      const tool = toolsById.get(toolId)
-      return buildCLIToolModelProfiles(tool, toolModels)
-    },
-    [toolModels, toolsById],
+    (toolId: string) => runtimeModelsForToolId(runtimeModelSettings, toolId),
+    [runtimeModelSettings],
   )
   const effectiveModelId = useMemo(() => {
     const models = modelsForTool(effectiveCliToolId)
     if (selectedModelId && models.some((model) => model.id === selectedModelId)) return selectedModelId
-    const tool = toolsById.get(effectiveCliToolId)
-    const fallback = cliToolDefaultModelID(tool, toolModels)
+    const fallback = runtimeDefaultModelForToolId(runtimeModelSettings, effectiveCliToolId)
     if (fallback && models.some((model) => model.id === fallback)) return fallback
     return models[0]?.id ?? ''
-  }, [effectiveCliToolId, modelsForTool, selectedModelId, toolModels, toolsById])
+  }, [effectiveCliToolId, modelsForTool, runtimeModelSettings, selectedModelId])
 
   const onSubmit = async () => {
     const features = parseFeatureList(featuresText)
@@ -218,124 +221,99 @@ export function RepoLibraryRepositoriesPage() {
             <RepoLibrarySidebarRepositoryItem
               key={item.repository_id}
               title={item.full_name || item.name || item.repo_url}
-              subtitle={item.repo_url}
-              meta={formatRelativeTime(item.created_at || item.updated_at || 0)}
-              active={Boolean(createdRepositoryId && item.repository_id === createdRepositoryId)}
+              subtitle={item.default_branch ? `默认分支：${item.default_branch}` : item.repo_url}
+              meta={item.updated_at ? formatRelativeTime(item.updated_at) : '未知'}
               onPress={() => goToRepoLibraryRepository(item.repository_id)}
             />
           ))}
         </div>
       )}
-      <LoadingVeil visible={loading && hasRepositoryCache} compact label="正在刷新仓库列表…" />
+      <LoadingVeil visible={loading && hasRepositoryCache} />
     </div>
   )
 
   return (
     <RepoLibraryShell
-      title="Github 知识库"
-      headerMeta={
-        <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-          <span>Repo Library</span>
-          <span>·</span>
-          <span>{items.length} 个仓库</span>
-        </div>
-      }
-      headerActions={
-        <>
-          <Button variant="flat" size="sm" startContent={<Search className="h-4 w-4" />} onPress={goToRepoLibraryPatternSearch}>
-            知识库检索
-          </Button>
-          <Button variant="light" size="sm" startContent={<RefreshCcw className="h-4 w-4" />} onPress={() => void refresh({ force: true })}>
-            刷新列表
-          </Button>
-        </>
-      }
-      sidebarTitle="仓库"
+      title="Repo Library"
+      headerMeta={<div className="text-sm text-muted-foreground">统一查看分析过的 GitHub 仓库，并在右侧快速提交新的特征分析任务。</div>}
+      sidebarTitle="已分析仓库"
       sidebarCount={items.length}
       sidebarAction={
-        <Button
-          color="primary"
-          size="sm"
-          className="w-[25%] min-w-[86px] rounded-2xl"
-          startContent={<Plus className="h-4 w-4 shrink-0 stroke-[3]" />}
-          onPress={() => {
-            document.getElementById('repo-library-analyze-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-            window.requestAnimationFrame(() => {
-              const input = document.getElementById('repo-library-repo-url') as HTMLInputElement | null
-              input?.focus()
-            })
-          }}
-        >
-          添加仓库
+        <Button variant="light" size="sm" startContent={<RefreshCcw className="h-4 w-4" />} onPress={() => void refresh({ force: true })}>
+          刷新
         </Button>
       }
       sidebarContent={sidebarContent}
     >
-      <div className="relative">
-        {error && hasRepositoryCache ? <Alert color="danger" title="刷新失败，已保留上次内容" description={error} className="mb-4" /> : null}
-        <section id="repo-library-analyze-form" className="rounded-2xl border bg-card p-5 shadow-sm">
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2 text-lg font-semibold">
-              <Sparkles className="h-5 w-5" />
-              Analyze Repo
+      <div className="space-y-4">
+        <div className="rounded-2xl border border-default-200/70 bg-background/70 p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div>
+              <div className="text-base font-semibold">Analyze Repo</div>
+              <div className="text-sm text-muted-foreground">调用后端 GitHub Feature Analyzer 流水线，对目标仓库做多维度特征分析。</div>
             </div>
-            <div className="mt-1 text-sm text-muted-foreground">
-              提交 GitHub 仓库 URL、Ref、分析深度和关注特征，后端会异步执行 analyzer 并沉淀为 Repo Library 资产。
-            </div>
+            <Chip variant="flat" color="primary">
+              {selectableTools.length > 0 ? `${selectableTools.length} 个 CLI 可用` : '未配置 CLI'}
+            </Chip>
           </div>
-          <Chip variant="bordered" size="sm">
-            支持异步分析
-          </Chip>
-        </div>
 
-        <div className="grid gap-3 md:grid-cols-[1.4fr_0.8fr_0.6fr]">
-          <Input
-            id="repo-library-repo-url"
-            label="仓库地址"
-            placeholder="https://github.com/owner/repo"
-            value={repoUrl}
-            onValueChange={setRepoUrl}
-          />
-          <Input label="Ref" placeholder="HEAD / main / v1.0.0" value={ref} onValueChange={setRef} />
-          <Select
-            aria-label="分析深度"
-            label="分析深度"
-            description={depth === 'deep' ? '深度分析：适合更深入的实现机制与证据链梳理。' : '标准分析：适合常规结构理解与功能概览。'}
-            selectedKeys={new Set([depth])}
-            selectionMode="single"
-            disallowEmptySelection
-            onSelectionChange={(keys) => {
-              const value = selectionToString(keys)
-              if (value === 'deep' || value === 'standard') setDepth(value)
-            }}
-          >
-            <SelectItem key="standard">标准</SelectItem>
-            <SelectItem key="deep">深度</SelectItem>
-          </Select>
-        </div>
-
-        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-xl border bg-muted/20 p-3">
-            <div className="mb-2 text-sm font-medium">输出语言</div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant={language === 'zh-CN' ? 'flat' : 'light'} size="sm" onPress={() => setLanguage('zh-CN')}>
-                中文
-              </Button>
-              <Button variant={language === 'en' ? 'flat' : 'light'} size="sm" onPress={() => setLanguage('en')}>
-                English
-              </Button>
-            </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <Input
+              label="GitHub 仓库地址"
+              placeholder="https://github.com/owner/repo"
+              value={repoUrl}
+              onValueChange={setRepoUrl}
+              startContent={<Search className="h-4 w-4" />}
+            />
+            <Input
+              label="Ref / Branch"
+              placeholder="HEAD"
+              value={ref}
+              onValueChange={setRef}
+            />
           </div>
-          <div className="rounded-xl border bg-muted/20 p-3">
-            <div className="mb-2 text-sm font-medium">分析模式</div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant={analyzerMode === 'full' ? 'flat' : 'light'} size="sm" onPress={() => setAnalyzerMode('full')}>
-                完整分析
-              </Button>
-              <Button variant={analyzerMode === 'compact' ? 'flat' : 'light'} size="sm" onPress={() => setAnalyzerMode('compact')}>
-                快速概览
-              </Button>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <Select
+              aria-label="分析深度"
+              label="分析深度"
+              selectedKeys={new Set([depth])}
+              selectionMode="single"
+              disallowEmptySelection
+              onSelectionChange={(keys) => {
+                const value = selectionToString(keys)
+                if (value === 'deep' || value === 'standard') {
+                  setDepth(value)
+                }
+              }}
+            >
+              <SelectItem key="standard">Standard</SelectItem>
+              <SelectItem key="deep">Deep</SelectItem>
+            </Select>
+            <Select
+              aria-label="输出语言"
+              label="输出语言"
+              selectedKeys={new Set([language])}
+              selectionMode="single"
+              disallowEmptySelection
+              onSelectionChange={(keys) => {
+                const value = selectionToString(keys)
+                if (value === 'zh-CN' || value === 'en') setLanguage(value)
+              }}
+            >
+              <SelectItem key="zh-CN">中文</SelectItem>
+              <SelectItem key="en">English</SelectItem>
+            </Select>
+            <div className="rounded-xl border bg-muted/20 p-3">
+              <div className="mb-2 text-sm font-medium">分析模式</div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant={analyzerMode === 'full' ? 'flat' : 'light'} size="sm" onPress={() => setAnalyzerMode('full')}>
+                  完整分析
+                </Button>
+                <Button variant={analyzerMode === 'compact' ? 'flat' : 'light'} size="sm" onPress={() => setAnalyzerMode('compact')}>
+                  快速概览
+                </Button>
+              </div>
             </div>
           </div>
           <Select
@@ -361,7 +339,7 @@ export function RepoLibraryRepositoriesPage() {
             aria-label="模型"
             label="模型"
             placeholder={modelsForTool(effectiveCliToolId).length === 0 ? '当前工具暂无可用模型' : '选择模型'}
-            description={effectiveModelId ? `默认回退：${effectiveModelId}` : '模型列表按 CLI 工具协议自动过滤'}
+            description={effectiveModelId ? `默认回退：${effectiveModelId}` : '模型列表来自 Settings → 模型设置 中该 runtime 的配置'}
             selectedKeys={effectiveModelId ? new Set([effectiveModelId]) : new Set()}
             selectionMode="single"
             disallowEmptySelection
@@ -376,61 +354,74 @@ export function RepoLibraryRepositoriesPage() {
               <SelectItem key={model.id}>{model.label || model.id} · {model.model}</SelectItem>
             ))}
           </Select>
+
+          <div className="mt-3">
+            <Textarea
+              label="分析特征 / 问题"
+              placeholder="每行一个，例如：\n认证流程\n仓库路由与导航\n数据层抽象"
+              minRows={4}
+              value={featuresText}
+              onValueChange={setFeaturesText}
+            />
+          </div>
+
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <Button variant="light" onPress={() => {
+              setRepoUrl('')
+              setRef('HEAD')
+              setFeaturesText('认证流程\n仓库路由与导航')
+              setDepth('standard')
+              setLanguage('zh-CN')
+              setAnalyzerMode('full')
+              setSelectedCliToolId('')
+              setSelectedModelId('')
+            }}>
+              重置
+            </Button>
+            <Button color="primary" startContent={<Plus className="h-4 w-4" />} isLoading={submitting} onPress={() => void onSubmit()}>
+              创建分析
+            </Button>
+          </div>
         </div>
 
-        <div className="mt-3">
-          <Textarea
-            label="分析特征 / 问题"
-            placeholder="每行一个，例如：\n认证流程\n仓库路由与导航\n数据层抽象"
-            minRows={4}
-            value={featuresText}
-            onValueChange={setFeaturesText}
-          />
-        </div>
-
-        <div className="mt-4 flex justify-end">
-          <Button color="primary" isLoading={submitting} onPress={onSubmit}>
-            创建分析任务
-          </Button>
-        </div>
-      </section>
-
-      {createdAnalysis ? (
-        <section className="rounded-2xl border bg-card p-5 shadow-sm">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="text-sm font-semibold">最近提交的分析</div>
-                <Chip color={analysisStatusColor(createdAnalysis.status)} variant="flat" size="sm">
+        {createdAnalysis ? (
+          <div className="rounded-2xl border border-success/40 bg-success/5 p-4">
+            <div className="mb-2 flex items-center gap-2 text-success">
+              <Sparkles className="h-4 w-4" />
+              <span className="font-medium">最近创建的分析</span>
+            </div>
+            <div className="grid gap-2 text-sm md:grid-cols-2">
+              <div>
+                <span className="text-muted-foreground">分析 ID：</span>
+                <span className="font-mono">{createdAnalysis.analysis_id}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">执行 ID：</span>
+                <span className="font-mono">{createdAnalysis.execution_id || '-'}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">状态：</span>
+                <Chip size="sm" color={analysisStatusColor(createdAnalysis.status)} variant="flat">
                   {formatAnalysisStatus(createdAnalysis.status)}
                 </Chip>
               </div>
-              <div className="text-sm text-muted-foreground">{createdAnalysis.repo_url}</div>
-              <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
-                <div>
-                  <div className="text-muted-foreground/80">分析 ID</div>
-                  <code className="text-foreground">{createdAnalysis.analysis_id}</code>
-                </div>
-                <div>
-                  <div className="text-muted-foreground/80">Execution</div>
-                  <code className="text-foreground">{createdAnalysis.execution_id || '待分配'}</code>
-                </div>
-                <div>
-                  <div className="text-muted-foreground/80">最近更新时间</div>
-                  <div className="text-foreground">{formatRelativeTime(createdAnalysis.updated_at || 0)}</div>
-                </div>
+              <div>
+                <span className="text-muted-foreground">创建时间：</span>
+                <span>{createdAnalysis.created_at ? formatRelativeTime(createdAnalysis.created_at) : '-'}</span>
               </div>
             </div>
-
-            {createdRepositoryId ? (
-              <Button variant="flat" size="sm" onPress={() => goToRepoLibraryRepository(createdRepositoryId)}>
-                打开仓库详情
+            <div className="mt-3 flex flex-wrap gap-2">
+              {createdRepositoryId ? (
+                <Button size="sm" variant="flat" onPress={() => goToRepoLibraryRepository(createdRepositoryId)}>
+                  打开仓库详情
+                </Button>
+              ) : null}
+              <Button size="sm" variant="light" onPress={() => goToRepoLibraryPatternSearch()}>
+                打开 Pattern Search
               </Button>
-            ) : null}
+            </div>
           </div>
-        </section>
-      ) : null}
-      <LoadingVeil visible={loading && hasRepositoryCache} label="正在同步知识库内容…" />
+        ) : null}
       </div>
     </RepoLibraryShell>
   )

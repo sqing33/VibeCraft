@@ -50,6 +50,7 @@ func llmTestHandler() gin.HandlerFunc {
 		sourceID := strings.TrimSpace(req.SourceID)
 		baseURL := strings.TrimSpace(req.BaseURL)
 		var llm *config.LLMSettings
+		var apiSources []config.APISourceConfig
 		var savedModelID string
 
 		if provider != "openai" && provider != "anthropic" {
@@ -79,6 +80,7 @@ func llmTestHandler() gin.HandlerFunc {
 		cfg, _, err := config.LoadPersisted()
 		if err == nil {
 			llm = cfg.LLM
+			apiSources = cfg.APISources
 			if llm == nil || (len(llm.Sources) == 0 && len(llm.Models) == 0) {
 				derived := deriveLLMFromExperts(cfg.Experts)
 				llm = &derived
@@ -86,18 +88,9 @@ func llmTestHandler() gin.HandlerFunc {
 		}
 
 		if apiKey == "" || baseURL == "" {
-			if llm == nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			for _, source := range llm.Sources {
+			for _, source := range apiSources {
 				if strings.TrimSpace(source.ID) != sourceID {
 					continue
-				}
-				sourceProvider := strings.ToLower(strings.TrimSpace(source.Provider))
-				if sourceProvider != "" && sourceProvider != provider {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "source provider mismatch"})
-					return
 				}
 				if apiKey == "" {
 					apiKey = strings.TrimSpace(source.APIKey)
@@ -106,6 +99,20 @@ func llmTestHandler() gin.HandlerFunc {
 					baseURL = strings.TrimSpace(source.BaseURL)
 				}
 				break
+			}
+			if (apiKey == "" || baseURL == "") && llm != nil {
+				for _, source := range llm.Sources {
+					if strings.TrimSpace(source.ID) != sourceID {
+						continue
+					}
+					if apiKey == "" {
+						apiKey = strings.TrimSpace(source.APIKey)
+					}
+					if baseURL == "" {
+						baseURL = strings.TrimSpace(source.BaseURL)
+					}
+					break
+				}
 			}
 		}
 

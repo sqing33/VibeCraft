@@ -448,7 +448,7 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 		} else {
 			delete(runSpec.Env, "VIBE_TREE_RESUME_SESSION_ID")
 		}
-		preparedRunSpec, prepErr := prepareIFLOWRunSpec(sess, runSpec, expertID)
+		preparedRunSpec, prepErr := prepareCLIRuntimeRunSpec(sess, runSpec, expertID)
 		if prepErr != nil {
 			return "", "", "", prepErr
 		}

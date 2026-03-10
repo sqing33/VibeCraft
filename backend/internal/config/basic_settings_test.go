@@ -110,3 +110,36 @@ func TestResolveThinkingTranslation_MatchesTargetModel(t *testing.T) {
 		t.Fatalf("expected nil runtime for unmatched model")
 	}
 }
+
+func TestValidateBasicSettingsWithRuntime_UsesModelProviderInsteadOfSourceProvider(t *testing.T) {
+	cfg := config.Default()
+	cfg.APISources = []config.APISourceConfig{{
+		ID:      "shared-gateway",
+		Label:   "共享来源",
+		BaseURL: "https://gateway.example.com/v1",
+	}}
+	cfg.RuntimeModels = &config.RuntimeModelSettings{
+		Runtimes: []config.RuntimeModelRuntimeConfig{{
+			ID: config.RuntimeIDSDKAnthropic,
+			Models: []config.RuntimeModelConfig{{
+				ID:       "translator-fast",
+				Provider: "anthropic",
+				Model:    "claude-3-5-haiku",
+				SourceID: "shared-gateway",
+			}},
+			DefaultModelID: "translator-fast",
+		}},
+	}
+	if err := config.NormalizeRuntimeModelSettings(&cfg.RuntimeModels, cfg.APISources); err != nil {
+		t.Fatalf("normalize runtime settings: %v", err)
+	}
+	basic := &config.BasicSettings{
+		ThinkingTranslation: &config.ThinkingTranslationSettings{
+			ModelID:        "translator-fast",
+			TargetModelIDs: []string{"translator-fast"},
+		},
+	}
+	if err := config.ValidateBasicSettingsWithRuntime(basic, cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

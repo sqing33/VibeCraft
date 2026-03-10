@@ -11,7 +11,7 @@ import { RepoLibraryRepositoriesPage } from '@/app/pages/RepoLibraryRepositories
 import { RepoLibraryRepositoryDetailPage } from '@/app/pages/RepoLibraryRepositoryDetailPage'
 import { WorkflowsPage } from '@/app/pages/WorkflowsPage'
 import { WorkflowDetailPage } from '@/app/pages/WorkflowDetailPage'
-import { fetchExperts, fetchHealth, fetchInfo } from '@/lib/daemon'
+import { fetchExperts, fetchHealth } from '@/lib/daemon'
 import { emitWsEnvelope } from '@/lib/wsBus'
 import { parseWsEnvelope } from '@/lib/ws'
 import { useDaemonStore } from '@/stores/daemonStore'
@@ -58,7 +58,7 @@ function renderRoute(route: Route) {
  * 功能：应用入口（App Shell + 路由），并集中维护 daemon health 与 WS 连接状态。
  * 参数/返回：无入参；返回 React 组件树。
  * 失败场景：daemon 不可达时 health 进入 error，并由页面展示可恢复提示。
- * 副作用：发起 health/info/experts 请求；建立 WebSocket 连接并断线重连。
+ * 副作用：发起 health/experts 请求；建立 WebSocket 连接并断线重连。
  */
 export default function App() {
   const route = useHashRoute()
@@ -68,8 +68,6 @@ export default function App() {
   const wsUrl = useDaemonStore((s) => s.wsUrl)
   const setHealth = useDaemonStore((s) => s.setHealth)
   const setWsState = useDaemonStore((s) => s.setWsState)
-  const setInfo = useDaemonStore((s) => s.setInfo)
-  const setInfoError = useDaemonStore((s) => s.setInfoError)
   const setExperts = useDaemonStore((s) => s.setExperts)
   const setExpertsError = useDaemonStore((s) => s.setExpertsError)
 
@@ -78,8 +76,6 @@ export default function App() {
     let cancelled = false
 
     setHealth({ status: 'checking' })
-    setInfo(null)
-    setInfoError(null)
     setExperts([])
     setExpertsError(null)
 
@@ -87,17 +83,6 @@ export default function App() {
       .then(() => {
         if (cancelled) return
         setHealth({ status: 'ok' })
-
-        fetchInfo(daemonUrl)
-          .then((res) => {
-            if (cancelled) return
-            setInfo(res)
-          })
-          .catch((err: unknown) => {
-            if (cancelled) return
-            const message = err instanceof Error ? err.message : String(err)
-            setInfoError(message)
-          })
 
         fetchExperts(daemonUrl)
           .then((list) => {
@@ -120,14 +105,7 @@ export default function App() {
       cancelled = true
       abortController.abort()
     }
-  }, [
-    daemonUrl,
-    setExperts,
-    setExpertsError,
-    setHealth,
-    setInfo,
-    setInfoError,
-  ])
+  }, [daemonUrl, setExperts, setExpertsError, setHealth])
 
   useEffect(() => {
     if (!wsUrl) {

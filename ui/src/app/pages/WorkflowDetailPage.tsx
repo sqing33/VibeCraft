@@ -72,11 +72,6 @@ function formatExpertOption(e: PublicExpert): string {
   return `${label} (${id})`
 }
 
-function wsText(state: string): string {
-  if (state === 'connected') return '已连接'
-  if (state === 'connecting') return '连接中'
-  return '未连接'
-}
 
 function canEditNode(n: Node): boolean {
   if (n.node_type === 'master') return false
@@ -540,9 +535,6 @@ export function WorkflowDetailPage(props: WorkflowDetailPageProps) {
                   {formatMode(workflow.mode)}
                 </Chip>
               ) : null}
-              <Chip variant="flat" size="sm">
-                连接：{wsText(wsState)}
-              </Chip>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">

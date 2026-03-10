@@ -70,15 +70,18 @@
 | `backend/internal/executionflow/runtime.go` | Execution 共享 helper：统一 execution 启动记录、超时上下文与终态摘要/错误信息                                                         |
 | `backend/internal/api/info.go`             | 排障信息 API：`GET /api/v1/info`（version + XDG paths）                                                                               |
 | `backend/internal/api/experts.go`          | Experts 列表 API：`GET /api/v1/experts`（仅安全字段，供 UI 下拉）                                                                     |
-| `backend/internal/api/settings_basic.go`   | 基本设置 API：`GET/PUT /api/v1/settings/basic`（思考过程翻译 Source/模型/目标模型列表）                                              |
-| `backend/internal/api/settings_llm.go`     | 模型设置 API：`GET/PUT /api/v1/settings/llm`（sources/models；key masking；写盘并热更新 experts，并自动裁剪失效的翻译设置；保留/失效 OpenAI 接口风格隐藏元数据） |
+| `backend/internal/api/settings_basic.go`   | 基本设置 API：`GET/PUT /api/v1/settings/basic`（思考过程翻译的 SDK 翻译模型与目标 runtime 模型列表）                                 |
+| `backend/internal/api/settings_api_sources.go` | API 来源设置 API：`GET/PUT /api/v1/settings/api-sources`（来源元数据、masked key、iFlow auth mode）                               |
+| `backend/internal/api/settings_runtime_models.go` | Runtime 模型设置 API：`GET/PUT /api/v1/settings/runtime-models`（6 个 runtime 的模型列表、默认模型与来源绑定）                 |
+| `backend/internal/api/settings_llm.go`     | 兼容 LLM API：`GET/PUT /api/v1/settings/llm` 与 `POST /api/v1/settings/llm/test`（SDK 镜像维护、模型测试与 OpenAI 接口风格探测） |
 | `backend/internal/api/settings_experts.go` | 专家设置 API：`GET/PUT /api/v1/settings/experts` 与 `POST /api/v1/settings/experts/generate`（专家详情、保存、AI 生成）              |
 | `backend/internal/api/settings_expert_sessions.go` | 专家生成会话 API：session 列表/详情、追加消息、快照发布与继续优化                                                             |
 | `backend/internal/api/workflows.go`        | Workflow HTTP handlers：create/list/get/patch，并广播 `workflow.updated`                                                              |
 | `backend/internal/api/workflow_start.go`   | Workflow start/nodes handlers：创建 master node + execution，并提供 nodes 查询                                                        |
 | `backend/internal/api/workflow_cancel.go`  | Workflow cancel handler：取消 workflow（取消 running execution + 标记未开始节点 canceled）                                            |
 | `backend/internal/api/nodes.go`            | Node handlers：patch/retry/cancel（`PATCH /api/v1/nodes/:id`、`POST /api/v1/nodes/:id/retry`、`POST /api/v1/nodes/:id/cancel`）       |
-| `backend/internal/config/config.go`        | 配置读取逻辑，处理默认值、XDG 路径、环境变量覆盖                                                                                      |
+| `backend/internal/config/config.go`        | 配置读取逻辑：处理默认值、XDG 路径、环境变量覆盖，并在加载/持久化时驱动 runtime settings hydrate                                   |
+| `backend/internal/config/runtime_settings.go` | 设置主真相源：维护 `api_sources` / `runtime_model_settings`、6 个 runtime 目录、legacy `llm/cli_tools` 迁移与兼容镜像导出         |
 | `backend/internal/dotenv/dotenv.go`        | dotenv 加载：daemon 启动时从 repo root/指定路径读取 `.env` 并注入到进程环境变量（用于 `${ENV}`）                                      |
 | `backend/internal/expert/expert.go`        | Expert 注册表：基于 config 解析 `expert_id` -> RunSpec（`{{prompt}}`/`${ENV}` 模板替换、timeout），并为多协议 CLI tool 注入所选模型 source 的运行时连接信息             |
 | `backend/internal/runner/pty_runner.go`    | PTY runner：启动子进程、流式输出、Cancel（SIGTERM→grace→SIGKILL）                                                                     |
@@ -92,13 +95,15 @@
 | `backend/internal/chat/codex_runtime_settings.go` | Codex 线程运行时注入：按会话注入 `config.mcp_servers`，并仅为“已发现且已启用”的 skills 追加 allowlist/path index |
 | `backend/internal/chat/provider_input.go`    | Chat 多模态重建：基于本地消息 + 附件重建 OpenAI/Anthropic provider 输入                                                                |
 | `backend/internal/chat/thinking_translation.go` | Chat 思考过程翻译：按分段阈值缓冲 reasoning、调用翻译模型并广播中文 delta / 失败事件                                             |
-| `backend/internal/config/clitools.go`                | CLI 工具配置：维护 `Codex CLI` / `Claude Code` / `iFlow CLI` / `OpenCode CLI` 的主协议、兼容协议列表、默认模型与命令路径；其中 iFlow 额外维护官方认证方式、官方 Base URL、专属模型列表与默认模型 |
+| `backend/internal/config/clitools.go`                | CLI 工具配置：维护 `Codex CLI` / `Claude Code` / `iFlow CLI` / `OpenCode CLI` 的启用状态、协议族与命令路径；其中 iFlow 额外维护官方认证方式与浏览器登录镜像 |
 | `backend/internal/config/mcp_skill_settings.go`     | MCP / Skill 配置归一化与运行时筛选：默认启用集合、有效 MCP 映射、Skill 绑定合并与 expert 交集裁剪 |
-| `backend/internal/api/settings_clitools.go`          | CLI 工具设置 API：读取/保存工具配置、兼容协议列表与默认模型；iFlow 额外返回 masked API Key、网页登录状态与专属模型列表，供设置页 `CLI 工具` Tab 使用 |
+| `backend/internal/api/settings_clitools.go`          | CLI 工具设置 API：读取/保存工具级配置（启用、命令路径、协议族）；iFlow 额外返回网页登录状态与专属登录元数据，供设置页 `CLI 工具` Tab 使用 |
 | `backend/internal/api/settings_iflow_auth.go`        | iFlow 官方网页登录 API：启动 PTY 登录、读取实时状态、提交授权码与取消网页登录 |
 | `backend/internal/iflow/home.go`                     | iFlow managed home：在 daemon 数据目录下维护独立 `iflow-home` 与最小 bootstrap settings |
 | `backend/internal/iflow/auth_manager.go`             | iFlow 登录会话管理器：自动选择网页登录、解析终端 OAuth 链接、检测登录完成并维护状态 |
 | `backend/internal/chat/iflow_runtime_settings.go`    | iFlow Chat 运行时注入：在实际启动 CLI 前注入 managed home、官方认证、有效 MCP 与技能说明 |
+| `backend/internal/chat/cli_runtime_settings.go`      | CLI 运行时受管配置注入：统一为 Codex / Claude / iFlow / OpenCode 注入 managed config root、来源 env 与运行参数                     |
+| `backend/internal/cliruntime/managed_configs.go`     | 受管 CLI 配置物化：写入 Codex `CODEX_HOME`、Claude `settings.json` 等应用级 config root 文件                                         |
 | `backend/internal/api/settings_mcp.go`               | MCP 设置 API：以原始 JSON 读写 MCP 注册表，并按 CLI 工具维护“默认启用”集合 |
 | `backend/internal/api/settings_skills.go`            | Skill 设置 API：读取/保存 skill 启用状态，并支持 zip / 文件夹安装到用户级 `~/.codex/skills` |
 | `backend/internal/skillcatalog/install.go`           | Skill 安装器：处理 zip / 目录上传、定位 `SKILL.md` 根目录，并将 skill 安装到用户级 Codex skills 目录 |
@@ -139,11 +144,12 @@
 | `ui/src/lib/chatAttachmentPreview.ts`      | Chat 附件预览判断：按文件后缀/MIME 推断图片/PDF/Markdown/代码/纯文本预览模式                                                         |
 | `ui/src/components/DAGView.tsx`            | React Flow DAG 视图：dagre 自动布局 + 节点按状态上色 + 点击节点联动终端                                                               |
 | `ui/src/components/TerminalPane.tsx`       | xterm.js 封装组件（fit + write/reset 接口）                                                                                           |
-| `ui/src/app/components/CLIToolSettingsTab.tsx` | 系统设置「CLI 工具」Tab：管理 `Codex CLI` / `Claude Code` / `iFlow CLI` / `OpenCode CLI` 的启用状态、默认模型与命令路径；其中 iFlow 提供官方网页登录、授权码提交、API Key、专属模型列表与默认模型配置 |
+| `ui/src/app/components/APISourceSettingsTab.tsx` | 系统设置「API 来源」Tab：统一维护 OpenAI / Anthropic / iFlow 来源、Base URL、Key 与 iFlow auth mode                           |
+| `ui/src/app/components/RuntimeModelSettingsTab.tsx` | 系统设置「模型设置」Tab：统一维护 2 个 SDK + 4 个 CLI runtime 的模型列表、默认模型、来源绑定与模型测试                         |
+| `ui/src/app/components/CLIToolSettingsTab.tsx` | 系统设置「CLI 工具」Tab：只管理 `Codex CLI` / `Claude Code` / `iFlow CLI` / `OpenCode CLI` 的启用状态、命令路径与 iFlow 登录动作 |
 | `ui/src/app/components/MCPSettingsTab.tsx`     | 系统设置「MCP」Tab：以 JSON 编辑 MCP 注册表、双列卡片展示，并紧凑维护各 CLI 工具的默认启用集合 |
 | `ui/src/app/components/SkillSettingsTab.tsx`   | 系统设置「技能」Tab：展示已发现 skills、维护单一启用开关，并支持 zip / 文件夹安装 |
-| `ui/src/app/components/LLMSettingsTab.tsx` | 系统设置「模型」Tab：编辑 Sources 与 Models 组成的模型池，供 CLI 工具与 helper SDK 复用                                              |
-| `ui/src/app/components/BasicSettingsTab.tsx` | 系统设置「基本设置」Tab：配置思考过程翻译的 API 源、翻译模型与目标 AI 模型列表                                                     |
+| `ui/src/app/components/BasicSettingsTab.tsx` | 系统设置「基本设置」Tab：基于 runtime 模型注册表配置思考过程翻译的 SDK 翻译模型与目标 AI 模型列表                                   |
 | `ui/src/app/components/ExpertSettingsTab.tsx` | 系统设置「专家」Tab：专家列表、AI 生成专家、生成会话历史、快照发布                                                                   |
 | `.iflow/settings.json`, `.iflow/hooks/session_start.sh`                    | iFlow 项目级默认配置：声明上下文文件名，使 CLI 优先读取仓库内 `AGENTS.md`                                                              |
 | `scripts/agent-runtimes/iflow_exec.sh`     | iFlow CLI wrapper：桥接 `--prompt/--resume/--output-file/--yolo` 与标准 artifact/session contract                                      |
@@ -170,7 +176,9 @@
 | daemon 地址默认值                  | `backend/internal/config/config.go`, `ui/src/lib/daemon.ts`                                                                                                                                                                                |
 | dotenv/.env 自动加载               | `backend/internal/dotenv/dotenv.go`, `backend/cmd/vibe-tree-daemon/main.go`                                                                                                                                                                |
 | UI 运行时切换 daemon URL           | `ui/src/App.tsx`                                                                                                                                                                                                                           |
-| 模型设置（Sources/Models）         | `backend/internal/api/settings_llm.go`, `backend/internal/config/llm_settings.go`, `backend/internal/config/llm_mirror.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/LLMSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
+| API 来源设置                       | `backend/internal/api/settings_api_sources.go`, `backend/internal/config/runtime_settings.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/APISourceSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
+| Runtime 模型设置                   | `backend/internal/api/settings_runtime_models.go`, `backend/internal/config/runtime_settings.go`, `backend/internal/api/chat.go`, `backend/internal/expert/expert.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/RuntimeModelSettingsTab.tsx`, `ui/src/lib/runtimeModels.ts`, `ui/src/lib/daemon.ts` |
+| CLI 工具设置                        | `backend/internal/api/settings_clitools.go`, `backend/internal/config/clitools.go`, `backend/internal/chat/cli_runtime_settings.go`, `backend/internal/cliruntime/managed_configs.go`, `scripts/agent-runtimes/codex_exec.sh`, `scripts/agent-runtimes/claude_exec.sh`, `scripts/agent-runtimes/iflow_exec.sh`, `scripts/agent-runtimes/opencode_exec.sh`, `ui/src/app/components/CLIToolSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
 | 基本设置 / 思考过程翻译            | `backend/internal/api/settings_basic.go`, `backend/internal/config/basic_settings.go`, `backend/internal/api/chat.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/thinking_translation.go`, `backend/internal/chat/timeline_persistence.go`, `backend/internal/store/chat_turns.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/BasicSettingsTab.tsx`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/daemon.ts` |
 | OpenAI 兼容接口自动切换            | `backend/internal/openaicompat/compat.go`, `backend/internal/api/settings_llm_test_call.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/thinking_translation.go`, `backend/internal/runner/sdk_runner.go`, `backend/internal/config/openai_api_style.go` |
 | 专家设置 / AI 创建专家             | `backend/internal/api/settings_experts.go`, `backend/internal/api/settings_expert_sessions.go`, `backend/internal/expertbuilder/service.go`, `backend/internal/skillcatalog/catalog.go`, `.codex/skills/expert-creator/SKILL.md`, `ui/src/app/components/ExpertSettingsTab.tsx`, `ui/src/lib/daemon.ts` |

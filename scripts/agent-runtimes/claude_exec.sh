@@ -9,6 +9,10 @@ model_id="${VIBE_TREE_MODEL_ID:-}"
 workspace="${VIBE_TREE_WORKSPACE:-$PWD}"
 cli_cmd="${VIBE_TREE_CLI_COMMAND_PATH:-claude}"
 resume_session_id="${VIBE_TREE_RESUME_SESSION_ID:-}"
+managed_settings_path="${VIBE_TREE_CLAUDE_SETTINGS_PATH:-}"
+cli_tool_id="${VIBE_TREE_CLI_TOOL_ID:-claude}"
+anthropic_api_key="${ANTHROPIC_API_KEY:-}"
+anthropic_base_url="${ANTHROPIC_BASE_URL:-}"
 status="ok"
 summary_text=""
 next_action=""
@@ -33,6 +37,26 @@ if [[ -z "$raw_log" ]]; then
 fi
 trap 'for f in "${cleanup_files[@]:-}"; do [[ -n "$f" ]] && rm -f "$f"; done' EXIT
 
+ensure_claude_settings() {
+  local tool_id="$1"
+  local path="$2"
+  if [[ -z "$path" ]]; then
+    local xdg_data_home="${XDG_DATA_HOME:-}"
+    if [[ -z "$xdg_data_home" ]]; then
+      xdg_data_home="$HOME/.local/share"
+    fi
+    path="$xdg_data_home/vibe-tree/managed-clis/${tool_id:-claude}/settings.json"
+  fi
+  mkdir -p "$(dirname "$path")"
+  printf '{}\n' > "$path"
+  chmod 600 "$path"
+  printf '%s' "$path"
+}
+
+if [[ -n "$anthropic_api_key" || -n "$anthropic_base_url" ]]; then
+  managed_settings_path="$(ensure_claude_settings "$cli_tool_id" "$managed_settings_path")"
+fi
+
 args=(-p --output-format stream-json --dangerously-skip-permissions --include-partial-messages)
 if [[ -n "$model" ]]; then
   args+=(--model "$model")
@@ -42,6 +66,9 @@ if [[ -n "$system_prompt" ]]; then
 fi
 if [[ -n "$resume_session_id" ]]; then
   args+=(-r "$resume_session_id")
+fi
+if [[ -n "$managed_settings_path" ]]; then
+  args+=(--settings "$managed_settings_path")
 fi
 
 if ! command -v "$cli_cmd" >/dev/null 2>&1; then

@@ -113,3 +113,15 @@ func CLIRuntimeArtifactsDir() (string, error) {
 	}
 	return filepath.Join(dataDir, "cli-artifacts"), nil
 }
+
+// ManagedCLIRuntimesDir 功能：返回受管 CLI 配置根目录。
+// 参数/返回：返回 `$XDG_DATA_HOME/vibe-tree/managed-clis`。
+// 失败场景：dataDir 解析失败时返回 error。
+// 副作用：读取环境变量与 home 目录信息（间接）。
+func ManagedCLIRuntimesDir() (string, error) {
+	dataDir, err := DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dataDir, "managed-clis"), nil
+}

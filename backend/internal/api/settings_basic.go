@@ -64,7 +64,7 @@ func putBasicSettingsHandler() gin.HandlerFunc {
 			}
 		}
 		config.NormalizeBasicSettings(&next)
-		if err := config.ValidateBasicSettings(next, cfg.LLM); err != nil {
+		if err := config.ValidateBasicSettingsWithRuntime(next, cfg); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
