@@ -60,21 +60,21 @@ func (s *Service) runAIChatAnalysis(ctx context.Context, source store.RepoSource
 		s.failRun(ctx, run.ID, err)
 		return
 	}
-	reportMarkdown := sanitizeReportMarkdown(finalTurn.AssistantMessage.ContentText)
-	if strings.TrimSpace(reportMarkdown) == "" {
-		s.failRun(ctx, run.ID, fmt.Errorf("final analysis report is empty"))
-		return
-	}
-	if err := os.WriteFile(layout.ReportPath, []byte(reportMarkdown+"\n"), 0o644); err != nil {
+	validated, err := s.validateAndFinalizeFormalReport(ctx, source, snapshot, run, prepared, layout, session, resolved, reportCandidate{
+		UserMessageID:      &finalTurn.UserMessage.ID,
+		AssistantMessageID: finalTurn.AssistantMessage.ID,
+		Markdown:           finalTurn.AssistantMessage.ContentText,
+	})
+	if err != nil {
 		s.failRun(ctx, run.ID, err)
 		return
 	}
 	_, _ = s.store.UpdateRepoAnalysisChatBinding(ctx, store.UpdateRepoAnalysisChatBindingParams{
-		RunID:                 run.ID,
-		ChatSessionID:         &session.ID,
-		ChatUserMessageID:     &finalTurn.UserMessage.ID,
-		ChatAssistantMessageID: &finalTurn.AssistantMessage.ID,
-		Summary:               pointer("最终报告已生成，正在抽取知识卡片并刷新检索索引…"),
+		RunID:                  run.ID,
+		ChatSessionID:          &session.ID,
+		ChatUserMessageID:      validated.Candidate.UserMessageID,
+		ChatAssistantMessageID: stringPtrIfNotEmpty(validated.Candidate.AssistantMessageID),
+		Summary:                pointer("正式报告已通过校验，正在抽取知识卡片并刷新检索索引…"),
 	})
 
 	cardsCount, evidenceCount, searchRefresh, err := s.postProcessAIReport(ctx, source, snapshot, run, layout)
@@ -83,18 +83,20 @@ func (s *Service) runAIChatAnalysis(ctx context.Context, source store.RepoSource
 		return
 	}
 	resultPayload := map[string]any{
-		"runtime_kind": "ai_chat",
-		"chat_session_id": session.ID,
-		"final_user_message_id": finalTurn.UserMessage.ID,
-		"final_assistant_message_id": finalTurn.AssistantMessage.ID,
-		"report_path": layout.ReportPath,
-		"cards_path": layout.CardsPath,
-		"card_count": cardsCount,
-		"evidence_count": evidenceCount,
-		"search_refresh": searchRefresh,
+		"runtime_kind":               "ai_chat",
+		"chat_session_id":            session.ID,
+		"final_user_message_id":      pointerValue(validated.Candidate.UserMessageID),
+		"final_assistant_message_id": validated.Candidate.AssistantMessageID,
+		"report_path":                layout.ReportPath,
+		"report_validation_path":     filepath.Join(layout.DerivedDir, "report.validation.json"),
+		"report_attempts":            validated.Attempts,
+		"cards_path":                 layout.CardsPath,
+		"card_count":                 cardsCount,
+		"evidence_count":             evidenceCount,
+		"search_refresh":             searchRefresh,
 	}
 	resultJSON, _ := json.Marshal(resultPayload)
-	summary := fmt.Sprintf("AI Chat 分析完成：已生成报告，抽取 %d 张卡片、%d 条证据。", cardsCount, evidenceCount)
+	summary := fmt.Sprintf("AI Chat 分析完成：正式报告已通过校验，抽取 %d 张卡片、%d 条证据。", cardsCount, evidenceCount)
 	_, err = s.store.FinalizeRepoAnalysisRun(ctx, store.FinalizeRepoAnalysisRunParams{
 		RunID:      run.ID,
 		Status:     string(store.RepoAnalysisStatusSucceeded),
@@ -107,11 +109,11 @@ func (s *Service) runAIChatAnalysis(ctx context.Context, source store.RepoSource
 		return
 	}
 	_, _ = s.store.UpdateRepoAnalysisChatBinding(ctx, store.UpdateRepoAnalysisChatBindingParams{
-		RunID:                 run.ID,
-		ChatSessionID:         &session.ID,
-		ChatUserMessageID:     &finalTurn.UserMessage.ID,
-		ChatAssistantMessageID: &finalTurn.AssistantMessage.ID,
-		Summary:               &summary,
+		RunID:                  run.ID,
+		ChatSessionID:          &session.ID,
+		ChatUserMessageID:      validated.Candidate.UserMessageID,
+		ChatAssistantMessageID: stringPtrIfNotEmpty(validated.Candidate.AssistantMessageID),
+		Summary:                &summary,
 	})
 }
 

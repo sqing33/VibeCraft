@@ -4,8 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"strings"
+	"path/filepath"
 	"time"
 
 	"vibe-tree/backend/internal/store"
@@ -52,14 +51,31 @@ func (s *Service) SyncAnalysisFromChat(ctx context.Context, runID string) (store
 	if reportText == "" {
 		return store.RepoAnalysisRun{}, fmt.Errorf("%w: latest assistant message is empty", store.ErrValidation)
 	}
-	if !looksLikeFormalAnalysisReport(reportText) {
-		return store.RepoAnalysisRun{}, fmt.Errorf("%w: latest assistant reply is not a formal analysis report; continue the chat if needed, then sync only when a full report is ready", store.ErrValidation)
-	}
 	layout, err := s.prepareSnapshotLayoutForID(source.RepoKey, snapshot.ID)
 	if err != nil {
 		return store.RepoAnalysisRun{}, err
 	}
-	if err := os.WriteFile(layout.ReportPath, []byte(reportText+"\n"), 0o644); err != nil {
+	session, err := s.store.GetChatSession(ctx, *run.ChatSessionID)
+	if err != nil {
+		return store.RepoAnalysisRun{}, err
+	}
+	resolved, err := s.resolveAnalysisTurnRuntime(session, run)
+	if err != nil {
+		return store.RepoAnalysisRun{}, err
+	}
+	prepared := analysisPrepareResult{
+		ResolvedRef:   firstNonEmpty(pointerValue(snapshot.ResolvedRef), snapshot.RequestedRef),
+		CommitSHA:     pointerValue(snapshot.CommitSHA),
+		CodeIndexPath: filepath.Join(layout.ArtifactsDir, "code_index.json"),
+		SnapshotDir:   layout.SnapshotDir,
+		SourceDir:     session.WorkspacePath,
+		ReportPath:    layout.ReportPath,
+	}
+	validated, err := s.validateAndFinalizeFormalReport(ctx, source, snapshot, run, prepared, layout, session, resolved, reportCandidate{
+		AssistantMessageID: latestAssistant.ID,
+		Markdown:           reportText,
+	})
+	if err != nil {
 		return store.RepoAnalysisRun{}, err
 	}
 	cardsCount, evidenceCount, refreshSummary, err := s.postProcessAIReport(ctx, source, snapshot, run, layout)
@@ -67,23 +83,25 @@ func (s *Service) SyncAnalysisFromChat(ctx context.Context, runID string) (store
 		return store.RepoAnalysisRun{}, err
 	}
 	resultPayload := map[string]any{
-		"runtime_kind": firstNonEmptyStringPtr(run.RuntimeKind, "ai_chat"),
-		"chat_session_id": run.ChatSessionID,
-		"synced_from_chat_message_id": latestAssistant.ID,
-		"report_path": layout.ReportPath,
-		"cards_path": layout.CardsPath,
-		"card_count": cardsCount,
-		"evidence_count": evidenceCount,
-		"search_refresh": refreshSummary,
-		"synced_at": time.Now().UnixMilli(),
+		"runtime_kind":                firstNonEmptyStringPtr(run.RuntimeKind, "ai_chat"),
+		"chat_session_id":             run.ChatSessionID,
+		"synced_from_chat_message_id": validated.Candidate.AssistantMessageID,
+		"report_path":                 layout.ReportPath,
+		"report_validation_path":      filepath.Join(layout.DerivedDir, "report.validation.json"),
+		"report_attempts":             validated.Attempts,
+		"cards_path":                  layout.CardsPath,
+		"card_count":                  cardsCount,
+		"evidence_count":              evidenceCount,
+		"search_refresh":              refreshSummary,
+		"synced_at":                   time.Now().UnixMilli(),
 	}
 	resultJSON, _ := json.Marshal(resultPayload)
-	summary := fmt.Sprintf("已从 Chat 最新回复同步分析结果：%d 张卡片，%d 条证据。", cardsCount, evidenceCount)
+	summary := fmt.Sprintf("已从 Chat 最新回复同步分析结果：正式报告已通过校验，生成 %d 张卡片、%d 条证据。", cardsCount, evidenceCount)
 	run, err = s.store.FinalizeRepoAnalysisRun(ctx, store.FinalizeRepoAnalysisRunParams{RunID: run.ID, Status: string(store.RepoAnalysisStatusSucceeded), Summary: &summary, ResultJSON: pointer(string(resultJSON)), ReportPath: &layout.ReportPath})
 	if err != nil {
 		return store.RepoAnalysisRun{}, err
 	}
-	_, _ = s.store.UpdateRepoAnalysisChatBinding(ctx, store.UpdateRepoAnalysisChatBindingParams{RunID: run.ID, ChatSessionID: run.ChatSessionID, ChatAssistantMessageID: &latestAssistant.ID, Summary: &summary})
+	_, _ = s.store.UpdateRepoAnalysisChatBinding(ctx, store.UpdateRepoAnalysisChatBindingParams{RunID: run.ID, ChatSessionID: run.ChatSessionID, ChatUserMessageID: validated.Candidate.UserMessageID, ChatAssistantMessageID: stringPtrIfNotEmpty(validated.Candidate.AssistantMessageID), Summary: &summary})
 	return s.store.GetRepoAnalysisRun(ctx, run.ID)
 }
 
@@ -92,23 +110,4 @@ func firstNonEmptyStringPtr(value *string, fallback string) string {
 		return *value
 	}
 	return fallback
-}
-
-
-func looksLikeFormalAnalysisReport(text string) bool {
-	trimmed := strings.ToLower(strings.TrimSpace(text))
-	markers := []string{
-		"# github 功能实现原理报告",
-		"## run 1",
-		"### 第一部分：项目参数与结构解析",
-		"### 第二部分：面向人的功能说明",
-		"### 第三部分：面向 ai 的实现细节与证据链",
-	}
-	hits := 0
-	for _, marker := range markers {
-		if strings.Contains(trimmed, strings.ToLower(marker)) {
-			hits++
-		}
-	}
-	return hits >= 3
 }

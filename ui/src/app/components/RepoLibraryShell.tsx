@@ -86,8 +86,10 @@ export function RepoLibraryShell(props: RepoLibraryShellProps) {
         <div className="flex items-center justify-end gap-2">{headerActions}</div>
       </WorkspacePortal>
       <WorkspacePortal target="content">
-        <div className={`mx-auto flex w-full flex-col gap-5 p-4 md:p-6 ${contentMaxWidthClassName}`}>
-          {children}
+        <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto">
+          <div className={`mx-auto flex w-full flex-col gap-5 p-4 md:p-6 ${contentMaxWidthClassName}`}>
+            {children}
+          </div>
         </div>
       </WorkspacePortal>
     </>

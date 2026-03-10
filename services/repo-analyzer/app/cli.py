@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single-entry Repo Library CLI for prepare, ingest, extraction, search, and pipeline runs."""
+"""Single-entry Repo Library CLI for prepare, ingest, validation, extraction, search, and pipeline runs."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
 from extract_cards import build_cards_payload
+from validate_report import validate_report_payload
 from helpers import ENGINE_VERSION, EngineError, log_event, write_json, write_result
 from ingest import run_ingest, run_prepare
 from search import run_search
@@ -63,6 +64,21 @@ def handle_extract_cards(args: argparse.Namespace) -> dict[str, Any]:
         subagent_results_path=subagent_results_path,
     )
 
+
+def handle_validate_report(args: argparse.Namespace) -> dict[str, Any]:
+    report_path = Path(args.report_path).resolve()
+    output_path = Path(args.output).resolve()
+    snapshot_dir = Path(args.snapshot_dir).resolve() if args.snapshot_dir else None
+    return validate_report_payload(
+        report_path=report_path,
+        output_path=output_path,
+        features=args.feature,
+        repo_url=args.repo_url,
+        repo_key=args.repo_key,
+        snapshot_id=args.snapshot_id,
+        snapshot_dir=snapshot_dir,
+        run_id=args.run_id,
+    )
 
 def handle_search(args: argparse.Namespace) -> dict[str, Any]:
     output_path = Path(args.output).resolve()
@@ -201,6 +217,17 @@ def build_parser() -> argparse.ArgumentParser:
     extract_parser.add_argument("--run-id", default=None)
     extract_parser.add_argument("--output", required=True)
     extract_parser.set_defaults(handler=handle_extract_cards)
+
+    validate_parser = subparsers.add_parser("validate-report", help="Validate one formal Repo Library report")
+    validate_parser.add_argument("--report-path", required=True)
+    validate_parser.add_argument("--feature", action="append", default=[])
+    validate_parser.add_argument("--repo-url", default=None)
+    validate_parser.add_argument("--repo-key", default=None)
+    validate_parser.add_argument("--snapshot-id", default=None)
+    validate_parser.add_argument("--snapshot-dir", default=None)
+    validate_parser.add_argument("--run-id", default=None)
+    validate_parser.add_argument("--output", required=True)
+    validate_parser.set_defaults(handler=handle_validate_report)
 
     search_parser = subparsers.add_parser("search", help="Refresh or query the Repo Library vector index")
     search_parser.add_argument("--storage-root", required=True)

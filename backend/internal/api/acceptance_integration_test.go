@@ -40,6 +40,12 @@ type testEnv struct {
 func newTestEnv(t *testing.T, cfg config.Config, maxConcurrency int) *testEnv {
 	t.Helper()
 
+	// Ensure tests do not depend on a developer's local ~/.config/vibe-tree/config.json.
+	// Some API handlers load persisted config (for defaults), so we isolate XDG config per test.
+	if os.Getenv("XDG_CONFIG_HOME") == "" {
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	}
+
 	hub := ws.NewHub()
 	grace := 50 * time.Millisecond
 	execMgr := newTestExecMgr(grace, hub)

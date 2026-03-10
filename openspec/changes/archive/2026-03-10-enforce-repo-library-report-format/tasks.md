@@ -1,0 +1,4 @@
+- [x] Add a reusable Repo Library report validator CLI that checks structure, feature mapping, table requirements, evidence references, and `card_count > 0`.
+- [x] Tighten final-report prompting so features map one-to-one to report sections and table-style asks are emitted as Markdown tables.
+- [x] Add a bounded validation/retry loop for automated analysis and sync-from-chat, persisting attempt artifacts and invalid final drafts.
+- [x] Add regression tests for real failing report shape, validator failures, and successful retry/finalization behavior.

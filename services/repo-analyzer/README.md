@@ -8,6 +8,7 @@ Repo Library 的 Python 命令式引擎，提供单一 CLI 入口并复用现有
 - `pipeline`：顺序执行 `ingest`、`extract-cards` 和搜索索引刷新。
 - `ingest`：准备存储目录、抓取仓库、构建代码索引、渲染 `report.md`。
 - `extract-cards`：把 `report.md` 与可选 `subagent_results.json` 抽取成 cards/evidence JSON。
+- `validate-report`：校验正式报告的标题层级、feature 映射、表格要求、证据格式，以及是否至少能抽出 1 张卡片。
 - `search`：同步 snapshot 语料、刷新向量索引，或执行归一化搜索查询。
 
 ## Example

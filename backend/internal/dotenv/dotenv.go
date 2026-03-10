@@ -24,7 +24,7 @@ type Result struct {
 // 规则：
 // - 若 `VIBE_TREE_DOTENV=0`：跳过加载。
 // - 若 `VIBE_TREE_DOTENV_PATH` 非空：从该路径加载。
-// - 否则：向上查找 `.git/` 定位 repo root，并尝试加载 `<repo_root>/.env`。
+// - 否则：向上查找 `.git`（目录或文件）定位 repo root，并尝试加载 `<repo_root>/.env`。
 // - dotenv 写入环境变量采用覆盖策略（.env 覆盖同名 env）。
 //
 // 参数/返回：无入参；返回加载结果与错误（错误不会用于阻断启动，由调用方决定记录并继续）。
@@ -89,8 +89,10 @@ func findRepoRoot(start string) (string, bool) {
 	}
 
 	for {
-		if fi, err := os.Stat(filepath.Join(dir, ".git")); err == nil && fi.IsDir() {
-			return dir, true
+		if fi, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			if fi.IsDir() || fi.Mode().IsRegular() {
+				return dir, true
+			}
 		}
 
 		parent := filepath.Dir(dir)

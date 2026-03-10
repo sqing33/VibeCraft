@@ -1,6 +1,6 @@
 # vibe-tree 项目结构与功能定位索引
 
-> 更新时间：2026-03-09
+> 更新时间：2026-03-10
 > 说明：本文档用于开发期快速定位功能文件。修改前先读本文件，再做定向检索。
 
 ## 1. 项目概览
@@ -42,12 +42,15 @@
 | `docs/cli-pivot-and-repo-library-plan.md` | 规划文档：CLI-first 转型路线、SDK/CLI 职责重构，以及 GitHub analyzer 作为 Repo Library 功能集成方案 |
 | `backend/internal/api/repo_library.go` | Repo Library HTTP API：analysis 创建、repositories/detail/snapshots、cards/evidence、search、report 内容读取 |
 | `backend/internal/repolib/service.go` | Repo Library 服务层：GitHub URL 校验、分析运行创建、Python engine 调用、搜索结果增强与报告读取 |
-| `backend/internal/repolib/analysis_chat.go` | AI Chat 分析主链：prepare 仓库、自动创建 chat session、自动 turn 产出 report 并触发后处理 |
-| `backend/internal/repolib/sync_chat.go` | Repo Library 同步入口：将关联 Chat 的最新 assistant 回复刷新回 report/cards/search |
+| `backend/internal/repolib/prompts.go` | Repo Library 正式报告 Prompt 模板：定义三段式正式报告骨架、feature 一一映射与修订提示 |
+| `backend/internal/repolib/report_validation.go` | Repo Library 正式报告校验闭环：调用 `validate-report`、保存 attempt artifacts，并把失败原因回灌给 AI 重写 |
+| `backend/internal/repolib/analysis_chat.go` | AI Chat 分析主链：prepare 仓库、自动创建 chat session、自动 turn 产出候选 report，并在校验通过后触发后处理 |
+| `backend/internal/repolib/sync_chat.go` | Repo Library 同步入口：将关联 Chat 的最新 assistant 回复校验为正式报告后，再刷新回 report/cards/search |
 | `backend/internal/store/repo_analysis_chat_updates.go` | Repo analysis run 的 chat linkage/runtime metadata 更新接口 |
 | `backend/internal/store/repo_analysis_recovery.go` | Repo analysis run 重启恢复：将遗留 queued/running run 标记为 failed |
 | `backend/internal/store/repo_library.go` | Repo Library 持久化模型与查询：repo source/snapshot/run/card/evidence/search history |
-| `services/repo-analyzer/app/cli.py` | Repo Analyzer 统一 CLI：`prepare` / `pipeline` / `ingest` / `extract-cards` / `search` |
+| `services/repo-analyzer/app/cli.py` | Repo Analyzer 统一 CLI：`prepare` / `pipeline` / `ingest` / `extract-cards` / `validate-report` / `search` |
+| `services/repo-analyzer/app/validate_report.py` | Repo Library 正式报告校验器：检查标题层级、feature 映射、表格/证据要求与 `card_count > 0` |
 | `services/repo-analyzer/app/ingest.py` | Repo Analyzer ingest 流程：准备 snapshot 目录、抓仓库、建索引、渲染报告 |
 | `services/repo-analyzer/app/extract_cards.py` | 知识卡片抽取：从 `report.md + subagent_results.json` 提取 cards/evidence JSON |
 | `services/repo-analyzer/app/search.py` | Repo Library 搜索包装层：同步语料、刷新向量索引、查询并归一化结果 |

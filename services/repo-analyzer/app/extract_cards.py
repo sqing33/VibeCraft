@@ -18,7 +18,8 @@ H5_PATTERN = re.compile(r"^#####\s+(?!#)(.+?)\s*$")
 FEATURE_TITLE_PATTERN = re.compile(r"^(?:(?:功能|feature)(?:\s+\d+)?)\s*:\s*(.+?)\s*$", flags=re.IGNORECASE)
 CHARACTERISTIC_TITLE_PATTERN = re.compile(r"^(?:(?:项目特点|characteristic)(?:\s+\d+)?)\s*:\s*(.+?)\s*$", flags=re.IGNORECASE)
 EVIDENCE_PATTERN = re.compile(
-    r"`?([A-Za-z0-9_./-]+\.[A-Za-z0-9_+.-]+):(\d+)`?(?:\s+\[([^\]]+)\])?(?:\s+-\s+`?(.+?)`?)?$"
+    r"`?([A-Za-z0-9_./-]+\.[A-Za-z0-9_+.-]+):(\d+)(?:-(\d+))?`?"
+    r"(?:\s+\[([^\]]+)\])?(?:\s+-\s+`?(.+?)`?)?$"
 )
 
 TITLE_KEYS = {
@@ -48,10 +49,67 @@ LABEL_KEYS = {
 FORMAL_REPORT_MARKERS = {
     "# github 功能实现原理报告",
     "## run 1",
-    "### 第一部分：项目参数与结构解析",
-    "### 第二部分：面向人的功能说明",
-    "### 第三部分：面向 ai 的实现细节与证据链",
+    "## 第一部分：项目参数与结构解析",
+    "## 第二部分：面向人的功能说明",
+    "## 第三部分：面向 ai 的实现细节与证据链",
+    "## 第一部分：技术栈与模块语言",
+    "## 第二部分：项目用途与核心特点",
+    "## 第三部分：特点实现思路",
+    "## 第四部分：提问与解答",
+    "## 第五部分：实现定位与证据",
 }
+
+FORMAL_REPORT_V2_TITLES = {
+    "第一部分：技术栈与模块语言": "part_one",
+    "第二部分：项目用途与核心特点": "part_two",
+    "第三部分：特点实现思路": "part_three",
+    "第四部分：提问与解答": "part_four",
+    "第五部分：实现定位与证据": "part_five",
+}
+
+FORMAL_REPORT_V2_CHARACTERISTIC_PATTERN = re.compile(r"^特点\s+(\d+)\s*[:：]\s*(.+?)\s*$")
+FORMAL_REPORT_V2_QUESTION_PATTERN = re.compile(r"^问题\s+(\d+)\s*[:：]\s*(.+?)\s*$")
+
+
+def _strip_guidance_lines(lines: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("（") and stripped.endswith("）"):
+            continue
+        cleaned.append(line)
+    return cleaned
+
+
+def _parse_simple_bullets(lines: list[str]) -> tuple[dict[str, str], list[str]]:
+    fields: dict[str, str] = {}
+    notes: list[str] = []
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("- "):
+            body = stripped[2:].strip()
+            if ":" in body or "：" in body:
+                label, value = re.split(r"[:：]", body, maxsplit=1)
+                label = label.strip()
+                value = value.strip()
+                if label:
+                    fields[label] = value
+                    continue
+            notes.append(body)
+            continue
+        notes.append(stripped)
+    return fields, notes
+
+
+def _safe_join_lines(lines: list[str]) -> str:
+    out: list[str] = []
+    for line in lines:
+        stripped = line.rstrip()
+        if stripped:
+            out.append(stripped)
+    return "\n".join(out).strip()
 
 SEARCH_SECTION_TITLES = {
     "project_characteristics": "Project Characteristics and Signature Implementations",
@@ -195,6 +253,116 @@ def latest_run_text(raw: str) -> str:
     return raw[last.start() :]
 
 
+def _normalize_report_v2(report_text: str) -> dict[str, Any]:
+    run_text = latest_run_text(report_text)
+    h2_blocks = split_by_heading(run_text.splitlines(), H2_PATTERN)
+    parts: dict[str, list[str]] = {key: [] for key in FORMAL_REPORT_V2_TITLES.values()}
+    for title, body in h2_blocks:
+        title = title.strip()
+        key = FORMAL_REPORT_V2_TITLES.get(title)
+        if key:
+            parts[key] = _strip_guidance_lines(body)
+
+    def section_exists(key: str) -> bool:
+        return bool(parts.get(key))
+
+    if not any(section_exists(key) for key in parts):
+        return {
+            "tech_stack": {},
+            "project_overview": {},
+            "risks": [],
+            "characteristics": [],
+            "questions": [],
+            "evidence_blocks": {},
+        }
+
+    tech_fields, tech_notes = _parse_simple_bullets(parts["part_one"])
+    project_fields, project_notes = _parse_simple_bullets(parts["part_two"])
+
+    risk_blocks: list[str] = []
+    h3_parts = split_by_heading(parts["part_two"], H3_PATTERN)
+    for h3_title, h3_body in h3_parts:
+        if h3_title.strip() == "风险与局限":
+            risk_blocks = h3_body
+            break
+    _, risk_notes = _parse_simple_bullets(risk_blocks)
+    risks = [line.strip()[2:].strip() for line in risk_blocks if line.strip().startswith("- ")]
+    if not risks:
+        risks = [line.strip() for line in risk_notes if line.strip()]
+
+    characteristics: list[dict[str, Any]] = []
+    characteristic_headings = split_by_heading(parts["part_three"], H3_PATTERN)
+    for h3_title, h3_body in characteristic_headings:
+        match = FORMAL_REPORT_V2_CHARACTERISTIC_PATTERN.match(h3_title.strip())
+        if not match:
+            continue
+        index = int(match.group(1))
+        title = match.group(2).strip()
+        fields, notes = _parse_simple_bullets(h3_body)
+        characteristics.append(
+            {
+                "index": index,
+                "title": title,
+                "fields": fields,
+                "notes": notes,
+            }
+        )
+    characteristics.sort(key=lambda item: int(item.get("index") or 0))
+
+    questions: list[dict[str, Any]] = []
+    question_headings = split_by_heading(parts["part_four"], H3_PATTERN)
+    for h3_title, h3_body in question_headings:
+        match = FORMAL_REPORT_V2_QUESTION_PATTERN.match(h3_title.strip())
+        if not match:
+            continue
+        index = int(match.group(1))
+        title = match.group(2).strip()
+        fields, notes = _parse_simple_bullets(h3_body)
+        questions.append(
+            {
+                "index": index,
+                "title": title,
+                "fields": fields,
+                "notes": notes,
+            }
+        )
+    questions.sort(key=lambda item: int(item.get("index") or 0))
+
+    evidence_blocks: dict[str, dict[str, Any]] = {}
+    evidence_headings = split_by_heading(parts["part_five"], H3_PATTERN)
+    for h3_title, h3_body in evidence_headings:
+        stripped = h3_title.strip()
+        key = None
+        match = FORMAL_REPORT_V2_CHARACTERISTIC_PATTERN.match(stripped)
+        if match:
+            key = f"characteristic:{int(match.group(1))}"
+        else:
+            q_match = FORMAL_REPORT_V2_QUESTION_PATTERN.match(stripped)
+            if q_match:
+                key = f"question:{int(q_match.group(1))}"
+        if not key:
+            continue
+        evidence_blocks[key] = {
+            "title": stripped,
+            "lines": h3_body,
+        }
+
+    return {
+        "tech_stack": {
+            "fields": tech_fields,
+            "notes": tech_notes,
+        },
+        "project_overview": {
+            "fields": project_fields,
+            "notes": project_notes,
+        },
+        "risks": risks,
+        "characteristics": characteristics,
+        "questions": questions,
+        "evidence_blocks": evidence_blocks,
+    }
+
+
 def parse_bullets(lines: list[str]) -> tuple[dict[str, Any], list[str]]:
     """Parse simple '- key: value' blocks into a structured dictionary."""
 
@@ -275,8 +443,13 @@ def parse_evidence_lines(lines: list[str], *, default_label: str, origin: str) -
             continue
         path = match.group(1)
         line = int(match.group(2))
-        label = (match.group(3) or default_label or "evidence").strip()
-        snippet = (match.group(4) or "").strip().strip("`")
+        end_line_raw = match.group(3)
+        label = (match.group(4) or default_label or "evidence").strip()
+        snippet = (match.group(5) or "").strip().strip("`")
+        if end_line_raw:
+            end_line = int(end_line_raw)
+            range_hint = f"lines {line}-{end_line}"
+            snippet = f"{range_hint} {snippet}".strip()
         dedupe_key = (path, line, label, snippet)
         if dedupe_key in seen:
             continue
@@ -330,6 +503,18 @@ def make_evidence_id(card_id: str, item: dict[str, Any]) -> str:
 
 
 def _normalize_report(report_text: str) -> dict[str, Any]:
+    if looks_like_formal_report(report_text):
+        normalized_v2 = _normalize_report_v2(report_text)
+        if any(
+            [
+                normalized_v2.get("tech_stack", {}).get("fields"),
+                normalized_v2.get("project_overview", {}).get("fields"),
+                normalized_v2.get("characteristics"),
+                normalized_v2.get("questions"),
+            ]
+        ):
+            return normalized_v2
+
     run_text = latest_run_text(report_text)
     h2_blocks = split_by_heading(run_text.splitlines(), H2_PATTERN)
     parts: dict[str, list[str]] = {"part_one": [], "part_two": [], "part_three": []}
@@ -460,6 +645,9 @@ def render_search_compatible_report(report_text: str) -> str:
     """
 
     normalized = _normalize_report(report_text)
+    if "tech_stack" in normalized:
+        return render_search_compatible_report_v2(normalized)
+
     if not any(
         [
             normalized["overview"],
@@ -562,6 +750,89 @@ def render_search_compatible_report(report_text: str) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def render_search_compatible_report_v2(normalized: dict[str, Any]) -> str:
+    if not isinstance(normalized, dict):
+        return ""
+    tech_fields = normalized.get("tech_stack", {}).get("fields", {})
+    project_fields = normalized.get("project_overview", {}).get("fields", {})
+    characteristics = normalized.get("characteristics", [])
+    questions = normalized.get("questions", [])
+    risks = normalized.get("risks", [])
+    evidence_blocks = normalized.get("evidence_blocks", {})
+
+    lines = ["# Repo Library Retrieval Report", ""]
+
+    lines.extend([f"## {SEARCH_SECTION_TITLES['project_characteristics']}", ""])
+    for item in characteristics:
+        title = str(item.get("title") or "").strip()
+        index = int(item.get("index") or 0)
+        if not title or index <= 0:
+            continue
+        lines.append(f"### {title}")
+        fields = item.get("fields", {}) if isinstance(item.get("fields"), dict) else {}
+        for label in ["动机", "目标", "思路", "取舍"]:
+            value = str(fields.get(label) or "").strip()
+            if value:
+                lines.append(f"- {label}: {value}")
+        confidence = str(fields.get("置信度") or "").strip().strip("`")
+        if confidence:
+            lines.append(f"- Confidence: `{confidence}`")
+        evidence_lines = evidence_blocks.get(f"characteristic:{index}", {}).get("lines", [])
+        evidence_items = parse_evidence_lines(evidence_lines, default_label="characteristic", origin="report")
+        if evidence_items:
+            lines.append("- Key Evidence References:")
+            for evidence_item in evidence_items:
+                lines.append(f"  - `{evidence_item['source_path']}:{evidence_item['source_line']}`")
+        lines.append("")
+
+    lines.extend([f"## {SEARCH_SECTION_TITLES['executive_summary']}", ""])
+    if tech_fields:
+        lines.append("### Tech Stack and Modules")
+        for label, value in tech_fields.items():
+            text = str(value or "").strip()
+            if text:
+                lines.append(f"- {label}: {text}")
+        lines.append("")
+
+    if project_fields:
+        lines.append("### Project Purpose and Core Characteristics")
+        for label, value in project_fields.items():
+            text = str(value or "").strip()
+            if text:
+                lines.append(f"- {label}: {text}")
+        lines.append("")
+
+    lines.extend([f"## {SEARCH_SECTION_TITLES['feature_details']}", ""])
+    for item in questions:
+        title = str(item.get("title") or "").strip()
+        index = int(item.get("index") or 0)
+        if not title or index <= 0:
+            continue
+        lines.append(f"### {title}")
+        fields = item.get("fields", {}) if isinstance(item.get("fields"), dict) else {}
+        for label in ["结论", "思路", "取舍", "置信度"]:
+            value = str(fields.get(label) or "").strip()
+            if value:
+                if label == "置信度":
+                    lines.append(f"- Confidence: `{value.strip('`')}`")
+                else:
+                    lines.append(f"- {label}: {value}")
+        evidence_lines = evidence_blocks.get(f"question:{index}", {}).get("lines", [])
+        evidence_items = parse_evidence_lines(evidence_lines, default_label="question", origin="report")
+        if evidence_items:
+            lines.append("- Key Evidence References:")
+            for evidence_item in evidence_items:
+                lines.append(f"  - `{evidence_item['source_path']}:{evidence_item['source_line']}`")
+        lines.append("")
+
+    lines.extend([f"## {SEARCH_SECTION_TITLES['global_risks']}", ""])
+    for risk in risks:
+        if str(risk).strip():
+            lines.append(f"- {str(risk).strip()}")
+    lines.append("")
+    return "\n".join(lines).strip() + "\n"
+
+
 def _append_card(
     *,
     cards: list[dict[str, Any]],
@@ -638,109 +909,274 @@ def build_cards_payload(
     cards: list[dict[str, Any]] = []
     evidence: list[dict[str, Any]] = []
 
-    overview_lines = [line.strip()[2:].strip() if line.strip().startswith("- ") else line.strip() for line in normalized["overview"] if line.strip()]
-    if overview_lines:
-        overview_text = "\n".join(overview_lines)
-        _append_card(
-            cards=cards,
-            evidence=evidence,
-            snapshot_id=snapshot_id,
-            repo_key=resolved_repo_key,
-            run_id=run_id,
-            card_type="integration_note",
-            title="Repository structure mental model",
-            summary=overview_lines[0],
-            content=overview_text,
-            confidence="medium",
-            tags=["overview", "integration"],
-            source="report.md",
-            evidence_items=parse_evidence_lines(normalized["overview"], default_label="overview", origin="report"),
-        )
+    def normalize_confidence(value: Any, *, fallback: str = "low") -> str:
+        text = str(value or "").strip().strip("`").casefold()
+        if text in {"high", "medium", "low"}:
+            return text
+        return fallback
 
-    for item in normalized["characteristics"]:
-        fields = item["fields"]
-        summary = str(fields.get("characteristic_mechanism") or item["title"])
-        content_parts = []
-        if fields.get("characteristic_source"):
-            content_parts.append(f"source: {fields['characteristic_source']}")
-        if fields.get("characteristic_signal"):
-            content_parts.append(f"signal: {fields['characteristic_signal']}")
-        content_parts.append(summary)
-        content_parts.extend(item.get("notes", []))
-        _append_card(
-            cards=cards,
-            evidence=evidence,
-            snapshot_id=snapshot_id,
-            repo_key=resolved_repo_key,
-            run_id=run_id,
-            card_type="project_characteristic",
-            title=item["title"],
-            summary=summary,
-            content="\n".join(content_parts),
-            confidence=str(fields.get("confidence") or ("medium" if item["evidence"] else "low")),
-            tags=["characteristic", item["title"]],
-            source="report.md",
-            evidence_items=item["evidence"],
-        )
+    if "tech_stack" in normalized:
+        tech_fields = normalized.get("tech_stack", {}).get("fields", {})
+        project_fields = normalized.get("project_overview", {}).get("fields", {})
+        evidence_blocks = normalized.get("evidence_blocks", {})
 
-    all_features = sorted(set(normalized["feature_summaries"]) | set(normalized["feature_details"]))
-    for feature_name in all_features:
-        summary_block = normalized["feature_summaries"].get(feature_name, {})
-        detail_block = normalized["feature_details"].get(feature_name, {})
-        summary_fields = summary_block.get("fields", {})
-        content_lines: list[str] = []
-        if summary_fields.get("function_role"):
-            content_lines.append(f"function_role: {summary_fields['function_role']}")
-        if summary_fields.get("special_capability"):
-            content_lines.append(f"special_capability: {summary_fields['special_capability']}")
-        if summary_fields.get("implementation_idea"):
-            content_lines.append(f"implementation_idea: {summary_fields['implementation_idea']}")
-        for section_title, section_lines in detail_block.get("sections", {}).items():
-            cleaned = [line.strip()[2:].strip() if line.strip().startswith("- ") else line.strip() for line in section_lines if line.strip()]
-            if cleaned:
-                content_lines.append(f"{section_title}: {' '.join(cleaned)}")
-        content_lines.extend(summary_block.get("notes", []))
-        content_lines.extend(detail_block.get("notes", []))
-        evidence_items = list(summary_block.get("evidence", [])) + list(detail_block.get("evidence", []))
-        confidence = merge_confidence(
-            [
-                str(summary_fields.get("confidence") or ""),
-                str(detail_block.get("confidence") or ""),
+        if isinstance(tech_fields, dict) and tech_fields:
+            summary = str(
+                tech_fields.get("主要语言/技术栈总览")
+                or tech_fields.get("后端")
+                or tech_fields.get("前端")
+                or "技术栈与模块语言"
+            ).strip()
+            content_lines = [
+                f"{label}: {tech_fields[label]}"
+                for label in [
+                    "主要语言/技术栈总览",
+                    "后端",
+                    "前端",
+                    "其它模块",
+                ]
+                if str(tech_fields.get(label) or "").strip()
             ]
-        )
-        summary = str(summary_fields.get("implementation_idea") or summary_fields.get("function_role") or feature_name)
-        _append_card(
-            cards=cards,
-            evidence=evidence,
-            snapshot_id=snapshot_id,
-            repo_key=resolved_repo_key,
-            run_id=run_id,
-            card_type="feature_pattern",
-            title=feature_name,
-            summary=summary,
-            content="\n".join(content_lines) if content_lines else summary,
-            confidence=confidence,
-            tags=["feature", feature_name],
-            source="report.md",
-            evidence_items=evidence_items,
-        )
+            _append_card(
+                cards=cards,
+                evidence=evidence,
+                snapshot_id=snapshot_id,
+                repo_key=resolved_repo_key,
+                run_id=run_id,
+                card_type="integration_note",
+                title="技术栈与模块语言",
+                summary=summary,
+                content="\n".join(content_lines) if content_lines else summary,
+                confidence="medium",
+                tags=["tech_stack"],
+                source="report.md",
+                evidence_items=[],
+            )
 
-    for index, risk in enumerate(normalized["risks"], start=1):
-        _append_card(
-            cards=cards,
-            evidence=evidence,
-            snapshot_id=snapshot_id,
-            repo_key=resolved_repo_key,
-            run_id=run_id,
-            card_type="risk_note",
-            title=f"Risk {index}",
-            summary=risk,
-            content=risk,
-            confidence="medium",
-            tags=["risk"],
-            source="report.md",
-            evidence_items=[],
-        )
+        if isinstance(project_fields, dict) and project_fields:
+            summary = str(project_fields.get("项目做什么用") or project_fields.get("核心特点概览") or "项目用途与核心特点").strip()
+            content_lines = [
+                f"{label}: {project_fields[label]}"
+                for label in [
+                    "项目做什么用",
+                    "典型使用场景",
+                    "核心特点概览",
+                ]
+                if str(project_fields.get(label) or "").strip()
+            ]
+            _append_card(
+                cards=cards,
+                evidence=evidence,
+                snapshot_id=snapshot_id,
+                repo_key=resolved_repo_key,
+                run_id=run_id,
+                card_type="integration_note",
+                title="项目用途与核心特点",
+                summary=summary,
+                content="\n".join(content_lines) if content_lines else summary,
+                confidence="medium",
+                tags=["project_overview"],
+                source="report.md",
+                evidence_items=[],
+            )
+
+        for item in normalized.get("characteristics", []) or []:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            index = int(item.get("index") or 0)
+            if not title or index <= 0:
+                continue
+            fields = item.get("fields", {}) if isinstance(item.get("fields"), dict) else {}
+            summary = str(fields.get("思路") or fields.get("目标") or title).strip()
+            content_parts = []
+            for label in ["动机", "目标", "思路", "取舍"]:
+                value = str(fields.get(label) or "").strip()
+                if value:
+                    content_parts.append(f"{label}: {value}")
+            notes = item.get("notes", [])
+            if isinstance(notes, list):
+                content_parts.extend([str(line).strip() for line in notes if str(line).strip()])
+            evidence_lines = evidence_blocks.get(f"characteristic:{index}", {}).get("lines", [])
+            evidence_items = parse_evidence_lines(evidence_lines, default_label="characteristic", origin="report")
+            confidence = normalize_confidence(fields.get("置信度"), fallback="medium" if evidence_items else "low")
+            _append_card(
+                cards=cards,
+                evidence=evidence,
+                snapshot_id=snapshot_id,
+                repo_key=resolved_repo_key,
+                run_id=run_id,
+                card_type="project_characteristic",
+                title=title,
+                summary=summary,
+                content="\n".join(content_parts) if content_parts else summary,
+                confidence=confidence,
+                tags=["characteristic", title],
+                source="report.md",
+                evidence_items=evidence_items,
+            )
+
+        for item in normalized.get("questions", []) or []:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            index = int(item.get("index") or 0)
+            if not title or index <= 0:
+                continue
+            fields = item.get("fields", {}) if isinstance(item.get("fields"), dict) else {}
+            summary = str(fields.get("结论") or title).strip()
+            content_parts = []
+            for label in ["结论", "思路", "取舍"]:
+                value = str(fields.get(label) or "").strip()
+                if value:
+                    content_parts.append(f"{label}: {value}")
+            notes = item.get("notes", [])
+            if isinstance(notes, list):
+                content_parts.extend([str(line).strip() for line in notes if str(line).strip()])
+            evidence_lines = evidence_blocks.get(f"question:{index}", {}).get("lines", [])
+            evidence_items = parse_evidence_lines(evidence_lines, default_label="question", origin="report")
+            confidence = normalize_confidence(fields.get("置信度"), fallback="medium" if evidence_items else "low")
+            _append_card(
+                cards=cards,
+                evidence=evidence,
+                snapshot_id=snapshot_id,
+                repo_key=resolved_repo_key,
+                run_id=run_id,
+                card_type="feature_pattern",
+                title=title,
+                summary=summary,
+                content="\n".join(content_parts) if content_parts else summary,
+                confidence=confidence,
+                tags=["question", title],
+                source="report.md",
+                evidence_items=evidence_items,
+            )
+
+        for index, risk in enumerate(normalized.get("risks", []) or [], start=1):
+            risk_text = str(risk).strip()
+            if not risk_text:
+                continue
+            _append_card(
+                cards=cards,
+                evidence=evidence,
+                snapshot_id=snapshot_id,
+                repo_key=resolved_repo_key,
+                run_id=run_id,
+                card_type="risk_note",
+                title=f"Risk {index}",
+                summary=risk_text,
+                content=risk_text,
+                confidence="medium",
+                tags=["risk"],
+                source="report.md",
+                evidence_items=[],
+            )
+
+    else:
+
+        overview_lines = [line.strip()[2:].strip() if line.strip().startswith("- ") else line.strip() for line in normalized["overview"] if line.strip()]
+        if overview_lines:
+            overview_text = "\n".join(overview_lines)
+            _append_card(
+                cards=cards,
+                evidence=evidence,
+                snapshot_id=snapshot_id,
+                repo_key=resolved_repo_key,
+                run_id=run_id,
+                card_type="integration_note",
+                title="Repository structure mental model",
+                summary=overview_lines[0],
+                content=overview_text,
+                confidence="medium",
+                tags=["overview", "integration"],
+                source="report.md",
+                evidence_items=parse_evidence_lines(normalized["overview"], default_label="overview", origin="report"),
+            )
+
+        for item in normalized["characteristics"]:
+            fields = item["fields"]
+            summary = str(fields.get("characteristic_mechanism") or item["title"])
+            content_parts = []
+            if fields.get("characteristic_source"):
+                content_parts.append(f"source: {fields['characteristic_source']}")
+            if fields.get("characteristic_signal"):
+                content_parts.append(f"signal: {fields['characteristic_signal']}")
+            content_parts.append(summary)
+            content_parts.extend(item.get("notes", []))
+            _append_card(
+                cards=cards,
+                evidence=evidence,
+                snapshot_id=snapshot_id,
+                repo_key=resolved_repo_key,
+                run_id=run_id,
+                card_type="project_characteristic",
+                title=item["title"],
+                summary=summary,
+                content="\n".join(content_parts),
+                confidence=str(fields.get("confidence") or ("medium" if item["evidence"] else "low")),
+                tags=["characteristic", item["title"]],
+                source="report.md",
+                evidence_items=item["evidence"],
+            )
+
+        all_features = sorted(set(normalized["feature_summaries"]) | set(normalized["feature_details"]))
+        for feature_name in all_features:
+            summary_block = normalized["feature_summaries"].get(feature_name, {})
+            detail_block = normalized["feature_details"].get(feature_name, {})
+            summary_fields = summary_block.get("fields", {})
+            content_lines: list[str] = []
+            if summary_fields.get("function_role"):
+                content_lines.append(f"function_role: {summary_fields['function_role']}")
+            if summary_fields.get("special_capability"):
+                content_lines.append(f"special_capability: {summary_fields['special_capability']}")
+            if summary_fields.get("implementation_idea"):
+                content_lines.append(f"implementation_idea: {summary_fields['implementation_idea']}")
+            for section_title, section_lines in detail_block.get("sections", {}).items():
+                cleaned = [line.strip()[2:].strip() if line.strip().startswith("- ") else line.strip() for line in section_lines if line.strip()]
+                if cleaned:
+                    content_lines.append(f"{section_title}: {' '.join(cleaned)}")
+            content_lines.extend(summary_block.get("notes", []))
+            content_lines.extend(detail_block.get("notes", []))
+            evidence_items = list(summary_block.get("evidence", [])) + list(detail_block.get("evidence", []))
+            confidence = merge_confidence(
+                [
+                    str(summary_fields.get("confidence") or ""),
+                    str(detail_block.get("confidence") or ""),
+                ]
+            )
+            summary = str(summary_fields.get("implementation_idea") or summary_fields.get("function_role") or feature_name)
+            _append_card(
+                cards=cards,
+                evidence=evidence,
+                snapshot_id=snapshot_id,
+                repo_key=resolved_repo_key,
+                run_id=run_id,
+                card_type="feature_pattern",
+                title=feature_name,
+                summary=summary,
+                content="\n".join(content_lines) if content_lines else summary,
+                confidence=confidence,
+                tags=["feature", feature_name],
+                source="report.md",
+                evidence_items=evidence_items,
+            )
+
+        for index, risk in enumerate(normalized["risks"], start=1):
+            _append_card(
+                cards=cards,
+                evidence=evidence,
+                snapshot_id=snapshot_id,
+                repo_key=resolved_repo_key,
+                run_id=run_id,
+                card_type="risk_note",
+                title=f"Risk {index}",
+                summary=risk,
+                content=risk,
+                confidence="medium",
+                tags=["risk"],
+                source="report.md",
+                evidence_items=[],
+            )
 
     if subagent_results_path:
         payload = read_json(subagent_results_path)

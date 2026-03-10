@@ -120,6 +120,54 @@ func TestLoad_RepoRootDiscovery(t *testing.T) {
 	}
 }
 
+func TestLoad_RepoRootDiscovery_WorktreeGitFile(t *testing.T) {
+	repo := t.TempDir()
+	gitFile := filepath.Join(repo, ".git")
+	if err := os.WriteFile(gitFile, []byte("gitdir: /tmp/vibe-tree-test\n"), 0o644); err != nil {
+		t.Fatalf("write .git file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".env"), []byte("ANTHROPIC_API_KEY=new\n"), 0o644); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+	backendDir := filepath.Join(repo, "backend")
+	if err := os.MkdirAll(backendDir, 0o755); err != nil {
+		t.Fatalf("mkdir backend: %v", err)
+	}
+
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	if err := os.Chdir(backendDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	t.Setenv("VIBE_TREE_DOTENV", "")
+	t.Setenv("VIBE_TREE_DOTENV_PATH", "")
+	t.Setenv("ANTHROPIC_API_KEY", "old")
+
+	res, err := Load()
+	if err != nil {
+		t.Fatalf("Load() err: %v", err)
+	}
+	if !res.Attempted || !res.Loaded {
+		t.Fatalf("Attempted=%v Loaded=%v, want true/true", res.Attempted, res.Loaded)
+	}
+
+	absRepo, err := filepath.Abs(repo)
+	if err != nil {
+		t.Fatalf("abs repo: %v", err)
+	}
+	wantPath := filepath.Join(absRepo, ".env")
+	if res.Path != wantPath {
+		t.Fatalf("Path=%q, want %q", res.Path, wantPath)
+	}
+	if got := os.Getenv("ANTHROPIC_API_KEY"); got != "new" {
+		t.Fatalf("ANTHROPIC_API_KEY=%q, want %q", got, "new")
+	}
+}
+
 func TestLoad_NoRepoRoot_Skips(t *testing.T) {
 	dir := t.TempDir()
 	subdir := filepath.Join(dir, "nested")
