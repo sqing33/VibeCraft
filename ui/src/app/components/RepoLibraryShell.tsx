@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { WorkspacePortal } from './WorkspaceShell'
 
 type RepoLibraryShellProps = {
-  title: string
+  title: ReactNode
   headerMeta?: ReactNode
   headerActions?: ReactNode
   sidebarTitle: string
@@ -12,6 +12,7 @@ type RepoLibraryShellProps = {
   sidebarContent: ReactNode
   children: ReactNode
   contentMaxWidthClassName?: string
+  contentPaddingClassName?: string
 }
 
 type RepoLibrarySidebarRepositoryItemProps = {
@@ -61,6 +62,7 @@ export function RepoLibraryShell(props: RepoLibraryShellProps) {
     sidebarContent,
     children,
     contentMaxWidthClassName = 'max-w-[980px]',
+    contentPaddingClassName = 'gap-5 p-4 md:p-6',
   } = props
 
   return (
@@ -80,14 +82,14 @@ export function RepoLibraryShell(props: RepoLibraryShellProps) {
       <WorkspacePortal target="sidebarBody">{sidebarContent}</WorkspacePortal>
       <WorkspacePortal target="headerMeta">{headerMeta ?? <div />}</WorkspacePortal>
       <WorkspacePortal target="headerTitle">
-        <div className="truncate text-base font-semibold">{title}</div>
+        <div className="min-w-0 text-base font-semibold">{title}</div>
       </WorkspacePortal>
       <WorkspacePortal target="headerActions">
         <div className="flex items-center justify-end gap-2">{headerActions}</div>
       </WorkspacePortal>
       <WorkspacePortal target="content">
-        <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto">
-          <div className={`mx-auto flex w-full flex-col gap-5 p-4 md:p-6 ${contentMaxWidthClassName}`}>
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className={`mx-auto flex w-full flex-col ${contentPaddingClassName} ${contentMaxWidthClassName}`}>
             {children}
           </div>
         </div>

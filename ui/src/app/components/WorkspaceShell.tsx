@@ -1,9 +1,12 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '@heroui/react'
-import { Github, MessageSquare, Moon, Sun, Workflow } from 'lucide-react'
+import { ChevronRight, Github, MessageSquare, Moon, Sun, Workflow } from 'lucide-react'
 
 import { goHome, goToChat, goToRepoLibraryRepositories } from '@/app/routes'
+import { cn } from '@/lib/utils'
+import { AnimatedGradientText } from '@/registry/magicui/animated-gradient-text'
+import { MorphingText } from '@/registry/magicui/morphing-text'
 import { useChatStore } from '@/stores/chatStore'
 import { useThemeStore } from '@/stores/themeStore'
 
@@ -12,6 +15,73 @@ import { SettingsDialog } from './SettingsDialog'
 
 
 type WorkspaceNavKey = 'chat' | 'orchestrations' | 'repo_library'
+
+const MORPHING_TITLE_TEXTS: string[] = [
+  'VibeTree',
+  'VibeCoding',
+  'ChatGPT',
+  'Gemini',
+  'Claude',
+  'GLM',
+  'Qwen',
+  'DeepSeek',
+]
+
+type SidebarNavItemProps = {
+  active: boolean
+  icon: ReactNode
+  label: string
+  onPress: () => void
+}
+
+function SidebarNavItem(props: SidebarNavItemProps) {
+  const { active, icon, label, onPress } = props
+
+  return (
+    <button
+      type="button"
+      className={cn(
+        'group relative flex w-full items-center justify-start gap-2 rounded-2xl px-3 py-2 text-left text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+        active
+          ? 'shadow-[inset_0_-8px_10px_#8fdfff1f] transition-shadow duration-500 ease-out hover:shadow-[inset_0_-5px_10px_#8fdfff3f]'
+          : 'hover:bg-default-100/70',
+      )}
+      aria-current={active ? 'page' : undefined}
+      onClick={onPress}
+    >
+      {active ? (
+        <span
+          className="animate-gradient pointer-events-none absolute inset-0 block h-full w-full rounded-[inherit] bg-gradient-to-r from-[#ffaa40]/50 via-[#9c40ff]/50 to-[#ffaa40]/50 bg-[length:300%_100%] p-[1px]"
+          style={{
+            WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+            WebkitMaskComposite: 'destination-out',
+            mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+            maskComposite: 'subtract',
+            WebkitClipPath: 'padding-box',
+          }}
+        />
+      ) : null}
+      <span className="relative flex min-w-0 flex-1 items-center gap-2">
+        <span className="shrink-0 text-foreground/80 group-hover:text-foreground">{icon}</span>
+        {active ? (
+          <AnimatedGradientText className="min-w-0 truncate text-sm font-medium">{label}</AnimatedGradientText>
+        ) : (
+          <span className="min-w-0 truncate text-sm font-medium text-foreground/80 transition-colors group-hover:text-foreground">
+            {label}
+          </span>
+        )}
+      </span>
+      <ChevronRight
+        className={cn(
+          'relative ml-1 size-4 shrink-0 stroke-neutral-500 transition-transform duration-300 ease-in-out group-hover:translate-x-0.5',
+          active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+        )}
+        aria-hidden="true"
+        focusable="false"
+      />
+    </button>
+  )
+}
 
 type WorkspacePortalTargetKey =
   | 'sidebarHeader'
@@ -77,63 +147,55 @@ export function WorkspaceShell(props: WorkspaceShellProps) {
       <div className="grid h-full min-h-0 w-full grid-cols-1 lg:grid-cols-[292px_minmax(0,1fr)]">
         <section className="flex min-h-0 flex-col overflow-hidden px-1 py-2 md:px-2">
           <div className="shrink-0">
-            <div className="mb-4 flex items-center justify-between gap-2 px-1">
-              <div className="text-lg font-semibold tracking-tight">vibe-tree</div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="light"
-                  size="sm"
-                  isIconOnly
-                  onPress={toggleTheme}
-                  aria-label={theme === 'dark' ? '切换为浅色主题' : '切换为深色主题'}
-                  title={theme === 'dark' ? '切换为浅色主题' : '切换为深色主题'}
-                >
-                  {theme === 'dark' ? (
-                    <Sun className="h-4 w-4" aria-hidden="true" focusable="false" />
-                  ) : (
-                    <Moon className="h-4 w-4" aria-hidden="true" focusable="false" />
-                  )}
-                </Button>
-                <SettingsDialog />
-              </div>
-            </div>
+            <MorphingText
+              texts={MORPHING_TITLE_TEXTS}
+              className="mb-4 h-9 w-full text-center text-xl leading-tight md:h-10 md:text-2xl"
+            />
             <div className="flex flex-col gap-2">
-              <Button
-                color={activeNav === 'chat' ? 'primary' : 'default'}
-                variant={activeNav === 'chat' ? 'flat' : 'light'}
-                size="sm"
-                className="justify-start rounded-2xl"
-                startContent={<MessageSquare className="h-4 w-4" />}
+              <SidebarNavItem
+                active={activeNav === 'chat'}
+                icon={<MessageSquare className="h-4 w-4" aria-hidden="true" focusable="false" />}
+                label="对话"
                 onPress={() => goToChat(activeChatSessionId ?? undefined)}
-              >
-                对话
-              </Button>
-              <Button
-                color={activeNav === 'orchestrations' ? 'primary' : 'default'}
-                variant={activeNav === 'orchestrations' ? 'flat' : 'light'}
-                size="sm"
-                className="justify-start rounded-2xl"
-                startContent={<Workflow className="h-4 w-4" />}
+              />
+              <SidebarNavItem
+                active={activeNav === 'orchestrations'}
+                icon={<Workflow className="h-4 w-4" aria-hidden="true" focusable="false" />}
+                label="工作流"
                 onPress={goHome}
-              >
-                工作流
-              </Button>
-              <Button
-                color={activeNav === 'repo_library' ? 'primary' : 'default'}
-                variant={activeNav === 'repo_library' ? 'flat' : 'light'}
-                size="sm"
-                className="justify-start rounded-2xl"
-                startContent={<Github className="h-4 w-4" />}
+              />
+              <SidebarNavItem
+                active={activeNav === 'repo_library'}
+                icon={<Github className="h-4 w-4" aria-hidden="true" focusable="false" />}
+                label="Github 知识库"
                 onPress={goToRepoLibraryRepositories}
-              >
-                Github 知识库
-              </Button>
+              />
             </div>
           </div>
 
           <div className="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden border-t border-default-200/70 pt-4">
             <div ref={setSidebarHeaderEl} className="shrink-0" />
             <div ref={setSidebarBodyEl} className="thin-scrollbar mt-3 min-h-0 flex-1 overflow-auto pr-0" />
+          </div>
+
+          <div className="shrink-0 border-t border-default-200/70 pt-3 pb-2">
+            <div className="flex items-center justify-center gap-2 px-1">
+              <Button
+                variant="light"
+                size="sm"
+                isIconOnly
+                onPress={toggleTheme}
+                aria-label={theme === 'dark' ? '切换为浅色主题' : '切换为深色主题'}
+                title={theme === 'dark' ? '切换为浅色主题' : '切换为深色主题'}
+              >
+                {theme === 'dark' ? (
+                  <Sun className="h-4 w-4" aria-hidden="true" focusable="false" />
+                ) : (
+                  <Moon className="h-4 w-4" aria-hidden="true" focusable="false" />
+                )}
+              </Button>
+              <SettingsDialog />
+            </div>
           </div>
         </section>
 

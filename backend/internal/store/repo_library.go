@@ -34,17 +34,26 @@ type RepoSource struct {
 	UpdatedAt     int64   `json:"updated_at"`
 }
 
+type RepoReportContextSummary struct {
+	GeneratedAt         *string `json:"generated_at,omitempty"`
+	StackOverview       *string `json:"stack_overview,omitempty"`
+	BackendSummary      *string `json:"backend_summary,omitempty"`
+	FrontendSummary     *string `json:"frontend_summary,omitempty"`
+	OtherModulesSummary *string `json:"other_modules_summary,omitempty"`
+}
+
 type RepoSnapshot struct {
-	ID                 string  `json:"snapshot_id"`
-	RepoSourceID       string  `json:"repository_id"`
-	RequestedRef       string  `json:"requested_ref"`
-	ResolvedRef        *string `json:"resolved_ref,omitempty"`
-	CommitSHA          *string `json:"commit_sha,omitempty"`
-	StoragePath        string  `json:"storage_path"`
-	ReportPath         *string `json:"report_path,omitempty"`
-	SubagentResultsPath *string `json:"subagent_results_path,omitempty"`
-	CreatedAt          int64   `json:"created_at"`
-	UpdatedAt          int64   `json:"updated_at"`
+	ID                  string                  `json:"snapshot_id"`
+	RepoSourceID        string                  `json:"repository_id"`
+	RequestedRef        string                  `json:"requested_ref"`
+	ResolvedRef         *string                 `json:"resolved_ref,omitempty"`
+	CommitSHA           *string                 `json:"commit_sha,omitempty"`
+	StoragePath         string                  `json:"storage_path"`
+	ReportPath          *string                 `json:"report_path,omitempty"`
+	SubagentResultsPath *string                 `json:"subagent_results_path,omitempty"`
+	ReportContext       *RepoReportContextSummary `json:"report_context_summary,omitempty"`
+	CreatedAt           int64                   `json:"created_at"`
+	UpdatedAt           int64                   `json:"updated_at"`
 }
 
 type RepoAnalysisRun struct {
@@ -80,6 +89,7 @@ type RepoKnowledgeCard struct {
 	AnalysisRunID string   `json:"analysis_run_id"`
 	Title         string   `json:"title"`
 	CardType      string   `json:"card_type"`
+	Conclusion    *string  `json:"conclusion,omitempty"`
 	Summary       string   `json:"summary"`
 	Mechanism     *string  `json:"mechanism,omitempty"`
 	Confidence    *string  `json:"confidence,omitempty"`
@@ -189,6 +199,7 @@ type ReplaceRepoKnowledgeParams struct {
 type RepoKnowledgeCardInput struct {
 	Title        string
 	CardType     string
+	Conclusion   *string
 	Summary      string
 	Mechanism    *string
 	Confidence   *string

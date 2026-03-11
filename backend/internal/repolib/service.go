@@ -53,6 +53,7 @@ type Service struct {
 	experts     *expert.Registry
 	projectRoot string
 	pythonBin   string
+	searchIdx   *searchIndex
 }
 
 type pipelineLayout struct {

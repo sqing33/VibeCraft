@@ -2037,8 +2037,17 @@ export type RepoLibrarySnapshot = {
   report_url?: string;
   report_excerpt?: string;
   report_markdown?: string;
+  report_context_summary?: RepoLibraryReportContextSummary;
   created_at: number;
   updated_at?: number;
+};
+
+export type RepoLibraryReportContextSummary = {
+  generated_at?: string | null;
+  stack_overview?: string | null;
+  backend_summary?: string | null;
+  frontend_summary?: string | null;
+  other_modules_summary?: string | null;
 };
 
 export type RepoLibraryRepository = {
@@ -2079,7 +2088,10 @@ export type RepoLibraryCard = {
   analysis_id?: string;
   card_type: string;
   title: string;
+  section_title?: string;
   summary?: string;
+  conclusion?: string;
+  mechanism?: string;
   detail?: string;
   confidence?: number;
   tags?: string[];

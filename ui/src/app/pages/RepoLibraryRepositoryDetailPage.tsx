@@ -1,5 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Chip, Skeleton } from '@heroui/react'
+import type { Selection } from '@react-types/shared'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  Alert,
+  Button,
+  Chip,
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalHeader,
+  Select,
+  SelectItem,
+  Skeleton,
+} from '@heroui/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { FileSearch, Plus, RefreshCcw, ScrollText } from 'lucide-react'
@@ -12,9 +24,7 @@ import {
 } from '@/app/routes'
 import { LoadingVeil } from '@/app/components/LoadingVeil'
 import { RepoLibraryShell, RepoLibrarySidebarRepositoryItem } from '@/app/components/RepoLibraryShell'
-import { TerminalPane, type TerminalPaneHandle } from '@/components/TerminalPane'
 import {
-  fetchExecutionLogTail,
   fetchRepoLibraryCard,
   fetchRepoLibraryCardEvidence,
   fetchRepoLibraryCards,
@@ -34,6 +44,12 @@ import { getEmptyRepoLibraryDetailCache, useRepoLibraryUIStore } from '@/stores/
 
 type RepoLibraryRepositoryDetailPageProps = {
   repositoryId: string
+}
+
+function selectionToString(keys: Selection): string {
+  if (keys === 'all') return ''
+  const first = keys.values().next()
+  return typeof first.value === 'string' ? first.value : ''
 }
 
 function formatAnalysisStatus(status: string): string {
@@ -59,21 +75,61 @@ function formatCardType(type: string): string {
   return type || '卡片'
 }
 
+function normalizeCardText(text?: string): string {
+  return (text ?? '')
+    .replace(/^思路[:：]\s*/u, '')
+    .replace(/\s+/gu, ' ')
+    .trim()
+}
+
+function displaySummary(summary?: string, conclusion?: string, mechanism?: string): string {
+  const normalizedSummary = normalizeCardText(summary)
+  if (!normalizedSummary) return ''
+
+  const normalizedConclusion = normalizeCardText(conclusion)
+  if (normalizedConclusion && normalizedSummary === normalizedConclusion) {
+    return ''
+  }
+
+  const normalizedMechanism = normalizeCardText(mechanism)
+  const mechanismPrefix = normalizedMechanism.replace(/^思路[:：]\s*/u, '').trim()
+  const summaryPrefix = normalizedSummary.replace(/\.{3}$/u, '').trim()
+  if (summaryPrefix && mechanismPrefix && mechanismPrefix.startsWith(summaryPrefix)) {
+    return ''
+  }
+
+  return summary?.trim() ?? ''
+}
+
+function formatGeneratedAt(value?: string | null): string {
+  if (!value) return '—'
+  return value.replace(/\s+[+-]\d{4}$/u, '')
+}
+
 function DetailSkeleton() {
   return (
     <div className="space-y-4">
-      <Skeleton className="h-36 w-full rounded-2xl" />
-      <Skeleton className="h-72 w-full rounded-2xl" />
-      <Skeleton className="h-72 w-full rounded-2xl" />
+      <Skeleton className="h-20 w-full rounded-2xl" />
+      <Skeleton className="h-[72vh] w-full rounded-2xl" />
+    </div>
+  )
+}
+
+function ContextField(props: { label: string; value?: string | null; multiline?: boolean }) {
+  const { label, value, multiline = false } = props
+  return (
+    <div className="border-b border-default-200/70 pb-3 last:border-b-0 last:pb-0">
+      <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground/75">{label}</div>
+      <div className={`mt-1 text-sm text-foreground/85 ${multiline ? 'whitespace-pre-wrap leading-6' : 'font-medium'}`}>{value?.trim() || '—'}</div>
     </div>
   )
 }
 
 /**
- * 功能：展示单个仓库的快照、分析运行、报告、知识卡片与证据明细。
+ * 功能：展示单个仓库的双区域知识工作台，包括左侧上下文和右侧卡片阅读区。
  * 参数/返回：接收 repositoryId；返回仓库详情页。
  * 失败场景：详情、快照、卡片或证据请求失败时展示错误提示，并保留刷新入口。
- * 副作用：发起仓库详情/快照/卡片/evidence 请求，并在选择分析运行时读取 execution 日志尾部。
+ * 副作用：发起仓库详情/快照/卡片/evidence 请求，并允许把分析 Chat 的最新回复同步回知识库。
  */
 export function RepoLibraryRepositoryDetailPage(props: RepoLibraryRepositoryDetailPageProps) {
   const { repositoryId } = props
@@ -105,12 +161,24 @@ export function RepoLibraryRepositoryDetailPage(props: RepoLibraryRepositoryDeta
   const cardLoading = detailCache.cardLoading
   const cardError = detailCache.cardError
   const selectedCard = detailCache.selectedCard
+  const selectedCardSummary = selectedCard
+    ? displaySummary(selectedCard.summary, selectedCard.conclusion, selectedCard.mechanism)
+    : ''
   const evidence = detailCache.evidence
   const reportMarkdown = detailCache.reportMarkdown
 
   const [syncingAnalysisId, setSyncingAnalysisId] = useState<string | null>(null)
-
-  const terminalRef = useRef<TerminalPaneHandle | null>(null)
+  const [reportModalOpen, setReportModalOpen] = useState(false)
+  const [detailReloadToken, setDetailReloadToken] = useState(0)
+  const cardScrollRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return
+    const handler = (e: WheelEvent) => {
+      if (e.deltaY === 0) return
+      e.preventDefault()
+      el.scrollLeft += e.deltaY * 0.3
+    }
+    el.addEventListener('wheel', handler, { passive: false })
+  }, [])
 
   const hasRepositoryCache = useMemo(
     () => repositoriesLoaded || repositories.length > 0,
@@ -163,6 +231,7 @@ export function RepoLibraryRepositoryDetailPage(props: RepoLibraryRepositoryDeta
             ? previousAnalysisId
             : nextDetail.latest_analysis?.analysis_id || analysisRuns[0]?.analysis_id || null,
       })
+      setDetailReloadToken((value) => value + 1)
       markLastViewedRepository(repositoryId)
     } catch (err: unknown) {
       setRepositoryDetailState(repositoryId, {
@@ -214,7 +283,7 @@ export function RepoLibraryRepositoryDetailPage(props: RepoLibraryRepositoryDeta
     return () => {
       cancelled = true
     }
-  }, [daemonUrl, repositoryId, selectedSnapshotId, setRepositoryDetailState])
+  }, [daemonUrl, detailReloadToken, repositoryId, selectedSnapshotId, setRepositoryDetailState])
 
   useEffect(() => {
     let cancelled = false
@@ -238,7 +307,7 @@ export function RepoLibraryRepositoryDetailPage(props: RepoLibraryRepositoryDeta
     return () => {
       cancelled = true
     }
-  }, [daemonUrl, repositoryId, selectedSnapshotId, setRepositoryDetailState])
+  }, [daemonUrl, detailReloadToken, repositoryId, selectedSnapshotId, setRepositoryDetailState])
 
   useEffect(() => {
     if (!selectedCardId) {
@@ -277,7 +346,7 @@ export function RepoLibraryRepositoryDetailPage(props: RepoLibraryRepositoryDeta
     return () => {
       cancelled = true
     }
-  }, [daemonUrl, repositoryId, selectedCardId, setRepositoryDetailState])
+  }, [daemonUrl, detailReloadToken, repositoryId, selectedCardId, setRepositoryDetailState])
 
   const analysisRuns = useMemo(() => detail?.analysis_runs ?? [], [detail?.analysis_runs])
   const repository = detail?.repository ?? null
@@ -314,38 +383,6 @@ export function RepoLibraryRepositoryDetailPage(props: RepoLibraryRepositoryDeta
     [daemonUrl, refresh],
   )
 
-  const loadTailIntoTerminal = useCallback(
-    async (analysis: RepoLibraryAnalysisRun | null) => {
-      const executionId = analysis?.execution_id
-      if (!executionId) {
-        terminalRef.current?.reset('当前分析暂无 execution 日志。\r\n')
-        return
-      }
-
-      terminalRef.current?.reset('正在加载日志…\r\n')
-      try {
-        const text = await fetchExecutionLogTail(daemonUrl, executionId, 200000)
-        terminalRef.current?.reset(text)
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        terminalRef.current?.reset(`日志加载失败：${message}\r\n`)
-      }
-    },
-    [daemonUrl],
-  )
-
-  useEffect(() => {
-    void loadTailIntoTerminal(selectedAnalysis)
-  }, [loadTailIntoTerminal, selectedAnalysis])
-
-  const reportText =
-    reportMarkdown ||
-    selectedSnapshot?.report_markdown ||
-    selectedSnapshot?.report_excerpt ||
-    detail?.report_markdown ||
-    detail?.report_excerpt ||
-    ''
-
   const sidebarContent = (
     <div className="relative min-h-[120px]">
       {repositoriesError && !hasRepositoryCache ? <Alert color="danger" title="加载仓库失败" description={repositoriesError} /> : null}
@@ -377,234 +414,167 @@ export function RepoLibraryRepositoryDetailPage(props: RepoLibraryRepositoryDeta
     </div>
   )
 
+  const reportAvailable = Boolean(reportMarkdown || selectedSnapshot?.report_path)
+  const selectedSnapshotLabel = selectedSnapshot?.resolved_ref || selectedSnapshot?.ref || '未选择快照'
+  const selectedAnalysisLabel = selectedAnalysis?.analysis_id || '未选择分析'
+  const selectedCommitShort = selectedSnapshot?.commit_sha ? selectedSnapshot.commit_sha.slice(0, 10) : '—'
+  const reportContext = selectedSnapshot?.report_context_summary
+  const generatedAtLabel = formatGeneratedAt(reportContext?.generated_at)
+
   return (
-    <RepoLibraryShell
-      title={repository?.full_name || '仓库详情'}
-      headerMeta={
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <span className="truncate">{repository?.repo_url || '查看仓库详情'}</span>
-          {selectedAnalysis ? (
-            <Chip color={analysisStatusColor(selectedAnalysis.status)} variant="flat" size="sm">
-              {formatAnalysisStatus(selectedAnalysis.status)}
-            </Chip>
-          ) : null}
-        </div>
-      }
-      headerActions={
-        <>
-          <Button variant="flat" size="sm" startContent={<FileSearch className="h-4 w-4" />} onPress={goToRepoLibraryPatternSearch}>
-            知识库检索
-          </Button>
-          <Button variant="light" size="sm" startContent={<RefreshCcw className="h-4 w-4" />} onPress={() => void refresh({ force: true })}>
-            刷新详情
-          </Button>
-        </>
-      }
-      sidebarTitle="仓库"
-      sidebarCount={repositories.length}
-      sidebarAction={
-        <Button color="primary" size="sm" className="w-[25%] min-w-[86px] rounded-2xl" startContent={<Plus className="h-4 w-4 shrink-0 stroke-[3]" />} onPress={goToRepoLibraryRepositories}>
-          添加仓库
-        </Button>
-      }
-      sidebarContent={sidebarContent}
-      contentMaxWidthClassName="max-w-[1200px]"
-    >
-      <div className="relative">
-        {repositoriesError && hasRepositoryCache ? <Alert color="danger" title="刷新失败，已保留上次仓库列表" description={repositoriesError} className="mb-4" /> : null}
-        {error && hasDetailCache ? <Alert color="danger" title="刷新详情失败，已保留上次内容" description={error} className="mb-4" /> : null}
-
-        {!hasDetailCache && loading ? (
-          <DetailSkeleton />
-        ) : (
+    <>
+      <RepoLibraryShell
+        title={
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="truncate">{repository?.full_name || '仓库详情'}</div>
+            {selectedAnalysis ? (
+              <Chip color={analysisStatusColor(selectedAnalysis.status)} variant="flat" size="sm">
+                {formatAnalysisStatus(selectedAnalysis.status)}
+              </Chip>
+            ) : null}
+            <span className="text-xs font-normal text-muted-foreground">
+              生成时间：{generatedAtLabel}
+            </span>
+          </div>
+        }
+        headerMeta={
+          <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span className="truncate">{repository?.repo_url || '查看仓库详情'}</span>
+          </div>
+        }
+        headerActions={
           <>
-            <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-              <div className="space-y-4">
-                <div className="rounded-2xl border bg-card p-5 shadow-sm">
-                  <div className="mb-4 flex flex-wrap items-center gap-2">
-                    <div className="text-sm font-semibold">仓库元信息</div>
-                    {repository?.default_branch ? (
-                      <Chip variant="bordered" size="sm">
-                        默认分支 {repository.default_branch}
-                      </Chip>
-                    ) : null}
-                    {typeof repository?.snapshot_count === 'number' ? (
-                      <Chip variant="bordered" size="sm">
-                        快照 {repository.snapshot_count}
-                      </Chip>
-                    ) : null}
-                    {typeof repository?.card_count === 'number' ? (
-                      <Chip variant="bordered" size="sm">
-                        卡片 {repository.card_count}
-                      </Chip>
-                    ) : null}
-                  </div>
+            <Button variant="flat" size="sm" startContent={<ScrollText className="h-4 w-4" />} isDisabled={!reportAvailable} onPress={() => setReportModalOpen(true)}>
+              查看报告
+            </Button>
+            <Button variant="flat" size="sm" startContent={<FileSearch className="h-4 w-4" />} onPress={() => goToRepoLibraryPatternSearch()}>
+              知识库检索
+            </Button>
+            <Button variant="light" size="sm" startContent={<RefreshCcw className="h-4 w-4" />} onPress={() => void refresh({ force: true })}>
+              刷新详情
+            </Button>
+          </>
+        }
+        sidebarTitle="仓库"
+        sidebarCount={repositories.length}
+        sidebarAction={
+          <Button color="primary" size="sm" className="w-[25%] min-w-[86px] rounded-2xl" startContent={<Plus className="h-4 w-4 shrink-0 stroke-[3]" />} onPress={goToRepoLibraryRepositories}>
+            添加仓库
+          </Button>
+        }
+        sidebarContent={sidebarContent}
+        contentMaxWidthClassName="max-w-[1680px]"
+        contentPaddingClassName="gap-4 pb-4 pl-2 pr-4 pt-4 md:gap-4 md:pb-5 md:pl-3 md:pr-5 md:pt-5"
+      >
+        <div className="relative">
+          {repositoriesError && hasRepositoryCache ? <Alert color="danger" title="刷新失败，已保留上次仓库列表" description={repositoriesError} className="mb-4" /> : null}
+          {error && hasDetailCache ? <Alert color="danger" title="刷新详情失败，已保留上次内容" description={error} className="mb-4" /> : null}
 
-                  <div className="grid gap-3 text-sm md:grid-cols-2">
-                    <div className="rounded-xl border bg-muted/20 p-3">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground/80">仓库地址</div>
-                      <div className="mt-1 break-all font-medium">{repository?.repo_url || '—'}</div>
-                    </div>
-                    <div className="rounded-xl border bg-muted/20 p-3">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground/80">最近活跃</div>
-                      <div className="mt-1 font-medium">
-                        {repository?.updated_at ? formatRelativeTime(repository.updated_at) : '—'}
+          {!hasDetailCache && loading ? (
+            <DetailSkeleton />
+          ) : (
+            <div className="space-y-4">
+              <section className="grid gap-4 xl:h-[calc(100vh-6.25rem)] xl:min-h-[680px] xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] xl:overflow-hidden">
+                <div className="grid gap-4 xl:min-h-0 xl:grid-rows-[auto_minmax(0,1fr)]">
+                  <div className="rounded-[28px] border border-default-200/80 bg-gradient-to-br from-background to-default-50/65 p-4 shadow-sm md:p-5">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="min-w-0">
+                        <div className="mb-1.5 pl-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground/75">快照</div>
+                        <Select
+                          aria-label="选择快照"
+                          size="sm"
+                          variant="bordered"
+                          className="w-full"
+                          selectedKeys={selectedSnapshotId ? new Set([selectedSnapshotId]) : new Set([])}
+                          isDisabled={snapshots.length === 0}
+                          disallowEmptySelection
+                          onSelectionChange={(keys) => {
+                            const next = selectionToString(keys)
+                            if (!next) return
+                            setRepositoryDetailState(repositoryId, { selectedSnapshotId: next })
+                          }}
+                        >
+                          {snapshots.map((snapshot) => (
+                            <SelectItem key={snapshot.snapshot_id} textValue={snapshot.resolved_ref || snapshot.ref || snapshot.snapshot_id}>
+                              {(snapshot.resolved_ref || snapshot.ref || snapshot.snapshot_id) + ' · ' + formatRelativeTime(snapshot.created_at || snapshot.updated_at || 0)}
+                            </SelectItem>
+                          ))}
+                        </Select>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="mb-1.5 pl-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground/75">分析运行</div>
+                        <Select
+                          aria-label="选择分析运行"
+                          size="sm"
+                          variant="bordered"
+                          className="w-full"
+                          selectedKeys={selectedAnalysisId ? new Set([selectedAnalysisId]) : new Set([])}
+                          isDisabled={analysisRuns.length === 0}
+                          disallowEmptySelection
+                          onSelectionChange={(keys) => {
+                            const next = selectionToString(keys)
+                            if (!next) return
+                            setRepositoryDetailState(repositoryId, { selectedAnalysisId: next })
+                          }}
+                        >
+                          {analysisRuns.map((analysis) => (
+                            <SelectItem key={analysis.analysis_id} textValue={analysis.analysis_id}>
+                              {analysis.analysis_id + ' · ' + formatAnalysisStatus(analysis.status)}
+                            </SelectItem>
+                          ))}
+                        </Select>
                       </div>
                     </div>
-                    <div className="rounded-xl border bg-muted/20 p-3">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground/80">最新 Ref</div>
-                      <div className="mt-1 font-medium">{selectedSnapshot?.resolved_ref || selectedSnapshot?.ref || '—'}</div>
-                    </div>
-                    <div className="rounded-xl border bg-muted/20 p-3">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground/80">最新 Commit</div>
-                      <code className="mt-1 block font-medium">{selectedSnapshot?.commit_sha || '—'}</code>
-                    </div>
-                  </div>
-                </div>
 
-                <div className="rounded-2xl border bg-card p-5 shadow-sm">
-                  <div className="mb-4 flex flex-wrap items-center gap-2">
-                    <ScrollText className="h-4 w-4" />
-                    <div className="text-sm font-semibold">报告</div>
-                    {selectedSnapshot?.report_url ? (
-                      <Button
-                        variant="light"
-                        size="sm"
-                        onPress={() => window.open(selectedSnapshot.report_url, '_blank', 'noopener,noreferrer')}
-                      >
-                        打开完整报告
-                      </Button>
-                    ) : null}
-                  </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Chip variant="flat" size="sm" className="bg-default-100/85">
+                        {selectedSnapshotLabel}
+                      </Chip>
+                      <Chip variant="bordered" size="sm">
+                        Commit {selectedCommitShort}
+                      </Chip>
+                      {selectedAnalysis ? (
+                        <Chip color={analysisStatusColor(selectedAnalysis.status)} variant="flat" size="sm">
+                          {formatAnalysisStatus(selectedAnalysis.status)}
+                        </Chip>
+                      ) : null}
+                      <Chip variant="bordered" size="sm" className="max-w-full">
+                        {selectedAnalysisLabel}
+                      </Chip>
+                    </div>
 
-                  {reportText ? (
-                    <div className="chat-markdown max-h-80 overflow-auto rounded-xl border bg-muted/20 p-4 text-sm leading-7">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{reportText}</ReactMarkdown>
-                    </div>
-                  ) : selectedSnapshot?.report_path ? (
-                    <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
-                      <div>当前快照已生成报告文件。</div>
-                      <code className="mt-2 block break-all text-xs text-foreground">{selectedSnapshot.report_path}</code>
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
-                      当前快照暂无可展示的报告正文，后端补齐 `report_markdown` / `report_excerpt` 后会直接显示在这里。
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="rounded-2xl border bg-card p-5 shadow-sm">
-                  <div className="mb-3 text-sm font-semibold">快照</div>
-                  {snapshots.length === 0 ? (
-                    <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-                      该仓库还没有快照。
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {snapshots.map((snapshot) => {
-                        const active = snapshot.snapshot_id === selectedSnapshotId
-                        return (
-                          <button
-                            key={snapshot.snapshot_id}
-                            type="button"
-                            className={`w-full rounded-xl border p-3 text-left transition ${
-                              active ? 'border-primary bg-primary/5' : 'bg-muted/10 hover:border-primary/40'
-                            }`}
-                            onClick={() => setRepositoryDetailState(repositoryId, { selectedSnapshotId: snapshot.snapshot_id })}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="font-medium">
-                                {snapshot.resolved_ref || snapshot.ref || snapshot.snapshot_id}
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                {formatRelativeTime(snapshot.created_at || snapshot.updated_at || 0)}
-                              </div>
-                            </div>
-                            <code className="mt-2 block text-xs text-muted-foreground">{snapshot.commit_sha || '未记录 commit'}</code>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                <div className="rounded-2xl border bg-card p-5 shadow-sm">
-                  <div className="mb-3 text-sm font-semibold">分析运行</div>
-                  {analysisRuns.length === 0 ? (
-                    <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-                      当前仓库暂无分析运行记录。
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {analysisRuns.map((analysis) => {
-                        const active = analysis.analysis_id === selectedAnalysisId
-                        return (
-                          <button
-                            key={analysis.analysis_id}
-                            type="button"
-                            className={`w-full rounded-xl border p-3 text-left transition ${
-                              active ? 'border-primary bg-primary/5' : 'bg-muted/10 hover:border-primary/40'
-                            }`}
-                            onClick={() => setRepositoryDetailState(repositoryId, { selectedAnalysisId: analysis.analysis_id })}
-                          >
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="font-medium">{analysis.analysis_id}</div>
-                              <Chip color={analysisStatusColor(analysis.status)} variant="flat" size="sm">
-                                {formatAnalysisStatus(analysis.status)}
-                              </Chip>
-                            </div>
-                            <div className="mt-2 text-xs text-muted-foreground">
-                              Execution: {analysis.execution_id || '待分配'}
-                            </div>
-                            {analysis.chat_session_id ? (
-                              <div className="mt-1 truncate text-xs text-muted-foreground">
-                                Chat: {analysis.chat_session_id}
-                              </div>
-                            ) : null}
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {formatRelativeTime(analysis.updated_at || analysis.created_at || 0)}
-                            </div>
-                            {analysis.failure_message ? (
-                              <div className="mt-2 text-xs text-danger">{analysis.failure_message}</div>
-                            ) : null}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                  {selectedAnalysis ? (
-                    <div className="mt-3 rounded-xl border bg-muted/20 p-3">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="space-y-2">
-                          <div>
-                            <div className="text-sm font-medium">关联 Chat</div>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {selectedAnalysis.chat_session_id
-                                ? '可直接打开分析会话，或将最新 assistant 回复同步回 Repo Library。'
-                                : '当前分析尚未关联可打开的 Chat 会话。'}
-                            </div>
-                          </div>
-                          <code className="block break-all text-xs text-foreground">
-                            {selectedAnalysis.chat_session_id || '—'}
-                          </code>
-                          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+                    {selectedAnalysis ? (
+                      <>
+                        <div className="mt-3 rounded-[24px] border border-default-200/75 bg-background/75 px-4 py-3">
+                          <div className="grid gap-x-6 gap-y-2 text-xs text-muted-foreground md:grid-cols-2">
                             <div>
-                              <div className="text-muted-foreground/80">CLI 工具</div>
-                              <div className="text-foreground">{selectedAnalysis.cli_tool_id || '—'}</div>
+                              <span className="uppercase tracking-[0.14em] text-muted-foreground/70">运行时</span>
+                              <span className="ml-2 text-foreground/90">{selectedAnalysis.runtime_kind || '—'}</span>
                             </div>
                             <div>
-                              <div className="text-muted-foreground/80">模型</div>
-                              <div className="break-all text-foreground">{selectedAnalysis.model_id || '—'}</div>
+                              <span className="uppercase tracking-[0.14em] text-muted-foreground/70">CLI 工具</span>
+                              <span className="ml-2 text-foreground/90">{selectedAnalysis.cli_tool_id || '—'}</span>
+                            </div>
+                            <div className="md:col-span-2">
+                              <span className="uppercase tracking-[0.14em] text-muted-foreground/70">Chat</span>
+                              <span className="ml-2 break-all text-foreground/90">{selectedAnalysis.chat_session_id || '—'}</span>
                             </div>
                             <div>
-                              <div className="text-muted-foreground/80">运行时</div>
-                              <div className="text-foreground">{selectedAnalysis.runtime_kind || '—'}</div>
+                              <span className="uppercase tracking-[0.14em] text-muted-foreground/70">模型</span>
+                              <span className="ml-2 break-all text-foreground/90">{selectedAnalysis.model_id || '—'}</span>
+                            </div>
+                            <div>
+                              <span className="uppercase tracking-[0.14em] text-muted-foreground/70">更新时间</span>
+                              <span className="ml-2 text-foreground/90">{formatRelativeTime(selectedAnalysis.updated_at || selectedAnalysis.created_at || 0)}</span>
                             </div>
                           </div>
                         </div>
-                        <div className="flex flex-wrap gap-2">
+
+                        {selectedAnalysis.failure_message ? (
+                          <Alert color="danger" title="分析失败" description={selectedAnalysis.failure_message} className="mt-3" />
+                        ) : null}
+
+                        <div className="mt-3 flex flex-wrap gap-2">
                           <Button
                             variant="flat"
                             size="sm"
@@ -623,167 +593,211 @@ export function RepoLibraryRepositoryDetailPage(props: RepoLibraryRepositoryDeta
                             isLoading={syncingAnalysisId === selectedAnalysis.analysis_id}
                             onPress={() => void onSyncLatestChatReply(selectedAnalysis)}
                           >
-                            同步最新 Chat 回复
+                            同步最新回复
                           </Button>
                         </div>
+                      </>
+                    ) : (
+                      <div className="mt-4 rounded-[22px] border border-dashed border-default-300/80 px-4 py-5 text-sm text-muted-foreground">
+                        当前仓库暂无可选分析运行。
                       </div>
+                    )}
+                  </div>
+
+                  <div className="min-h-0 rounded-[28px] border border-default-200/70 bg-background/90 p-4 shadow-sm md:p-5 xl:flex xl:flex-col">
+                    <div className="thin-scrollbar min-h-0 space-y-3 overflow-x-hidden xl:flex-1 xl:overflow-y-auto xl:pr-1">
+                      <ContextField label="技术栈总览" value={reportContext?.stack_overview} multiline />
+                      <ContextField label="后端" value={reportContext?.backend_summary} multiline />
+                      <ContextField label="前端" value={reportContext?.frontend_summary} multiline />
+                      <ContextField label="其它模块" value={reportContext?.other_modules_summary} multiline />
                     </div>
-                  ) : null}
-                </div>
-              </div>
-            </section>
-
-            <section className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-              <div className="rounded-2xl border bg-card p-5 shadow-sm">
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <div className="text-sm font-semibold">知识卡片</div>
-                  {selectedSnapshot ? (
-                    <Chip variant="bordered" size="sm">
-                      当前快照 {selectedSnapshot.resolved_ref || selectedSnapshot.ref || selectedSnapshot.snapshot_id}
-                    </Chip>
-                  ) : null}
+                  </div>
                 </div>
 
-                {cardsError ? (
-                  <Alert color="danger" title="加载卡片失败" description={cardsError} />
-                ) : cardsLoading && cards.length === 0 ? (
-                  <div className="space-y-2">
-                    <Skeleton className="h-24 w-full rounded-xl" />
-                    <Skeleton className="h-24 w-full rounded-xl" />
-                  </div>
-                ) : cards.length === 0 ? (
-                  <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-                    当前筛选条件下暂无知识卡片。
-                  </div>
-                ) : (
-                  <div className="relative space-y-2">
-                    {cards.map((card: RepoLibraryCard) => {
-                      const active = card.card_id === selectedCardId
-                      return (
-                        <button
-                          key={card.card_id}
-                          type="button"
-                          className={`w-full rounded-xl border p-3 text-left transition ${
-                            active ? 'border-primary bg-primary/5' : 'bg-muted/10 hover:border-primary/40'
-                          }`}
-                          onClick={() => setRepositoryDetailState(repositoryId, { selectedCardId: card.card_id })}
-                        >
-                          <div className="flex flex-wrap items-center gap-2">
-                            <div className="font-medium">{card.title || card.card_id}</div>
-                            <Chip variant="flat" size="sm">
-                              {formatCardType(card.card_type)}
-                            </Chip>
-                          </div>
-                          <div className="mt-2 text-sm text-muted-foreground">{card.summary || '暂无摘要'}</div>
-                        </button>
-                      )
-                    })}
-                    <LoadingVeil visible={cardsLoading && cards.length > 0} compact label="正在刷新卡片列表…" />
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-2xl border bg-card p-5 shadow-sm">
-                <div className="mb-3 text-sm font-semibold">卡片详情与证据</div>
-                {cardError ? (
-                  <Alert color="danger" title="加载卡片详情失败" description={cardError} />
-                ) : cardLoading && !selectedCard ? (
-                  <div className="space-y-2">
-                    <Skeleton className="h-24 w-full rounded-xl" />
-                    <Skeleton className="h-24 w-full rounded-xl" />
-                  </div>
-                ) : selectedCard ? (
-                  <div className="relative space-y-4">
-                    <div className="rounded-xl border bg-muted/20 p-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-base font-semibold">{selectedCard.title}</div>
-                        <Chip variant="flat" size="sm">
-                          {formatCardType(selectedCard.card_type)}
+                <div className="min-h-0 rounded-[32px] border border-default-200/85 bg-background/95 shadow-[0_28px_72px_-42px_rgba(15,23,42,0.35)] xl:flex xl:flex-col xl:overflow-hidden">
+                  <div className="shrink-0 px-4 pb-4 pt-4 md:px-5 md:pb-5 md:pt-5">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold">知识卡片</div>
+                      {selectedSnapshot ? (
+                        <Chip variant="bordered" size="sm">
+                          {cards.length} 张
                         </Chip>
-                        {typeof selectedCard.confidence === 'number' ? (
-                          <Chip variant="bordered" size="sm">
-                            置信度 {(selectedCard.confidence * 100).toFixed(0)}%
-                          </Chip>
-                        ) : null}
-                      </div>
-                      <div className="mt-3 whitespace-pre-wrap text-sm text-muted-foreground">
-                        {selectedCard.detail || selectedCard.summary || '暂无详细说明'}
-                      </div>
-                      {selectedCard.tags && selectedCard.tags.length > 0 ? (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {selectedCard.tags.map((tag) => (
-                            <Chip key={tag} variant="bordered" size="sm">
-                              {tag}
-                            </Chip>
-                          ))}
-                        </div>
                       ) : null}
                     </div>
 
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium">Evidence</div>
-                      {evidence.length === 0 ? (
-                        <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-                          当前卡片暂无独立 evidence 记录。
+                    {cardsError ? (
+                      <Alert color="danger" title="加载卡片失败" description={cardsError} />
+                    ) : cardsLoading && cards.length === 0 ? (
+                      <div className="flex gap-3 overflow-hidden">
+                        <Skeleton className="h-[88px] min-w-[220px] rounded-[22px]" />
+                        <Skeleton className="h-[88px] min-w-[220px] rounded-[22px]" />
+                        <Skeleton className="h-[88px] min-w-[220px] rounded-[22px]" />
+                      </div>
+                    ) : cards.length === 0 ? (
+                      <div className="rounded-[22px] border border-dashed p-4 text-sm text-muted-foreground">当前筛选条件下暂无知识卡片。</div>
+                    ) : (
+                      <div className="relative">
+                        <div
+                          ref={cardScrollRef}
+                          className="grid grid-flow-col auto-cols-[220px] gap-3 overflow-x-auto pb-[5px] [&::-webkit-scrollbar]:h-[3px] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-default-200/60 [&::-webkit-scrollbar-track]:bg-transparent"
+                        >
+                          {cards.map((card: RepoLibraryCard) => {
+                            const active = card.card_id === selectedCardId
+                            return (
+                              <button
+                                key={card.card_id}
+                                type="button"
+                                className={`flex min-h-[88px] flex-col justify-between rounded-[22px] border px-4 py-3 text-left transition ${
+                                  active
+                                    ? 'border-primary/40 bg-background shadow-[0_18px_34px_-28px_rgba(14,165,233,0.65)] ring-1 ring-primary/20'
+                                    : 'border-default-200/70 bg-background/70 hover:border-default-300 hover:bg-background'
+                                }`}
+                                onClick={() => setRepositoryDetailState(repositoryId, { selectedCardId: card.card_id })}
+                              >
+                                <div className="line-clamp-2 text-[15px] font-medium leading-6 text-foreground/95">{card.title || card.card_id}</div>
+                                <div className="flex items-center justify-between gap-2">
+                                  <Chip variant="flat" size="sm">
+                                    {formatCardType(card.card_type)}
+                                  </Chip>
+                                  {active ? <span className="text-[11px] font-medium text-primary">当前</span> : null}
+                                </div>
+                              </button>
+                            )
+                          })}
                         </div>
-                      ) : (
-                        evidence.map((item: RepoLibraryCardEvidence) => (
-                          <div key={item.evidence_id} className="rounded-xl border bg-muted/20 p-4">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <code className="text-xs">{item.source_path}</code>
-                              {item.label ? <Chip variant="flat" size="sm">{item.label}</Chip> : null}
-                              {(typeof item.start_line === 'number' || typeof item.end_line === 'number') ? (
-                                <Chip variant="bordered" size="sm">
-                                  {typeof item.start_line === 'number' ? item.start_line : '?'}
-                                  {typeof item.end_line === 'number' && item.end_line !== item.start_line ? `-${item.end_line}` : ''}
-                                </Chip>
-                              ) : null}
-                            </div>
-                            {item.excerpt ? (
-                              <pre className="mt-3 whitespace-pre-wrap rounded-lg border bg-background p-3 text-xs leading-6">
-                                {item.excerpt}
-                              </pre>
+                        <LoadingVeil visible={cardsLoading && cards.length > 0} compact label="正在刷新卡片列表…" />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="min-h-0 border-t border-default-200/70 bg-default-50/25 px-4 pb-4 pt-4 md:px-5 md:pb-5 xl:flex-1 xl:overflow-hidden">
+                    {cardError ? (
+                      <Alert color="danger" title="加载卡片详情失败" description={cardError} />
+                    ) : cardLoading && !selectedCard ? (
+                      <div className="space-y-2">
+                        <Skeleton className="h-24 w-full rounded-xl" />
+                        <Skeleton className="h-24 w-full rounded-xl" />
+                      </div>
+                    ) : selectedCard ? (
+                      <div className="thin-scrollbar relative space-y-4 xl:h-full xl:overflow-y-auto xl:pr-1">
+                        <div className="rounded-[26px] border border-default-200/70 bg-default-50/45 p-5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="text-xl font-semibold leading-8">{selectedCard.title}</div>
+                            {typeof selectedCard.confidence === 'number' ? (
+                              <Chip variant="bordered" size="sm">
+                                置信度 {(selectedCard.confidence * 100).toFixed(0)}%
+                              </Chip>
+                            ) : null}
+                            {selectedCard.section_title ? (
+                              <Chip variant="flat" size="sm">
+                                {selectedCard.section_title}
+                              </Chip>
                             ) : null}
                           </div>
-                        ))
-                      )}
-                    </div>
-                    <LoadingVeil visible={cardLoading && Boolean(selectedCard)} compact label="正在刷新卡片详情…" />
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
-                    选择左侧卡片后，这里会显示摘要、详细说明和 evidence 链接。
-                  </div>
-                )}
-              </div>
-            </section>
+                          {selectedCard.conclusion ? (
+                            <div className="mt-5 rounded-[22px] border border-primary/20 bg-primary/5 px-4 py-3.5 text-[15px] font-medium leading-7 text-foreground">
+                              {selectedCard.conclusion}
+                            </div>
+                          ) : null}
+                          {selectedCardSummary ? (
+                            <div className="mt-4 whitespace-pre-wrap text-sm leading-7 text-muted-foreground">{selectedCardSummary}</div>
+                          ) : null}
+                          {selectedCard.mechanism ? (
+                            <div className="mt-5 space-y-2 border-t border-default-200/70 pt-4">
+                              <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground/75">实现机制</div>
+                              <div className="whitespace-pre-wrap text-sm leading-7 text-foreground/85">{selectedCard.mechanism}</div>
+                            </div>
+                          ) : !selectedCardSummary && !selectedCard.conclusion ? (
+                            <div className="mt-4 text-sm text-muted-foreground">暂无详细说明</div>
+                          ) : null}
+                          {selectedCard.tags && selectedCard.tags.length > 0 ? (
+                            <div className="mt-5 flex flex-wrap gap-2">
+                              {selectedCard.tags.map((tag) => (
+                                <Chip key={tag} variant="bordered" size="sm">
+                                  {tag}
+                                </Chip>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
 
-            <section className="mt-4 rounded-2xl border bg-card p-5 shadow-sm">
-              <div className="mb-3 text-sm font-semibold">分析日志</div>
-              {selectedAnalysis?.execution_id ? (
-                <div className="mb-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <code>{selectedAnalysis.execution_id}</code>
-                  <Button
-                    variant="light"
-                    size="sm"
-                    onPress={() => {
-                      void loadTailIntoTerminal(selectedAnalysis)
-                      toast({ title: '已刷新日志', description: selectedAnalysis.execution_id })
-                    }}
-                  >
-                    刷新日志
-                  </Button>
+                        <div className="rounded-[26px] border border-default-200/65 bg-default-50/30 p-4">
+                          <div className="mb-3 flex items-start justify-between gap-2">
+                            <div>
+                              <div className="text-sm font-medium">实现证据</div>
+                              <div className="mt-1 text-xs text-muted-foreground">支撑当前卡片结论的代码定位与摘录。</div>
+                            </div>
+                            <Chip variant="flat" size="sm">
+                              {evidence.length}
+                            </Chip>
+                          </div>
+                          {evidence.length === 0 ? (
+                            <div className="rounded-2xl border border-dashed p-4 text-sm text-muted-foreground">当前卡片暂无独立 evidence 记录。</div>
+                          ) : (
+                            <div className="space-y-3 overflow-x-hidden">
+                              {evidence.map((item: RepoLibraryCardEvidence) => (
+                                <div key={item.evidence_id} className="rounded-[20px] border border-default-200/65 bg-background/85 p-3.5">
+                                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                                    <code className="rounded-full bg-default-100/80 px-2.5 py-1 text-[11px] text-foreground/80">{item.source_path}</code>
+                                    {item.label ? <Chip variant="flat" size="sm">{item.label}</Chip> : null}
+                                    {typeof item.start_line === 'number' || typeof item.end_line === 'number' ? (
+                                      <Chip variant="bordered" size="sm">
+                                        {typeof item.start_line === 'number' ? item.start_line : '?'}
+                                        {typeof item.end_line === 'number' && item.end_line !== item.start_line ? `-${item.end_line}` : ''}
+                                      </Chip>
+                                    ) : null}
+                                  </div>
+                                  {item.excerpt ? (
+                                    <pre className="mt-3 whitespace-pre-wrap rounded-[18px] bg-default-100/45 px-3 py-3 text-xs leading-6 text-foreground/85">
+                                      {item.excerpt}
+                                    </pre>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <LoadingVeil visible={cardLoading && Boolean(selectedCard)} compact label="正在刷新卡片详情…" />
+                      </div>
+                    ) : (
+                      <div className="flex h-full min-h-[240px] items-center">
+                        <div className="w-full rounded-[26px] border border-dashed border-default-300/80 bg-default-50/25 p-8 text-sm text-muted-foreground">
+                          先在上方选择一张知识卡片，这里会显示完整结论、实现机制和实现证据。
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              ) : null}
-              <div className="h-[420px] overflow-hidden rounded-xl border bg-black">
-                <TerminalPane ref={terminalRef} />
-              </div>
-            </section>
-          </>
-        )}
+              </section>
+            </div>
+          )}
 
-        <LoadingVeil visible={loading && hasDetailCache} label="正在刷新仓库详情…" />
-      </div>
-    </RepoLibraryShell>
+          <LoadingVeil visible={loading && hasDetailCache} label="正在刷新仓库详情…" />
+        </div>
+      </RepoLibraryShell>
+
+      <Modal isOpen={reportModalOpen} onOpenChange={setReportModalOpen} size="5xl" scrollBehavior="inside">
+        <ModalContent className="h-[85vh] min-h-0 overflow-hidden">
+          <ModalHeader className="flex items-center gap-2">
+            <ScrollText className="h-4 w-4" />
+            查看报告
+          </ModalHeader>
+          <ModalBody className="min-h-0 overflow-y-auto">
+            {reportMarkdown ? (
+              <div className="chat-markdown rounded-xl border bg-muted/20 p-4 text-sm leading-7">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{reportMarkdown}</ReactMarkdown>
+              </div>
+            ) : selectedSnapshot?.report_path ? (
+              <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
+                <div>当前快照已生成报告文件，但尚未加载到内存。</div>
+                <code className="mt-2 block break-all text-xs text-foreground">{selectedSnapshot.report_path}</code>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">当前快照暂无可展示的报告内容。</div>
+            )}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
+    </>
   )
 }

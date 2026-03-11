@@ -17,6 +17,10 @@ module.exports = {
       },
     },
     extend: {
+      animation: {
+        gradient: 'gradient 8s linear infinite',
+        shine: 'shine var(--duration) infinite linear',
+      },
       colors: {
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
@@ -56,6 +60,24 @@ module.exports = {
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
+      },
+      keyframes: {
+        gradient: {
+          to: {
+            backgroundPosition: 'var(--bg-size, 300%) 0',
+          },
+        },
+        shine: {
+          '0%': {
+            backgroundPosition: '0% 0%',
+          },
+          '50%': {
+            backgroundPosition: '100% 100%',
+          },
+          to: {
+            backgroundPosition: '0% 0%',
+          },
+        },
       },
     },
   },
