@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"vibe-tree/backend/internal/chat"
+	"vibe-tree/backend/internal/codexhistory"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/expert"
 	iflowcli "vibe-tree/backend/internal/iflow"
@@ -30,6 +31,7 @@ type Deps struct {
 	Store         *store.Store
 	Experts       *expert.Registry
 	Chat          *chat.Manager
+	CodexHistory  *codexhistory.Service
 	MCPGateway    *mcpgateway.Manager
 	Orchestration *orchestration.Manager
 	RepoLibrary   *repolib.Service
@@ -87,6 +89,8 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.POST("/chat/sessions/:id/turns", postChatTurnHandler(deps))
 	v1.POST("/chat/sessions/:id/compact", compactChatSessionHandler(deps))
 	v1.POST("/chat/sessions/:id/fork", forkChatSessionHandler(deps))
+	v1.GET("/codex-history/threads", listCodexHistoryThreadsHandler(deps))
+	v1.POST("/codex-history/import", importCodexHistoryHandler(deps))
 
 	v1.GET("/orchestrations", listOrchestrationsHandler(deps))
 	v1.POST("/orchestrations", createOrchestrationHandler(deps))

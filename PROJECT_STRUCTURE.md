@@ -1,6 +1,6 @@
 # vibe-tree 项目结构与功能定位索引
 
-> 更新时间：2026-03-10
+> 更新时间：2026-03-11
 > 说明：本文档用于开发期快速定位功能文件。修改前先读本文件，再做定向检索。
 
 ## 1. 项目概览
@@ -67,7 +67,8 @@
 | `ui/src/stores/orchestrationUIStore.ts` | Orchestrations 跨路由 UI 缓存：保留最近编排列表与详情快照，避免切换时闪空 |
 | `backend/cmd/vibe-tree-daemon/main.go`     | daemon 进程入口，负责加载配置、启动 HTTP Server、处理优雅退出                                                                         |
 | `backend/internal/server/server.go`        | Gin Engine 装配：恢复中间件、请求日志、dev CORS，并挂载 `internal/api` 路由；可选挂载 UI 静态资源（`ui/dist` 或 `VIBE_TREE_UI_DIST`） |
-| `backend/internal/api/api.go`              | HTTP/WS handlers：health、workflow CRUD、execution start/log/cancel、WebSocket 升级入口                                               |
+| `backend/internal/api/api.go`              | HTTP/WS handlers：health、workflow CRUD、execution start/log/cancel、WebSocket 升级入口，并集中注册 chat / codex-history 等子路由     |
+| `backend/internal/api/codex_history.go`    | Codex 历史导入 API：列出 `~/.codex` 线程与按 thread 批量导入（`/api/v1/codex-history/*`）                                            |
 | `backend/internal/api/orchestrations.go`   | Orchestration HTTP handlers：create/list/detail/cancel 与 agent-run retry                                                              |
 | `backend/internal/api/chat.go`             | Chat Session API：会话创建/列表/消息查询/turn timeline 快照读取/多轮发送/附件上传/附件内容预览（JSON + multipart）/手动压缩/分叉/归档（`/api/v1/chat/*`） |
 | `backend/internal/executionflow/runtime.go` | Execution 共享 helper：统一 execution 启动记录、超时上下文与终态摘要/错误信息                                                         |
@@ -91,6 +92,7 @@
 | `backend/internal/execution/manager.go`    | Execution 管理：启动/取消、日志落盘、WS 推送 `execution.*`/`node.log`                                                                 |
 | `backend/internal/orchestration/manager.go` | Orchestration 管理：goal 拆分首轮 agent runs、并发调度 queued agent run、cancel/retry/synthesis 收敛                                 |
 | `backend/internal/chat/manager.go`         | Chat 管理：多轮会话、provider anchor（OpenAI/Anthropic）、CLI 原生 session resume、Codex/Claude/iFlow/OpenCode 流式事件解析、附件持久化接入与 WS `chat.*` 推送                |
+| `backend/internal/codexhistory/service.go` | Codex CLI 历史服务：扫描 `~/.codex/state_*.sqlite`、解析可读标题、读取 rollout JSONL 并组装可导入 transcript/timeline |
 | `backend/internal/chat/timeline_persistence.go` | Chat timeline 持久化桥接：把 turn 启动、结构化事件、thinking 翻译与完成态回写到 `chat_turns/chat_turn_items` |
 | `backend/internal/chat/codex_appserver.go` | Codex Chat app-server 客户端：JSON-RPC 握手、`thread/start|resume`、细粒度 delta 映射、结构化 `chat.turn.event` 广播、token usage 与 artifact 写入             |
 | `backend/internal/chat/codex_turn_feed.go` | Codex turn feed 归一化：兼容 `item/*` 与 `codex/event/*`，把 answer/thinking/tool/plan/question/system 分层成结构化聊天事件 |
@@ -118,7 +120,8 @@
 | `backend/internal/ws/hub.go`               | WebSocket hub：连接管理与广播（配合 log tail 断线补齐）                                                                               |
 | `backend/internal/store/sqlite.go`         | SQLite state DB 打开与 pragma 初始化（WAL/busy_timeout/foreign_keys）                                                                 |
 | `backend/internal/store/migrate.go`        | SQLite migrations（使用 `PRAGMA user_version` 管理 schema 版本；含 chat attachments 与 expert builder sessions）                     |
-| `backend/internal/store/chat.go`           | Chat 存储：chat sessions/messages/attachments/anchors/compactions 的 SQLite CRUD + hydration                                          |
+| `backend/internal/store/chat.go`           | Chat 存储：chat sessions/messages/attachments/anchors/compactions 的 SQLite CRUD + hydration；消息读取按 `turn DESC, created_at DESC` 归并 |
+| `backend/internal/store/chat_import.go`    | Chat 历史导入 helper：按显式 turn 批量写入 imported session/messages/turns/items，并基于 CLI session 做幂等判断 |
 | `backend/internal/store/chat_turns.go`     | Chat turn timeline 存储：turn/item 创建、增量 upsert、翻译状态回写、完成态收敛与 session 级恢复查询 |
 | `backend/internal/store/orchestrations.go` | Orchestration 存储：SQLite orchestration/round/agent_run/synthesis/artifact CRUD 与详情查询                                           |
 | `backend/internal/store/orchestration_executions.go` | Agent-run execution 存储：agent_run_executions 落库、终态收敛、synthesis 生成与 retry/cancel 支撑                        |
@@ -141,7 +144,8 @@
 | `ui/src/app/components/OrchestrationsShell.tsx` | Orchestrations 共享壳适配层：把最近编排侧栏、页头与内容通过 portal 挂载到 `WorkspaceShell` |
 | `ui/src/stores/orchestrationUIStore.ts` | Orchestrations 跨路由 UI 缓存：保留最近编排列表与详情快照，避免页面切换时闪空 |
 | `ui/src/app/pages/OrchestrationDetailPage.tsx` | Orchestration 详情页：按 round 展示并行 agent 卡片、详情面板、日志、artifact、continue/retry/cancel 控制                    |
-| `ui/src/app/pages/ChatSessionsPage.tsx`    | Chat 会话页：会话列表、结构化 turn feed 渲染、消息流式渲染、发送消息/上传附件、拖拽上传、附件预览、手动压缩/分叉/归档，以及新建/当前会话的 MCP 选择与保存 |
+| `ui/src/app/pages/ChatSessionsPage.tsx`    | Chat 会话页：会话列表、结构化 turn feed 渲染、消息流式渲染、发送消息/上传附件、拖拽上传、附件预览、手动压缩/分叉/归档，以及 Codex 历史导入入口与新建/当前会话的 MCP 选择与保存 |
+| `ui/src/app/components/chat/CodexHistoryImportDialog.tsx` | Codex 历史导入弹窗：读取线程列表、搜索过滤、批量选择导入，并在 UI 中展示解析后的可读标题 |
 | `ui/src/app/components/chat/ChatTurnFeed.tsx` | Chat turn feed 组件：按 thinking/tool/plan/question/progress/answer 分层渲染 Codex 运行时条目 |
 | `ui/src/lib/chatTurnFeed.ts`                 | Chat turn feed 类型与 reducer：前端运行时结构化事件应用、thinking 翻译合并与 completed feed 收敛 |
 | `ui/src/app/components/AttachmentPreviewModal.tsx` | Chat 附件预览弹窗：图片/PDF 预览、Markdown 渲染、代码高亮与纯文本展示                                                              |
@@ -158,7 +162,7 @@
 | `.iflow/settings.json`, `.iflow/hooks/session_start.sh`                    | iFlow 项目级默认配置：声明上下文文件名，使 CLI 优先读取仓库内 `AGENTS.md`                                                              |
 | `scripts/agent-runtimes/iflow_exec.sh`     | iFlow CLI wrapper：桥接 `--prompt/--resume/--output-file/--yolo` 与标准 artifact/session contract                                      |
 | `scripts/agent-runtimes/opencode_exec.sh`  | OpenCode CLI wrapper：桥接 `opencode run --format json/--session/--model provider/model`、临时 XDG config 注入与标准 artifact/session contract |
-| `ui/src/lib/daemon.ts`                     | daemon URL/WS URL 解析与 health/workflow/execution/chat attachment/chat turns API 封装                                                 |
+| `ui/src/lib/daemon.ts`                     | daemon URL/WS URL 解析与 health/workflow/execution/chat/codex-history attachment/chat turns API 封装                                   |
 | `ui/src/stores/chatStore.ts`               | Chat 前端状态：sessions/messages、后端可恢复 turn timeline、轻量视图态与 chat API actions                                            |
 | `scripts/dev.sh`                           | 本地开发一键启动脚本（并行拉起 backend 与 UI）                                                                                        |
 | `backend/.air.toml`                        | 后端热重载配置（Air）：本地开发时监听 Go 源码变更并自动重建/重启 daemon                                                                |
@@ -191,12 +195,13 @@
 | Codex MCP/Skill 运行时注入          | `backend/internal/chat/codex_appserver.go`, `backend/internal/chat/codex_runtime_settings.go`, `backend/internal/config/mcp_skill_settings.go`, `backend/internal/expert/expert.go`, `backend/internal/api/chat.go` |
 | iFlow 官方认证与运行时注入          | `backend/internal/api/settings_iflow_auth.go`, `backend/internal/iflow/home.go`, `backend/internal/iflow/auth_manager.go`, `backend/internal/chat/iflow_runtime_settings.go`, `scripts/agent-runtimes/iflow_exec.sh`, `ui/src/app/components/CLIToolSettingsTab.tsx` |
 | Chat 会话 MCP 选择                  | `backend/internal/api/chat.go`, `backend/internal/store/chat.go`, `backend/internal/store/migrate.go`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/daemon.ts` |
+| Codex CLI 历史导入                 | `backend/internal/api/codex_history.go`, `backend/internal/codexhistory/service.go`, `backend/internal/store/chat_import.go`, `backend/internal/store/chat.go`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/app/components/chat/CodexHistoryImportDialog.tsx`, `ui/src/lib/daemon.ts` |
 | XDG 配置路径                       | `backend/internal/config/config.go`                                                                                                                                                                                                        |
 | XDG 日志路径                       | `backend/internal/paths/paths.go`                                                                                                                                                                                                          |
 | Expert 配置/模板解析               | `backend/internal/config/config.go`, `backend/internal/expert/expert.go`                                                                                                                                                                   |
 | execution timeout 语义             | `backend/internal/execution/manager.go`, `backend/internal/scheduler/scheduler.go`                                                                                                                                                         |
 | SQLite state.db 初始化             | `backend/cmd/vibe-tree-daemon/main.go`, `backend/internal/store/sqlite.go`, `backend/internal/store/migrate.go`                                                                                                                            |
-| Chat Session API                   | `backend/internal/api/chat.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/attachments.go`, `backend/internal/chat/timeline_persistence.go`, `backend/internal/store/chat.go`, `backend/internal/store/chat_turns.go`, `ui/src/lib/daemon.ts`                                                                                |
+| Chat Session API                   | `backend/internal/api/chat.go`, `backend/internal/api/codex_history.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/attachments.go`, `backend/internal/chat/timeline_persistence.go`, `backend/internal/codexhistory/service.go`, `backend/internal/store/chat.go`, `backend/internal/store/chat_import.go`, `backend/internal/store/chat_turns.go`, `ui/src/lib/daemon.ts`                                                                                |
 | Chat 自动上下文压缩               | `backend/internal/chat/manager.go`, `backend/internal/store/chat.go`                                                                                                                                                                                           |
 | Chat provider anchor 续上下文      | `backend/internal/chat/manager.go`, `backend/internal/store/chat.go`                                                                                                                                                                                           |
 | Chat 附件上传与多模态输入          | `backend/internal/api/chat.go`, `backend/internal/chat/attachments.go`, `backend/internal/chat/provider_input.go`, `backend/internal/store/chat.go`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/lib/daemon.ts`                                 |
@@ -233,7 +238,7 @@
 | Workflow DAG 视图（React Flow）    | `ui/src/components/DAGView.tsx`, `ui/src/App.tsx`                                                                                                                                                                                          |
 | health/workflow/execution API 封装 | `ui/src/lib/daemon.ts`                                                                                                                                                                                                                     |
 | 终端渲染与路由                     | `ui/src/components/TerminalPane.tsx`, `ui/src/App.tsx`                                                                                                                                                                                     |
-| Chat 会话 UI                       | `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/app/components/WorkspaceShell.tsx`, `ui/src/app/components/chat/ChatTurnFeed.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/chatTurnFeed.ts`, `ui/src/App.tsx`, `ui/src/app/components/Topbar.tsx`                                                                                                                       |
+| Chat 会话 UI                       | `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/app/components/WorkspaceShell.tsx`, `ui/src/app/components/chat/ChatTurnFeed.tsx`, `ui/src/app/components/chat/CodexHistoryImportDialog.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/chatTurnFeed.ts`, `ui/src/App.tsx`, `ui/src/app/components/Topbar.tsx`                                                                                                                       |
 | 本地一键启动                       | `scripts/dev.sh`                                                                                                                                                                                                                           |
 | Web 单进程启动（daemon 托管 UI）   | `scripts/web.sh`, `backend/internal/server/server.go`                                                                                                                                                                                      |
 | UI 开发端口代理与构建配置          | `ui/vite.config.ts`, `ui/package.json`                                                                                                                                                                                                     |
@@ -250,6 +255,7 @@
 | OpenSpec 基线规范（execution）     | `openspec/specs/execution/spec.md`                                                                                                                                                                                                         |
 | OpenSpec 基线规范（experts）       | `openspec/specs/experts/spec.md`                                                                                                                                                                                                           |
 | OpenSpec 基线规范（store）         | `openspec/specs/store/spec.md`                                                                                                                                                                                                             |
+| OpenSpec 基线规范（codex-history-import） | `openspec/specs/codex-history-import/spec.md`                                                                                                                                                                                        |
 | OpenSpec 基线规范（ui）            | `openspec/specs/ui/spec.md`                                                                                                                                                                                                                |
 | OpenSpec 变更提案                  | `openspec/changes/`                                                                                                                                                                                                                        |
 

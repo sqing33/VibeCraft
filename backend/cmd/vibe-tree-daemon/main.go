@@ -14,6 +14,7 @@ import (
 	"vibe-tree/backend/internal/api"
 	"vibe-tree/backend/internal/chat"
 	"vibe-tree/backend/internal/config"
+	"vibe-tree/backend/internal/codexhistory"
 	"vibe-tree/backend/internal/dotenv"
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/expert"
@@ -111,6 +112,7 @@ func main() {
 			logx.Warn("daemon", "close-chat-runtime", "关闭 Chat 暖运行时失败", "err", err)
 		}
 	}()
+	codexHistorySvc := codexhistory.NewService(stateStore, codexhistory.Options{})
 	repoLibSvc, err := repolib.NewService(stateStore, execMgr, chatMgr, experts)
 	if err != nil {
 		logx.Error("daemon", "repo-library", "初始化 Repo Library service 失败", "err", err)
@@ -159,7 +161,7 @@ func main() {
 
 	engine := server.New(
 		server.Options{DevCORS: server.DevCORSFromEnv()},
-		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore, Experts: experts, Chat: chatMgr, MCPGateway: mcpGateway, Orchestration: orchMgr, RepoLibrary: repoLibSvc, IFLOWAuth: iflowAuthMgr},
+		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore, Experts: experts, Chat: chatMgr, CodexHistory: codexHistorySvc, MCPGateway: mcpGateway, Orchestration: orchMgr, RepoLibrary: repoLibSvc, IFLOWAuth: iflowAuthMgr},
 	)
 	srv := &http.Server{
 		Addr:              cfg.Addr(),

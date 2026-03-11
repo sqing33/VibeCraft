@@ -54,6 +54,7 @@ import {
   AttachmentPreviewModal,
   type AttachmentPreviewState,
 } from "@/app/components/AttachmentPreviewModal";
+import { CodexHistoryImportDialog } from "@/app/components/chat/CodexHistoryImportDialog";
 import { ChatTurnFeed as ChatTurnFeedView } from "@/app/components/chat/ChatTurnFeed";
 import {
   canPreviewAttachmentTarget,
@@ -301,6 +302,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const [newModelId, setNewModelId] = useState("");
   const [turnModelId, setTurnModelId] = useState("");
   const [turnReasoningEffort, setTurnReasoningEffort] = useState("");
+  const [codexHistoryModalOpen, setCodexHistoryModalOpen] = useState(false);
   const [cliTools, setCliTools] = useState<CLITool[]>([]);
   const [runtimeModelSettings, setRuntimeModelSettings] =
     useState<RuntimeModelSettings | null>(null);
@@ -1462,6 +1464,30 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     }
   };
 
+  const onImportedCodexHistory = useCallback(
+    async (sessionIds: string[]) => {
+      await refreshSessions(daemonUrl);
+      const latestSessions = useChatStore.getState().sessions;
+      const nextSession =
+        sessionIds
+          .map((sessionId) =>
+            latestSessions.find((item) => item.session_id === sessionId),
+          )
+          .find((session): session is ChatSession => Boolean(session)) ?? null;
+      if (nextSession) {
+        selectSession(nextSession);
+      }
+      toast({
+        title: sessionIds.length > 0 ? "Codex 历史已导入" : "导入已完成",
+        description:
+          sessionIds.length > 0
+            ? `已新增 ${sessionIds.length} 个会话`
+            : "所选记录已经存在",
+      });
+    },
+    [daemonUrl, refreshSessions, selectSession],
+  );
+
   const visibleSessions = useMemo(
     () => sessions.filter((s) => s.status === "active"),
     [sessions],
@@ -1540,15 +1566,25 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
             </span>
           </div>
 
-          <Button
-            color="primary"
-            size="sm"
-            className="w-[25%] min-w-[86px] rounded-2xl"
-            startContent={<Plus className="h-4 w-4 shrink-0 stroke-[3]" />}
-            onPress={() => setNewSessionModalOpen(true)}
-          >
-            新建会话
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="flat"
+              size="sm"
+              className="rounded-2xl"
+              onPress={() => setCodexHistoryModalOpen(true)}
+            >
+              导入 Codex 历史
+            </Button>
+            <Button
+              color="primary"
+              size="sm"
+              className="min-w-[86px] rounded-2xl"
+              startContent={<Plus className="h-4 w-4 shrink-0 stroke-[3]" />}
+              onPress={() => setNewSessionModalOpen(true)}
+            >
+              新建会话
+            </Button>
+          </div>
         </div>
       </WorkspacePortal>
 
@@ -2252,6 +2288,12 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       </WorkspacePortal>
 
       <AttachmentPreviewModal preview={preview} onClose={closePreview} />
+      <CodexHistoryImportDialog
+        daemonUrl={daemonUrl}
+        open={codexHistoryModalOpen}
+        onOpenChange={setCodexHistoryModalOpen}
+        onImported={onImportedCodexHistory}
+      />
 
       <Modal
         isOpen={newSessionModalOpen}

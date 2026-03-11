@@ -641,7 +641,7 @@ func (s *Store) ListChatMessages(ctx context.Context, sessionID string, limit in
 		`SELECT id, session_id, turn, role, content_text, expert_id, provider, model, token_in, token_out, provider_message_id, created_at
 		   FROM chat_messages
 		  WHERE session_id = ?
-		  ORDER BY turn DESC
+		  ORDER BY turn DESC, created_at DESC
 		  LIMIT ?;`,
 		sessionID,
 		limit,

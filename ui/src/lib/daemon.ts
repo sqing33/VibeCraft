@@ -1054,6 +1054,30 @@ export type ChatSession = {
   last_turn: number;
 };
 
+export type CodexHistoryThread = {
+  thread_id: string;
+  display_title: string;
+  created_at: number;
+  updated_at: number;
+  workspace_path: string;
+  source: string;
+  model_provider: string;
+  archived: boolean;
+  already_imported: boolean;
+};
+
+export type CodexHistoryImportResult = {
+  thread_id: string;
+  display_title: string;
+  session_id?: string;
+  imported: boolean;
+  already_imported: boolean;
+};
+
+export type CodexHistoryImportResponse = {
+  results: CodexHistoryImportResult[];
+};
+
 export type ChatAttachment = {
   attachment_id: string;
   session_id: string;
@@ -1162,6 +1186,36 @@ export async function fetchChatSessions(
     throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim());
   }
   return (await res.json()) as ChatSession[];
+}
+
+export async function fetchCodexHistoryThreads(
+  daemonUrl: string,
+  limit = 500,
+): Promise<CodexHistoryThread[]> {
+  const url = new URL(`${daemonUrl}/api/v1/codex-history/threads`);
+  url.searchParams.set("limit", String(limit));
+  const res = await fetch(url);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim());
+  }
+  return (await res.json()) as CodexHistoryThread[];
+}
+
+export async function importCodexHistoryThreads(
+  daemonUrl: string,
+  req: { thread_ids: string[] },
+): Promise<CodexHistoryImportResponse> {
+  const res = await fetch(`${daemonUrl}/api/v1/codex-history/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim());
+  }
+  return (await res.json()) as CodexHistoryImportResponse;
 }
 
 export async function fetchChatMessages(
