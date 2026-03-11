@@ -18,6 +18,7 @@
 | `scripts/`       | 仓库级脚本：本地开发启动与辅助命令                                                     |
 | `.github-feature-analyzer/` | GitHub feature analyzer skill 运行产物目录：按 `{owner-repo}` 隔离源码缓存、分析工件与累计 `report.md` |
 | `.codex/skills/` | 项目级 Codex skills：流程规范、分析/实施工作流与协作约束                               |
+| `.codex/tools/`  | 项目级工具运行产物目录：独立于 skills 的 CLI/MCP 工具状态、日志与结果（例如 tmux-orch） |
 | `.codex/agents/` | 项目级 Codex 子代理角色配置（按角色覆盖模型/沙箱/指令）                               |
 | `.codex/config.toml` | 项目级 Codex 配置覆盖（feature flags、agents 并发与深度等）                      |
 | `openspec/`      | OpenSpec 规范管理：基线 specs（系统当前行为真相源）+ changes（变更提案与 delta specs） |
@@ -39,6 +40,8 @@
 | `.codex/skills/github-feature-analyzer/scripts/ensure_uv_unix.sh` | UV 引导脚本：在 Linux/macOS 上检测或安装 uv（二进制不入库），为检索脚本提供统一运行前置 |
 | `.codex/skills/github-feature-analyzer/scripts/setup_reference_venv.sh` | UV 环境初始化：强制 uv-managed Python 3.12，创建并同步固定 `.venv-reference` |
 | `.codex/skills/github-feature-analyzer/scripts/reference_retrieval_uv.sh` | UV 检索入口：先确保环境，再执行 `reference_retrieval.py` 的 `build/query` |
+| `backend/cmd/vt-mcp-tmux-orch/main.go` | tmux orchestrator MCP server：stdio JSON-RPC，向 Codex/Claude 暴露 `tmux_orch_*` tools |
+| `backend/internal/tmuxorch/orch.go` | tmux orchestrator 核心实现：draft/run/control/status/close，产物落盘到 `.codex/tools/tmux-orch/` |
 | `docs/cli-pivot-and-repo-library-plan.md` | 规划文档：CLI-first 转型路线、SDK/CLI 职责重构，以及 GitHub analyzer 作为 Repo Library 功能集成方案 |
 | `backend/internal/api/repo_library.go` | Repo Library HTTP API：analysis 创建、repositories/detail/snapshots、cards/evidence、search、report 内容读取 |
 | `backend/internal/repolib/service.go` | Repo Library 服务层：GitHub URL 校验、分析运行创建、Python engine 调用、搜索结果增强与报告读取 |
