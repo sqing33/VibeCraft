@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -29,7 +30,7 @@ func (s *Service) migrate(ctx context.Context) error {
 	}
 	defer tx.Rollback()
 
-	stmts := []string{
+	baseStmts := []string{
 		`
 CREATE TABLE IF NOT EXISTS kb_meta (
   id TEXT PRIMARY KEY,
@@ -56,6 +57,14 @@ CREATE TABLE IF NOT EXISTS kb_chunks (
 );`,
 		`CREATE INDEX IF NOT EXISTS idx_kb_chunks_snapshot_kind ON kb_chunks(repo_snapshot_id, source_kind, updated_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_kb_chunks_hash ON kb_chunks(content_hash);`,
+	}
+	for _, stmt := range baseStmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("searchdb migrate stmt: %w", err)
+		}
+	}
+
+	ftsStmts := []string{
 		`
 CREATE VIRTUAL TABLE IF NOT EXISTS kb_chunks_fts USING fts5(
   title,
@@ -84,11 +93,21 @@ CREATE TRIGGER IF NOT EXISTS kb_chunks_au AFTER UPDATE ON kb_chunks BEGIN
   VALUES (new.rowid, new.title, new.tags_flat, new.symbols_flat, new.evidence_refs_flat, new.search_text);
 END;`,
 	}
-	for _, stmt := range stmts {
+
+	ftsEnabled := true
+	for _, stmt := range ftsStmts {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			// Some environments compile SQLite without FTS5. In that case, keep the
+			// DB usable via keyword fallback queries against kb_chunks.
+			if strings.Contains(err.Error(), "no such module: fts5") {
+				ftsEnabled = false
+				break
+			}
 			return fmt.Errorf("searchdb migrate stmt: %w", err)
 		}
 	}
+	s.ftsEnabled = ftsEnabled
+
 	if err := tx.Commit(); err != nil {
 		return err
 	}

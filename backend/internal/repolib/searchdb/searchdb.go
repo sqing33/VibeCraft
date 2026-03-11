@@ -73,6 +73,7 @@ type Service struct {
 	dbPath       string
 	embedder     Embedder
 	vecExtension string
+	ftsEnabled   bool
 	vecEnabled   bool
 }
 
@@ -107,6 +108,7 @@ func Open(ctx context.Context, params OpenParams) (*Service, error) {
 		dbPath:       params.DBPath,
 		embedder:     params.Embedder,
 		vecExtension: strings.TrimSpace(params.VecExtension),
+		ftsEnabled:   false,
 		vecEnabled:   false,
 	}
 	if err := svc.applyPragmas(ctx); err != nil {
@@ -202,6 +204,9 @@ func (s *Service) SearchKeyword(ctx context.Context, query string, topK int, rep
 	if query == "" {
 		return nil, fmt.Errorf("searchdb: query required")
 	}
+	if !s.ftsEnabled {
+		return s.searchKeywordFallback(ctx, query, topK, repoSnapshotFilters, sourceKinds)
+	}
 	if topK <= 0 {
 		topK = 10
 	}
@@ -233,6 +238,88 @@ LIMIT ?;`, where)
 		return nil, err
 	}
 	defer rows.Close()
+	hits := []Hit{}
+	for rows.Next() {
+		var h Hit
+		var refs sql.NullString
+		var sourceRef sql.NullString
+		if err := rows.Scan(&h.ChunkID, &h.SourceKind, &h.Title, &h.TextExcerpt, &h.RepoSourceID, &h.RepoSnapshotID, &h.AnalysisRunID, &sourceRef, &refs, &h.Score); err != nil {
+			return nil, err
+		}
+		h.SourceRefID = strings.TrimSpace(sourceRef.String)
+		h.EvidenceRefs = splitFlatRefs(refs.String)
+		hits = append(hits, h)
+		if len(hits) >= limit {
+			break
+		}
+	}
+	return hits, nil
+}
+
+func (s *Service) searchKeywordFallback(ctx context.Context, query string, topK int, repoSnapshotFilters []string, sourceKinds []string) ([]Hit, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("searchdb: not initialized")
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("searchdb: query required")
+	}
+	if len(query) >= 2 {
+		if strings.HasPrefix(query, "\"") && strings.HasSuffix(query, "\"") {
+			query = strings.TrimSuffix(strings.TrimPrefix(query, "\""), "\"")
+		} else if strings.HasPrefix(query, "'") && strings.HasSuffix(query, "'") {
+			query = strings.TrimSuffix(strings.TrimPrefix(query, "'"), "'")
+		}
+		query = strings.TrimSpace(query)
+	}
+	if query == "" {
+		return nil, fmt.Errorf("searchdb: query required")
+	}
+	if topK <= 0 {
+		topK = 10
+	}
+	limit := stableRecallLimit(topK)
+	where, args := buildFilterWhere(repoSnapshotFilters, sourceKinds)
+
+	sqlText := fmt.Sprintf(`
+SELECT
+  c.chunk_id,
+  c.source_kind,
+  c.title,
+  c.text_excerpt,
+  c.repo_source_id,
+  c.repo_snapshot_id,
+  c.analysis_run_id,
+  c.source_ref_id,
+  c.evidence_refs_flat,
+  CASE
+    WHEN instr(lower(c.title), lower(?)) > 0 THEN 1.0
+    WHEN instr(lower(c.search_text), lower(?)) > 0 THEN 0.8
+    WHEN instr(lower(c.tags_flat), lower(?)) > 0 THEN 0.6
+    WHEN instr(lower(c.symbols_flat), lower(?)) > 0 THEN 0.6
+    WHEN instr(lower(c.evidence_refs_flat), lower(?)) > 0 THEN 0.4
+    ELSE 0.0
+  END AS score
+FROM kb_chunks c
+WHERE (
+  instr(lower(c.title), lower(?)) > 0
+  OR instr(lower(c.search_text), lower(?)) > 0
+  OR instr(lower(c.tags_flat), lower(?)) > 0
+  OR instr(lower(c.symbols_flat), lower(?)) > 0
+  OR instr(lower(c.evidence_refs_flat), lower(?)) > 0
+) %s
+ORDER BY score DESC, c.updated_at DESC
+LIMIT ?;`, where)
+
+	args = append([]any{query, query, query, query, query, query, query, query, query, query}, args...)
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, sqlText, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
 	hits := []Hit{}
 	for rows.Next() {
 		var h Hit
