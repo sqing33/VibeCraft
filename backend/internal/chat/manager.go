@@ -476,7 +476,8 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 		opencodeLoopGuardText := ""
 		sawOpenCodeContent := false
 		translationRuntime := newThinkingTranslationRuntime(m, sess.ID, turn.ID, thinkingTranslation)
-		feedEmitter := newCodexTurnFeedEmitter(m, turn.ID, sess.ID, userMsg.ID, translationRuntime)
+		feedEmitter := newCodexTurnFeedEmitter(m, turn.ID, sess.ID, userMsg.ID, artifactDir, translationRuntime)
+		defer feedEmitter.Close()
 		done := make(chan struct{})
 		go func() {
 			defer close(done)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -20,14 +22,77 @@ type chatTurnEventPayload struct {
 	Meta          map[string]any `json:"meta,omitempty"`
 }
 
+const codexToolFeedTailBytes = 32 * 1024
+
+type tailBuffer struct {
+	max       int
+	total     int64
+	truncated bool
+	buf       []byte
+}
+
+func newTailBuffer(max int) tailBuffer {
+	if max < 0 {
+		max = 0
+	}
+	return tailBuffer{max: max, buf: make([]byte, 0, max)}
+}
+
+func (t *tailBuffer) WriteString(s string) {
+	if t == nil || t.max <= 0 || s == "" {
+		return
+	}
+	t.total += int64(len(s))
+	if len(s) >= t.max {
+		t.buf = append(t.buf[:0], s[len(s)-t.max:]...)
+		t.truncated = true
+		return
+	}
+	t.buf = append(t.buf, s...)
+	if len(t.buf) <= t.max {
+		return
+	}
+	overflow := len(t.buf) - t.max
+	trimmed := append([]byte(nil), t.buf[overflow:]...)
+	t.buf = trimmed
+	t.truncated = true
+}
+
+func (t *tailBuffer) String() string {
+	if t == nil || len(t.buf) == 0 {
+		return ""
+	}
+	return string(t.buf)
+}
+
+func (t *tailBuffer) TotalBytes() int64 {
+	if t == nil {
+		return 0
+	}
+	return t.total
+}
+
+func (t *tailBuffer) Truncated() bool {
+	if t == nil {
+		return false
+	}
+	return t.truncated
+}
+
 type codexToolFeedState struct {
 	EntryID   string
 	Command   string
-	Stdout    strings.Builder
-	Stderr    strings.Builder
+	Stdout    tailBuffer
+	Stderr    tailBuffer
 	Status    string
 	ExitCode  *int
 	Succeeded *bool
+
+	stdoutFile *os.File
+	stderrFile *os.File
+
+	StdoutArtifact string
+	StderrArtifact string
 }
 
 type codexThinkingFeedState struct {
@@ -49,6 +114,24 @@ func (s *codexToolFeedState) meta() map[string]any {
 		"stdout":  s.Stdout.String(),
 		"stderr":  s.Stderr.String(),
 	}
+	if total := s.Stdout.TotalBytes(); total > 0 {
+		meta["stdout_bytes"] = total
+	}
+	if total := s.Stderr.TotalBytes(); total > 0 {
+		meta["stderr_bytes"] = total
+	}
+	if s.Stdout.Truncated() {
+		meta["stdout_truncated"] = true
+	}
+	if s.Stderr.Truncated() {
+		meta["stderr_truncated"] = true
+	}
+	if strings.TrimSpace(s.StdoutArtifact) != "" {
+		meta["stdout_artifact"] = strings.TrimSpace(s.StdoutArtifact)
+	}
+	if strings.TrimSpace(s.StderrArtifact) != "" {
+		meta["stderr_artifact"] = strings.TrimSpace(s.StderrArtifact)
+	}
 	if s.ExitCode != nil {
 		meta["exit_code"] = *s.ExitCode
 	}
@@ -63,6 +146,7 @@ type codexTurnFeedEmitter struct {
 	turnID            string
 	sessionID         string
 	userMessageID     string
+	artifactDir       string
 	translation       *thinkingTranslationRuntime
 	toolStates        map[string]*codexToolFeedState
 	thinkingStates    map[string]*codexThinkingFeedState
@@ -74,17 +158,37 @@ type codexTurnFeedEmitter struct {
 	sink              func(chatTurnEventPayload)
 }
 
-func newCodexTurnFeedEmitter(manager *Manager, turnID, sessionID, userMessageID string, translation *thinkingTranslationRuntime) *codexTurnFeedEmitter {
+func newCodexTurnFeedEmitter(manager *Manager, turnID, sessionID, userMessageID, artifactDir string, translation *thinkingTranslationRuntime) *codexTurnFeedEmitter {
 	return &codexTurnFeedEmitter{
 		manager:        manager,
 		turnID:         strings.TrimSpace(turnID),
 		sessionID:      strings.TrimSpace(sessionID),
 		userMessageID:  strings.TrimSpace(userMessageID),
+		artifactDir:    strings.TrimSpace(artifactDir),
 		translation:    translation,
 		toolStates:     make(map[string]*codexToolFeedState),
 		thinkingStates: make(map[string]*codexThinkingFeedState),
 		planText:       make(map[string]*strings.Builder),
 		entrySeq:       make(map[string]int),
+	}
+}
+
+func (e *codexTurnFeedEmitter) Close() {
+	if e == nil {
+		return
+	}
+	for _, state := range e.toolStates {
+		if state == nil {
+			continue
+		}
+		if state.stdoutFile != nil {
+			_ = state.stdoutFile.Close()
+			state.stdoutFile = nil
+		}
+		if state.stderrFile != nil {
+			_ = state.stderrFile.Close()
+			state.stderrFile = nil
+		}
 	}
 }
 
@@ -186,8 +290,11 @@ func (e *codexTurnFeedEmitter) consume(ctx context.Context, method string, param
 			callID = "command"
 		}
 		command := strings.TrimSpace(firstNonEmptyTrimmed(commandText(raw["command"]), commandText(raw["cmd"])))
-		state := &codexToolFeedState{EntryID: "tool:" + callID, Command: command, Status: "created"}
-		e.toolStates[callID] = state
+		state := e.ensureToolState(callID, command)
+		if state == nil {
+			return
+		}
+		state.Status = "created"
 		e.emitToolState(ctx, state)
 	case "exec_command_output_delta":
 		e.closeThinkingSegment(ctx)
@@ -204,11 +311,7 @@ func (e *codexTurnFeedEmitter) consume(ctx context.Context, method string, param
 			return
 		}
 		stream := strings.ToLower(firstNonEmptyTrimmed(stringValue(raw["stream"]), "stdout"))
-		if stream == "stderr" {
-			state.Stderr.WriteString(chunk)
-		} else {
-			state.Stdout.WriteString(chunk)
-		}
+		e.appendToolChunk(callID, state, stream, chunk)
 		state.Status = "streaming"
 		e.emitToolState(ctx, state)
 	case "exec_command_end":
@@ -218,11 +321,15 @@ func (e *codexTurnFeedEmitter) consume(ctx context.Context, method string, param
 		if state == nil {
 			return
 		}
-		if stdout := strings.TrimSpace(extractChunkText(raw["stdout"])); stdout != "" && state.Stdout.Len() == 0 {
-			state.Stdout.WriteString(stdout)
+		if stdout := strings.TrimSpace(extractChunkText(raw["stdout"])); stdout != "" {
+			if state.Stdout.TotalBytes() == 0 {
+				e.appendToolChunk(callID, state, "stdout", stdout)
+			}
 		}
-		if stderr := strings.TrimSpace(extractChunkText(raw["stderr"])); stderr != "" && state.Stderr.Len() == 0 {
-			state.Stderr.WriteString(stderr)
+		if stderr := strings.TrimSpace(extractChunkText(raw["stderr"])); stderr != "" {
+			if state.Stderr.TotalBytes() == 0 {
+				e.appendToolChunk(callID, state, "stderr", stderr)
+			}
 		}
 		if exitCode, ok := intValue(raw["exit_code"]); ok {
 			state.ExitCode = &exitCode
@@ -238,6 +345,14 @@ func (e *codexTurnFeedEmitter) consume(ctx context.Context, method string, param
 			state.Status = "failed"
 		}
 		e.emitToolState(ctx, state)
+		if state.stdoutFile != nil {
+			_ = state.stdoutFile.Close()
+			state.stdoutFile = nil
+		}
+		if state.stderrFile != nil {
+			_ = state.stderrFile.Close()
+			state.stderrFile = nil
+		}
 	case "request_user_input":
 		e.closeThinkingSegment(ctx)
 		entryID := firstNonEmptyTrimmed(stringValue(raw["callId"]), stringValue(raw["call_id"]), "question")
@@ -249,8 +364,12 @@ func (e *codexTurnFeedEmitter) consume(ctx context.Context, method string, param
 		e.emit(ctx, chatTurnEventPayload{EntryID: "system:warning", Kind: "system", Op: "upsert", Status: "created", Content: content})
 	case "error":
 		e.closeThinkingSegment(ctx)
-		content := firstNonEmptyTrimmed(stringValue(raw["message"]), "Codex CLI error")
-		e.emit(ctx, chatTurnEventPayload{EntryID: "error:codex", Kind: "error", Op: "upsert", Status: "failed", Content: content})
+		content, willRetry, meta := extractCodexErrorNotification(raw)
+		if willRetry {
+			e.emit(ctx, chatTurnEventPayload{EntryID: "system:codex", Kind: "system", Op: "upsert", Status: "streaming", Content: content, Meta: meta})
+			return
+		}
+		e.emit(ctx, chatTurnEventPayload{EntryID: "error:codex", Kind: "error", Op: "upsert", Status: "failed", Content: content, Meta: meta})
 	}
 }
 
@@ -366,11 +485,70 @@ func (e *codexTurnFeedEmitter) ensureToolState(callID, command string) *codexToo
 		if existing.Command == "" && strings.TrimSpace(command) != "" {
 			existing.Command = strings.TrimSpace(command)
 		}
+		e.openToolArtifacts(callID, existing)
 		return existing
 	}
-	state := &codexToolFeedState{EntryID: "tool:" + callID, Command: strings.TrimSpace(command), Status: "created"}
+	state := &codexToolFeedState{
+		EntryID: "tool:" + callID,
+		Command: strings.TrimSpace(command),
+		Stdout:  newTailBuffer(codexToolFeedTailBytes),
+		Stderr:  newTailBuffer(codexToolFeedTailBytes),
+		Status:  "created",
+	}
 	e.toolStates[callID] = state
+	e.openToolArtifacts(callID, state)
 	return state
+}
+
+func (e *codexTurnFeedEmitter) openToolArtifacts(callID string, state *codexToolFeedState) {
+	if e == nil || state == nil {
+		return
+	}
+	if strings.TrimSpace(e.artifactDir) == "" {
+		return
+	}
+	if state.stdoutFile != nil && state.stderrFile != nil {
+		return
+	}
+	callID = sanitizeCodexToolArtifactID(callID)
+	dir := filepath.Join(e.artifactDir, "codex_tools")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	stdoutName := callID + ".stdout.log"
+	stderrName := callID + ".stderr.log"
+	if state.stdoutFile == nil {
+		path := filepath.Join(dir, stdoutName)
+		if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+			state.stdoutFile = f
+			state.StdoutArtifact = filepath.ToSlash(filepath.Join("codex_tools", stdoutName))
+		}
+	}
+	if state.stderrFile == nil {
+		path := filepath.Join(dir, stderrName)
+		if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+			state.stderrFile = f
+			state.StderrArtifact = filepath.ToSlash(filepath.Join("codex_tools", stderrName))
+		}
+	}
+}
+
+func (e *codexTurnFeedEmitter) appendToolChunk(callID string, state *codexToolFeedState, stream string, chunk string) {
+	if e == nil || state == nil || chunk == "" {
+		return
+	}
+	e.openToolArtifacts(callID, state)
+	if strings.ToLower(strings.TrimSpace(stream)) == "stderr" {
+		state.Stderr.WriteString(chunk)
+		if state.stderrFile != nil {
+			_, _ = state.stderrFile.WriteString(chunk)
+		}
+		return
+	}
+	state.Stdout.WriteString(chunk)
+	if state.stdoutFile != nil {
+		_, _ = state.stdoutFile.WriteString(chunk)
+	}
 }
 
 func (e *codexTurnFeedEmitter) emitToolState(ctx context.Context, state *codexToolFeedState) {
@@ -378,6 +556,37 @@ func (e *codexTurnFeedEmitter) emitToolState(ctx context.Context, state *codexTo
 		return
 	}
 	e.emit(ctx, chatTurnEventPayload{EntryID: state.EntryID, Kind: "tool", Op: "upsert", Status: state.Status, Content: state.Command, Meta: state.meta()})
+}
+
+func sanitizeCodexToolArtifactID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "command"
+	}
+	if len(value) > 64 {
+		value = value[:64]
+	}
+	var out strings.Builder
+	out.Grow(len(value))
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+			out.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			out.WriteRune(r)
+		case r >= '0' && r <= '9':
+			out.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			out.WriteRune(r)
+		default:
+			out.WriteByte('_')
+		}
+	}
+	clean := strings.Trim(out.String(), "_")
+	if clean == "" {
+		return "command"
+	}
+	return clean
 }
 
 func (e *codexTurnFeedEmitter) consumeItemSnapshot(ctx context.Context, method string, raw map[string]any) {
@@ -392,8 +601,16 @@ func (e *codexTurnFeedEmitter) consumeItemSnapshot(ctx context.Context, method s
 		}
 		if method == "item/completed" || strings.HasSuffix(method, "/item_completed") {
 			state.Status = "success"
-			if strings.TrimSpace(snapshot.AggregatedOutput) != "" && state.Stdout.Len() == 0 {
-				state.Stdout.WriteString(strings.TrimSpace(snapshot.AggregatedOutput))
+			if strings.TrimSpace(snapshot.AggregatedOutput) != "" && state.Stdout.TotalBytes() == 0 {
+				e.appendToolChunk(callID, state, "stdout", strings.TrimSpace(snapshot.AggregatedOutput))
+			}
+			if state.stdoutFile != nil {
+				_ = state.stdoutFile.Close()
+				state.stdoutFile = nil
+			}
+			if state.stderrFile != nil {
+				_ = state.stderrFile.Close()
+				state.stderrFile = nil
 			}
 		} else {
 			state.Status = "created"
@@ -475,6 +692,38 @@ func normalizeFeedStatus(value string) string {
 	default:
 		return "created"
 	}
+}
+
+func extractCodexErrorNotification(raw map[string]any) (string, bool, map[string]any) {
+	content := firstNonEmptyTrimmed(
+		nestedString(raw, "error", "message"),
+		stringValue(raw["message"]),
+		"Codex CLI error",
+	)
+	willRetry := false
+	if b := boolValue(raw["willRetry"]); b != nil {
+		willRetry = *b
+	} else if b := boolValue(raw["will_retry"]); b != nil {
+		willRetry = *b
+	}
+	meta := map[string]any{
+		"will_retry": willRetry,
+	}
+	if tid := firstNonEmptyTrimmed(stringValue(raw["threadId"]), stringValue(raw["thread_id"])); tid != "" {
+		meta["thread_id"] = tid
+	}
+	if turnID := firstNonEmptyTrimmed(stringValue(raw["turnId"]), stringValue(raw["turn_id"])); turnID != "" {
+		meta["turn_id"] = turnID
+	}
+	if errObj, ok := raw["error"].(map[string]any); ok {
+		if info, ok := errObj["codexErrorInfo"]; ok {
+			meta["codex_error_info"] = info
+		}
+		if details := firstNonEmptyTrimmed(stringValue(errObj["additionalDetails"]), stringValue(errObj["additional_details"])); details != "" {
+			meta["additional_details"] = details
+		}
+	}
+	return content, willRetry, meta
 }
 
 func extractDeltaText(raw map[string]any) string {

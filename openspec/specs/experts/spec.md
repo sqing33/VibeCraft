@@ -3,7 +3,6 @@
 ## Purpose
 
 Expert 是可执行的专家配置，定义了 runtime 类型、provider、model、command、环境变量、超时策略等。Expert 注册表负责加载配置、解析模板、路由到正确的 runner。
-
 ## Requirements
 
 ### Configuration Loading
@@ -119,3 +118,15 @@ If an expert declares `enabled_skills`, the runtime MUST use only the intersecti
 - **WHEN** a chat session runs with an expert whose `enabled_skills` contains `ui-ux-pro-max`
 - **AND** the discovered skill catalog contains `ui-ux-pro-max` and `worktree-lite`
 - **THEN** the runtime injects only `ui-ux-pro-max`
+
+### Requirement: Chat turns MUST enforce expert timeout_ms
+When a chat turn is executed using an expert that resolves to a non-zero timeout, the daemon MUST enforce that timeout for the turn execution.
+
+The daemon MUST ignore HTTP request cancellation for long-running turns, but it MUST still stop the turn when the expert timeout elapses.
+
+#### Scenario: Chat turn stops after expert timeout
+- **WHEN** the active chat expert resolves with `timeout_ms > 0`
+- **AND** the turn execution exceeds that timeout
+- **THEN** the daemon stops the turn execution
+- **AND** the persisted turn timeline reaches a terminal state (not running)
+

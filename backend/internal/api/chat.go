@@ -423,6 +423,11 @@ func postChatTurnHandler(deps Deps) gin.HandlerFunc {
 			modelInput = resolved.Spec.SDK.Prompt
 		}
 		turnCtx := context.WithoutCancel(c.Request.Context())
+		if resolved.Timeout > 0 {
+			var cancel context.CancelFunc
+			turnCtx, cancel = context.WithTimeout(turnCtx, resolved.Timeout)
+			defer cancel()
+		}
 		result, err := deps.Chat.RunTurn(turnCtx, chat.TurnParams{
 			Session:             sess,
 			ExpertID:            firstNonEmptyTrimmed(resolved.ExpertID, expertID),

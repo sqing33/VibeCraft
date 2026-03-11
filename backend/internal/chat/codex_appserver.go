@@ -2,11 +2,13 @@ package chat
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"vibe-tree/backend/internal/cliruntime"
 	"vibe-tree/backend/internal/runner"
@@ -126,6 +129,12 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 		}()
 
 		client := lease.Client()
+		if artifactDir != "" {
+			if setter, ok := client.(interface{ SetDiagnosticsDir(string) }); ok {
+				setter.SetDiagnosticsDir(artifactDir)
+				defer setter.SetDiagnosticsDir("")
+			}
+		}
 		if err := drainCodexAppServerNotifications(client); err != nil {
 			released = true
 			_ = lease.Discard()
@@ -154,34 +163,166 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 		}
 
 		translationRuntime := newThinkingTranslationRuntime(m, sess.ID, turn.ID, thinkingTranslation)
-		feedEmitter := newCodexTurnFeedEmitter(m, turn.ID, sess.ID, userMsg.ID, translationRuntime)
+		feedEmitter := newCodexTurnFeedEmitter(m, turn.ID, sess.ID, userMsg.ID, artifactDir, translationRuntime)
+		defer feedEmitter.Close()
 		var assistantBuf strings.Builder
 		var reasoningSummaryBuf strings.Builder
 		var reasoningContentBuf strings.Builder
 		var progressBuf strings.Builder
 		var finalText string
+		var terminalErrorSummary string
 		metrics := codexAppServerTurnMetrics{}
 		sawReasoningSummary := false
+
+		finalizeTurn := func(ctx context.Context, finalText string, incomplete bool) (TurnResult, error) {
+			translatedReasoningText := ""
+			thinkingTranslationApplied := false
+			thinkingTranslationFailed := false
+			if translationRuntime != nil {
+				translationRuntime.complete(ctx)
+				translatedReasoningText = translationRuntime.translatedText()
+				thinkingTranslationApplied = translationRuntime.applied()
+				thinkingTranslationFailed = translationRuntime.failedState()
+			}
+
+			reasoningText := strings.TrimSpace(reasoningSummaryBuf.String())
+			if reasoningText == "" {
+				reasoningText = strings.TrimSpace(reasoningContentBuf.String())
+			}
+			if reasoningText == "" {
+				reasoningText = strings.TrimSpace(progressBuf.String())
+			}
+			if strings.TrimSpace(finalText) == "" && assistantBuf.Len() > 0 {
+				finalText = strings.TrimSpace(assistantBuf.String())
+			}
+			finalText = strings.TrimSpace(finalText)
+			if finalText == "" {
+				if strings.TrimSpace(terminalErrorSummary) != "" {
+					finalText = fmt.Sprintf("Codex 运行时错误：%s", strings.TrimSpace(terminalErrorSummary))
+				} else {
+					finalText = "(empty response)"
+				}
+			}
+			if incomplete {
+				finalText = strings.TrimSpace(finalText) + "\n\n(提示：本轮未正常收敛，结果可能不完整。)"
+			}
+
+			persistCtx := ctxNoCancel(ctx)
+			if artifactDir != "" {
+				_ = persistCodexChatArtifacts(artifactDir, threadID, model, sess.WorkspacePath, finalText)
+			}
+
+			assistantMsg, err := m.store.AppendChatMessage(persistCtx, store.AppendChatMessageParams{
+				SessionID:   sess.ID,
+				Role:        "assistant",
+				ContentText: finalText,
+				ExpertID:    pointerString(expertID),
+				Provider:    pointerString(provider),
+				Model:       pointerString(model),
+				TokenIn:     metrics.TokenIn,
+				TokenOut:    metrics.TokenOut,
+			})
+			if err != nil {
+				return TurnResult{}, err
+			}
+			_, _ = m.store.UpdateChatSessionDefaults(persistCtx, store.UpdateChatSessionDefaultsParams{
+				SessionID:       sess.ID,
+				ExpertID:        expertID,
+				CLIToolID:       resolvedTurnOptionPointer(cliToolID, spec.Env["VIBE_TREE_CLI_TOOL_ID"], sess.CLIToolID),
+				ModelID:         resolvedTurnOptionPointer(modelID, spec.Env["VIBE_TREE_MODEL_ID"], sess.ModelID),
+				ReasoningEffort: reasoningEffort,
+				CLISessionID:    pointerOrNilString(threadID),
+				Provider:        provider,
+				Model:           model,
+			})
+			if err := m.completeTurnEntry(persistCtx, turn.ID, "answer", "answer", finalText, nil); err != nil {
+				return TurnResult{}, err
+			}
+			if strings.TrimSpace(reasoningText) != "" && len(feedEmitter.thinkingStates) == 0 {
+				if err := m.completeTurnEntry(persistCtx, turn.ID, "thinking:1", "thinking", reasoningText, nil); err != nil {
+					return TurnResult{}, err
+				}
+				if strings.TrimSpace(translatedReasoningText) != "" || thinkingTranslationFailed {
+					if err := m.replaceTurnTranslation(persistCtx, turn.ID, "thinking:1", translatedReasoningText, thinkingTranslationFailed); err != nil {
+						return TurnResult{}, err
+					}
+				}
+			}
+			if err := m.completeTurnTimeline(persistCtx, turn, assistantMsg, contextMode, providerCallMeta{TokenIn: metrics.TokenIn, TokenOut: metrics.TokenOut, CachedInputTokens: metrics.CachedInputTokens, ModelInput: modelInput, ContextMode: contextMode}, thinkingTranslationApplied, thinkingTranslationFailed); err != nil {
+				return TurnResult{}, err
+			}
+			m.broadcast("chat.turn.completed", map[string]any{
+				"session_id":                   sess.ID,
+				"user_message_id":              userMsg.ID,
+				"message":                      assistantMsg,
+				"reasoning_text":               reasoningText,
+				"translated_reasoning_text":    translatedReasoningText,
+				"thinking_translation_applied": thinkingTranslationApplied,
+				"thinking_translation_failed":  thinkingTranslationFailed,
+				"model_input":                  modelInput,
+				"context_mode":                 contextMode,
+				"token_in":                     metrics.TokenIn,
+				"token_out":                    metrics.TokenOut,
+				"cached_input_tokens":          metrics.CachedInputTokens,
+			})
+			return TurnResult{
+				UserMessage:                userMsg,
+				AssistantMessage:           assistantMsg,
+				ReasoningText:              pointerOrNilString(reasoningText),
+				TranslatedReasoningText:    pointerOrNilString(translatedReasoningText),
+				ModelInput:                 pointerString(modelInput),
+				ContextMode:                pointerString(contextMode),
+				CachedInputTokens:          metrics.CachedInputTokens,
+				ThinkingTranslationApplied: thinkingTranslationApplied,
+				ThinkingTranslationFailed:  thinkingTranslationFailed,
+			}, nil
+		}
 
 		for {
 			select {
 			case <-ctx.Done():
-				return TurnResult{}, ctx.Err()
+				released = true
+				_ = lease.Discard()
+				if strings.TrimSpace(terminalErrorSummary) == "" {
+					terminalErrorSummary = ctx.Err().Error()
+				}
+				return finalizeTurn(ctx, finalText, true)
 			case note, ok := <-client.Notifications():
 				if !ok {
 					released = true
 					_ = lease.Discard()
 					waitErr := client.Wait()
-					if shouldFallbackCodexStreamDisconnect(waitErr, finalText, assistantBuf.String(), reasoningSummaryBuf.String(), reasoningContentBuf.String()) {
-						return TurnResult{}, &codexAppServerEarlyFailure{err: fmt.Errorf("stream disconnected before completion: %w", waitErr)}
+					if waitErr != nil && strings.TrimSpace(terminalErrorSummary) == "" {
+						terminalErrorSummary = waitErr.Error()
 					}
-					if waitErr != nil {
-						return TurnResult{}, waitErr
+					hasAnyActivity := strings.TrimSpace(finalText) != "" ||
+						strings.TrimSpace(assistantBuf.String()) != "" ||
+						strings.TrimSpace(reasoningSummaryBuf.String()) != "" ||
+						strings.TrimSpace(reasoningContentBuf.String()) != "" ||
+						strings.TrimSpace(progressBuf.String()) != ""
+					if !hasAnyActivity {
+						for _, state := range feedEmitter.toolStates {
+							if state != nil && state.visible() {
+								hasAnyActivity = true
+								break
+							}
+						}
 					}
-					if shouldFallbackCodexClosedBeforeCompletion(finalText, assistantBuf.String(), reasoningSummaryBuf.String(), reasoningContentBuf.String()) {
-						return TurnResult{}, &codexAppServerEarlyFailure{err: errors.New("codex app-server closed before turn completion")}
+					if !hasAnyActivity {
+						for _, buf := range feedEmitter.planText {
+							if buf != nil && strings.TrimSpace(buf.String()) != "" {
+								hasAnyActivity = true
+								break
+							}
+						}
 					}
-					return TurnResult{}, fmt.Errorf("codex app-server closed before turn completion")
+					if !hasAnyActivity {
+						if waitErr != nil {
+							return TurnResult{}, &codexAppServerEarlyFailure{err: fmt.Errorf("codex app-server closed before producing output: %w", waitErr)}
+						}
+						return TurnResult{}, &codexAppServerEarlyFailure{err: errors.New("codex app-server closed before producing output")}
+					}
+					return finalizeTurn(ctx, finalText, true)
 				}
 				if noteTurnID := codexAppServerNotificationTurnID(note.Params); noteTurnID != "" && strings.TrimSpace(activeTurnID) != "" && noteTurnID != strings.TrimSpace(activeTurnID) {
 					continue
@@ -191,102 +332,16 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 				case "thread/tokenUsage/updated":
 					metrics = parseCodexAppServerTurnMetrics(note.Params)
 					continue
+				case "error":
+					if msg, willRetry := parseCodexAppServerErrorNotification(note.Params); msg != "" && !willRetry {
+						terminalErrorSummary = msg
+					}
+					// still forward into feedEmitter below
 				case "turn/completed":
-					if err := parseCodexAppServerTurnCompletion(note.Params); err != nil {
-						return TurnResult{}, err
+					if _, errMsg := parseCodexAppServerTurnCompletion(note.Params); errMsg != "" {
+						terminalErrorSummary = errMsg
 					}
-					translatedReasoningText := ""
-					thinkingTranslationApplied := false
-					thinkingTranslationFailed := false
-					if translationRuntime != nil {
-						translationRuntime.complete(ctx)
-						translatedReasoningText = translationRuntime.translatedText()
-						thinkingTranslationApplied = translationRuntime.applied()
-						thinkingTranslationFailed = translationRuntime.failedState()
-					}
-
-					reasoningText := strings.TrimSpace(reasoningSummaryBuf.String())
-					if reasoningText == "" {
-						reasoningText = strings.TrimSpace(reasoningContentBuf.String())
-					}
-					if reasoningText == "" {
-						reasoningText = strings.TrimSpace(progressBuf.String())
-					}
-					if strings.TrimSpace(finalText) == "" && assistantBuf.Len() > 0 {
-						finalText = strings.TrimSpace(assistantBuf.String())
-					}
-					if strings.TrimSpace(finalText) == "" {
-						finalText = "(empty response)"
-					}
-
-					if artifactDir != "" {
-						_ = persistCodexChatArtifacts(artifactDir, threadID, model, sess.WorkspacePath, finalText)
-					}
-
-					assistantMsg, err := m.store.AppendChatMessage(ctx, store.AppendChatMessageParams{
-						SessionID:   sess.ID,
-						Role:        "assistant",
-						ContentText: finalText,
-						ExpertID:    pointerString(expertID),
-						Provider:    pointerString(provider),
-						Model:       pointerString(model),
-						TokenIn:     metrics.TokenIn,
-						TokenOut:    metrics.TokenOut,
-					})
-					if err != nil {
-						return TurnResult{}, err
-					}
-					_, _ = m.store.UpdateChatSessionDefaults(ctx, store.UpdateChatSessionDefaultsParams{
-						SessionID:       sess.ID,
-						ExpertID:        expertID,
-						CLIToolID:       resolvedTurnOptionPointer(cliToolID, spec.Env["VIBE_TREE_CLI_TOOL_ID"], sess.CLIToolID),
-						ModelID:         resolvedTurnOptionPointer(modelID, spec.Env["VIBE_TREE_MODEL_ID"], sess.ModelID),
-						ReasoningEffort: reasoningEffort,
-						CLISessionID:    pointerOrNilString(threadID),
-						Provider:        provider,
-						Model:           model,
-					})
-					if err := m.completeTurnEntry(ctx, turn.ID, "answer", "answer", finalText, nil); err != nil {
-						return TurnResult{}, err
-					}
-					if strings.TrimSpace(reasoningText) != "" && len(feedEmitter.thinkingStates) == 0 {
-						if err := m.completeTurnEntry(ctx, turn.ID, "thinking:1", "thinking", reasoningText, nil); err != nil {
-							return TurnResult{}, err
-						}
-						if strings.TrimSpace(translatedReasoningText) != "" || thinkingTranslationFailed {
-							if err := m.replaceTurnTranslation(ctx, turn.ID, "thinking:1", translatedReasoningText, thinkingTranslationFailed); err != nil {
-								return TurnResult{}, err
-							}
-						}
-					}
-					if err := m.completeTurnTimeline(ctx, turn, assistantMsg, contextMode, providerCallMeta{TokenIn: metrics.TokenIn, TokenOut: metrics.TokenOut, CachedInputTokens: metrics.CachedInputTokens, ModelInput: modelInput, ContextMode: contextMode}, thinkingTranslationApplied, thinkingTranslationFailed); err != nil {
-						return TurnResult{}, err
-					}
-					m.broadcast("chat.turn.completed", map[string]any{
-						"session_id":                   sess.ID,
-						"user_message_id":              userMsg.ID,
-						"message":                      assistantMsg,
-						"reasoning_text":               reasoningText,
-						"translated_reasoning_text":    translatedReasoningText,
-						"thinking_translation_applied": thinkingTranslationApplied,
-						"thinking_translation_failed":  thinkingTranslationFailed,
-						"model_input":                  modelInput,
-						"context_mode":                 contextMode,
-						"token_in":                     metrics.TokenIn,
-						"token_out":                    metrics.TokenOut,
-						"cached_input_tokens":          metrics.CachedInputTokens,
-					})
-					return TurnResult{
-						UserMessage:                userMsg,
-						AssistantMessage:           assistantMsg,
-						ReasoningText:              pointerOrNilString(reasoningText),
-						TranslatedReasoningText:    pointerOrNilString(translatedReasoningText),
-						ModelInput:                 pointerString(modelInput),
-						ContextMode:                pointerString(contextMode),
-						CachedInputTokens:          metrics.CachedInputTokens,
-						ThinkingTranslationApplied: thinkingTranslationApplied,
-						ThinkingTranslationFailed:  thinkingTranslationFailed,
-					}, nil
+					return finalizeTurn(ctx, finalText, false)
 				case "item/completed":
 					snapshot := parseCodexAppServerCompletedItem(note.Params)
 					switch snapshot.Type {
@@ -419,6 +474,27 @@ func parseCodexAppServerNotification(method string, params json.RawMessage) []cl
 	return nil
 }
 
+func parseCodexAppServerErrorNotification(params json.RawMessage) (string, bool) {
+	var raw map[string]any
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &raw); err != nil {
+			return "", false
+		}
+	}
+	content := firstNonEmptyTrimmed(
+		nestedString(raw, "error", "message"),
+		stringValue(raw["message"]),
+		"Codex CLI error",
+	)
+	willRetry := false
+	if b := boolValue(raw["willRetry"]); b != nil {
+		willRetry = *b
+	} else if b := boolValue(raw["will_retry"]); b != nil {
+		willRetry = *b
+	}
+	return content, willRetry
+}
+
 func parseCodexAppServerCompletedItem(params json.RawMessage) codexCompletedItemSnapshot {
 	var raw map[string]any
 	if err := json.Unmarshal(params, &raw); err != nil {
@@ -487,7 +563,7 @@ func shouldFallbackCodexStreamDisconnect(err error, finalText, assistantText, re
 	return shouldFallbackCodexClosedBeforeCompletion(finalText, assistantText, reasoningSummary, reasoningContent)
 }
 
-func parseCodexAppServerTurnCompletion(params json.RawMessage) error {
+func parseCodexAppServerTurnCompletion(params json.RawMessage) (string, string) {
 	var payload struct {
 		Turn struct {
 			Status string `json:"status"`
@@ -497,16 +573,16 @@ func parseCodexAppServerTurnCompletion(params json.RawMessage) error {
 		} `json:"turn"`
 	}
 	if err := json.Unmarshal(params, &payload); err != nil {
-		return err
+		return "", fmt.Sprintf("parse turn/completed: %v", err)
 	}
 	status := strings.TrimSpace(payload.Turn.Status)
 	if status == "" || strings.EqualFold(status, "completed") {
-		return nil
+		return "", ""
 	}
 	if payload.Turn.Error != nil && strings.TrimSpace(payload.Turn.Error.Message) != "" {
-		return fmt.Errorf("codex turn %s: %s", status, strings.TrimSpace(payload.Turn.Error.Message))
+		return status, strings.TrimSpace(payload.Turn.Error.Message)
 	}
-	return fmt.Errorf("codex turn ended with status %s", status)
+	return status, fmt.Sprintf("codex turn ended with status %s", status)
 }
 
 func persistCodexChatArtifacts(dir, threadID, model, workspace, finalText string) error {
@@ -602,6 +678,35 @@ func writeWorkspacePatch(path, workspace string) error {
 	return os.WriteFile(path, out, 0o644)
 }
 
+const (
+	codexAppServerStdoutLineMaxBytes = 32 << 20 // 32MB
+	codexAppServerStderrLineMaxBytes = 2 << 20  // 2MB
+
+	codexAppServerDiagnosticsMaxBytes int64 = 1 << 20 // 1MB per diagnostics file per turn
+
+	codexAppServerOverloadMaxRetries  = 5
+	codexAppServerOverloadBaseBackoff = 200 * time.Millisecond
+	codexAppServerOverloadMaxBackoff  = 5 * time.Second
+
+	codexAppServerInitializeTimeout  = 15 * time.Second
+	codexAppServerThreadStartTimeout = 2 * time.Minute
+	codexAppServerTurnStartTimeout   = 90 * time.Second
+)
+
+var codexAppServerSleep = func(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 type stdioCodexAppServerClient struct {
 	cancel context.CancelFunc
 	cmd    *exec.Cmd
@@ -618,6 +723,11 @@ type stdioCodexAppServerClient struct {
 
 	stderrMu    sync.Mutex
 	stderrLines []string
+
+	diagMu        sync.Mutex
+	diagDir       string
+	diagBytes     map[string]int64
+	diagTruncated map[string]bool
 
 	readDone chan struct{}
 	waitDone chan struct{}
@@ -636,6 +746,7 @@ type codexRPCEnvelope struct {
 type codexRPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 
 func startCodexAppServerClient(ctx context.Context, spec runner.RunSpec) (codexAppServerClient, error) {
@@ -643,7 +754,9 @@ func startCodexAppServerClient(ctx context.Context, spec runner.RunSpec) (codexA
 	cmdCtx, cancel := context.WithCancel(ctx)
 	cmd := exec.CommandContext(cmdCtx, cliCmd, "app-server", "--listen", "stdio://")
 	cmd.Dir = firstNonEmptyTrimmed(strings.TrimSpace(spec.Cwd), ".")
-	cmd.Env = mergeCodexAppServerEnv(os.Environ(), spec.Env)
+	envOverride := cloneEnvMap(spec.Env)
+	applyCodexAppServerDefaultEnv(envOverride)
+	cmd.Env = mergeCodexAppServerEnv(os.Environ(), envOverride)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -672,6 +785,8 @@ func startCodexAppServerClient(ctx context.Context, spec runner.RunSpec) (codexA
 		enc:           json.NewEncoder(stdin),
 		notifications: make(chan codexAppServerNotification, 256),
 		pending:       make(map[string]chan codexRPCEnvelope),
+		diagBytes:     make(map[string]int64),
+		diagTruncated: make(map[string]bool),
 		readDone:      make(chan struct{}),
 		waitDone:      make(chan struct{}),
 	}
@@ -802,7 +917,183 @@ func (c *stdioCodexAppServerClient) Close() error {
 	return nil
 }
 
+func (c *stdioCodexAppServerClient) SetDiagnosticsDir(dir string) {
+	if c == nil {
+		return
+	}
+	dir = strings.TrimSpace(dir)
+	c.diagMu.Lock()
+	defer c.diagMu.Unlock()
+	if c.diagDir == dir {
+		return
+	}
+	c.diagDir = dir
+	if c.diagBytes == nil {
+		c.diagBytes = make(map[string]int64)
+	}
+	if c.diagTruncated == nil {
+		c.diagTruncated = make(map[string]bool)
+	}
+	for k := range c.diagBytes {
+		delete(c.diagBytes, k)
+	}
+	for k := range c.diagTruncated {
+		delete(c.diagTruncated, k)
+	}
+}
+
+func (c *stdioCodexAppServerClient) appendDiagnostics(relPath, line string) {
+	if c == nil {
+		return
+	}
+	relPath = strings.TrimSpace(relPath)
+	if relPath == "" {
+		return
+	}
+	line = strings.TrimRight(line, "\r\n")
+	if strings.TrimSpace(line) == "" {
+		return
+	}
+
+	var dir string
+	var data []byte
+
+	c.diagMu.Lock()
+	dir = strings.TrimSpace(c.diagDir)
+	if dir == "" {
+		c.diagMu.Unlock()
+		return
+	}
+	if c.diagBytes == nil {
+		c.diagBytes = make(map[string]int64)
+	}
+	if c.diagTruncated == nil {
+		c.diagTruncated = make(map[string]bool)
+	}
+	if c.diagTruncated[relPath] {
+		c.diagMu.Unlock()
+		return
+	}
+	data = []byte(line + "\n")
+	used := c.diagBytes[relPath]
+	if used >= codexAppServerDiagnosticsMaxBytes {
+		c.diagTruncated[relPath] = true
+		c.diagMu.Unlock()
+		return
+	}
+	remaining := codexAppServerDiagnosticsMaxBytes - used
+	if int64(len(data)) > remaining {
+		data = data[:remaining]
+		c.diagTruncated[relPath] = true
+	}
+	c.diagBytes[relPath] = used + int64(len(data))
+	c.diagMu.Unlock()
+
+	path := filepath.Join(dir, filepath.Clean(relPath))
+	parent := filepath.Dir(path)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	_, _ = f.Write(data)
+	_ = f.Close()
+}
+
+type codexRPCResponseError struct {
+	Method  string
+	Code    int
+	Message string
+}
+
+func (e *codexRPCResponseError) Error() string {
+	if e == nil {
+		return "codex app-server error"
+	}
+	msg := strings.TrimSpace(e.Message)
+	if msg == "" {
+		msg = "codex app-server error"
+	}
+	if strings.TrimSpace(e.Method) == "" {
+		return msg
+	}
+	return fmt.Sprintf("%s: %s", strings.TrimSpace(e.Method), msg)
+}
+
+func isCodexRPCOverloaded(err error) bool {
+	var rpcErr *codexRPCResponseError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+	if rpcErr.Code == -32001 {
+		return true
+	}
+	msg := strings.ToLower(strings.TrimSpace(rpcErr.Message))
+	return strings.Contains(msg, "overload") || strings.Contains(msg, "retry later") || strings.Contains(msg, "too many requests")
+}
+
+func codexAppServerMethodTimeout(method string) time.Duration {
+	switch strings.TrimSpace(method) {
+	case "initialize":
+		return codexAppServerInitializeTimeout
+	case "thread/start", "thread/resume":
+		return codexAppServerThreadStartTimeout
+	case "turn/start":
+		return codexAppServerTurnStartTimeout
+	default:
+		return codexAppServerTurnStartTimeout
+	}
+}
+
+func codexAppServerOverloadBackoff(attempt int) time.Duration {
+	if attempt < 0 {
+		attempt = 0
+	}
+	delay := codexAppServerOverloadBaseBackoff
+	for i := 0; i < attempt; i++ {
+		next := delay * 2
+		if next >= codexAppServerOverloadMaxBackoff {
+			delay = codexAppServerOverloadMaxBackoff
+			break
+		}
+		delay = next
+	}
+	jitterN := int64(delay / 4)
+	if jitterN <= 0 {
+		return delay
+	}
+	jitter := time.Duration(rand.Int63n(jitterN + 1))
+	return delay + jitter
+}
+
 func (c *stdioCodexAppServerClient) call(ctx context.Context, method string, params any, out any) error {
+	maxRetries := 0
+	if method == "thread/start" || method == "thread/resume" || method == "turn/start" || method == "initialize" {
+		maxRetries = codexAppServerOverloadMaxRetries
+	}
+	for attempt := 0; ; attempt++ {
+		callCtx := ctx
+		cancel := func() {}
+		if timeout := codexAppServerMethodTimeout(method); timeout > 0 {
+			callCtx, cancel = context.WithTimeout(ctx, timeout)
+		}
+		err := c.callOnce(callCtx, method, params, out)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		if attempt >= maxRetries || !isCodexRPCOverloaded(err) {
+			return err
+		}
+		if sleepErr := codexAppServerSleep(ctx, codexAppServerOverloadBackoff(attempt)); sleepErr != nil {
+			return sleepErr
+		}
+	}
+}
+
+func (c *stdioCodexAppServerClient) callOnce(ctx context.Context, method string, params any, out any) error {
 	id := c.nextRequestID()
 	respCh := make(chan codexRPCEnvelope, 1)
 	key := strconv.FormatInt(id, 10)
@@ -831,7 +1122,7 @@ func (c *stdioCodexAppServerClient) call(ctx context.Context, method string, par
 		return fmt.Errorf("%s: codex app-server closed before responding", method)
 	case resp := <-respCh:
 		if resp.Error != nil {
-			return fmt.Errorf("%s: %s", method, strings.TrimSpace(resp.Error.Message))
+			return &codexRPCResponseError{Method: method, Code: resp.Error.Code, Message: resp.Error.Message}
 		}
 		if out != nil && len(resp.Result) > 0 {
 			if err := json.Unmarshal(resp.Result, out); err != nil {
@@ -859,21 +1150,82 @@ func (c *stdioCodexAppServerClient) nextRequestID() int64 {
 	return c.nextID
 }
 
+var errCodexAppServerLineTooLong = errors.New("codex app-server line too long")
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func readCodexAppServerLine(r *bufio.Reader, maxBytes int) ([]byte, error) {
+	if r == nil {
+		return nil, io.EOF
+	}
+	if maxBytes <= 0 {
+		maxBytes = codexAppServerStdoutLineMaxBytes
+	}
+
+	out := make([]byte, 0, minInt(maxBytes, 64*1024))
+	for {
+		chunk, err := r.ReadSlice('\n')
+		if len(chunk) > 0 {
+			if len(out)+len(chunk) <= maxBytes {
+				out = append(out, chunk...)
+			} else {
+				// Keep a bounded prefix for diagnostics, then drain the rest of the line.
+				remaining := maxBytes - len(out)
+				if remaining > 0 {
+					out = append(out, chunk[:remaining]...)
+				}
+				for errors.Is(err, bufio.ErrBufferFull) {
+					_, err = r.ReadSlice('\n')
+				}
+				return bytes.TrimRight(out, "\r\n"), errCodexAppServerLineTooLong
+			}
+		}
+		if err == nil {
+			break
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			if len(out) == 0 {
+				return nil, io.EOF
+			}
+			break
+		}
+		return nil, err
+	}
+	return bytes.TrimRight(out, "\r\n"), nil
+}
+
 func (c *stdioCodexAppServerClient) readLoop(stdout io.Reader) {
 	defer close(c.readDone)
 	defer close(c.notifications)
-	scanner := bufio.NewScanner(stdout)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 4*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+	reader := bufio.NewReaderSize(stdout, 64*1024)
+	for {
+		line, err := readCodexAppServerLine(reader, codexAppServerStdoutLineMaxBytes)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			if errors.Is(err, errCodexAppServerLineTooLong) {
+				c.appendDiagnostics("codex_appserver.stdout.oversize.log", string(bytes.TrimSpace(line)))
+			}
+			c.readErr = fmt.Errorf("read codex app-server stdout: %w", err)
+			return
+		}
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
 			continue
 		}
 		var env codexRPCEnvelope
-		if err := json.Unmarshal([]byte(line), &env); err != nil {
-			c.readErr = fmt.Errorf("parse codex app-server stdout: %w", err)
-			return
+		if err := json.Unmarshal(line, &env); err != nil {
+			c.appendDiagnostics("codex_appserver.stdout.non_json.log", string(line))
+			continue
 		}
 		if env.Method != "" && env.ID != nil {
 			_ = c.write(map[string]any{
@@ -897,22 +1249,26 @@ func (c *stdioCodexAppServerClient) readLoop(stdout io.Reader) {
 			respCh <- env
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		c.readErr = err
-	}
 }
 
 func (c *stdioCodexAppServerClient) stderrLoop(stderr io.Reader) {
-	scanner := bufio.NewScanner(stderr)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+	reader := bufio.NewReaderSize(stderr, 64*1024)
+	for {
+		line, err := readCodexAppServerLine(reader, codexAppServerStderrLineMaxBytes)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			return
+		}
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
 			continue
 		}
+		text := string(line)
+		c.appendDiagnostics("codex_appserver.stderr.log", text)
 		c.stderrMu.Lock()
-		c.stderrLines = append(c.stderrLines, line)
+		c.stderrLines = append(c.stderrLines, text)
 		if len(c.stderrLines) > 20 {
 			c.stderrLines = c.stderrLines[len(c.stderrLines)-20:]
 		}
@@ -940,6 +1296,27 @@ func rawJSONValue(raw json.RawMessage) any {
 		return out
 	}
 	return string(raw)
+}
+
+func applyCodexAppServerDefaultEnv(env map[string]string) {
+	if env == nil {
+		return
+	}
+	defaults := map[string]string{
+		"CODEX_NO_INTERACTIVE": "1",
+		"NO_COLOR":             "1",
+		"CLICOLOR":             "0",
+		"RUST_LOG":             "error",
+	}
+	for key, value := range defaults {
+		if _, ok := env[key]; ok {
+			continue
+		}
+		if _, ok := os.LookupEnv(key); ok {
+			continue
+		}
+		env[key] = value
+	}
 }
 
 func mergeCodexAppServerEnv(base []string, override map[string]string) []string {

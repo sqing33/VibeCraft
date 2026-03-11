@@ -3,6 +3,10 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -11,7 +15,7 @@ import (
 // 失败场景：thinking 未拆段、tool 更新换 seq 或顺序错乱时测试失败。
 // 副作用：无；仅构造内存态 emitter 与事件载荷。
 func TestCodexTurnFeedEmitterSplitsThinkingSegments(t *testing.T) {
-	emitter := newCodexTurnFeedEmitter(nil, "ct_1", "sess_1", "msg_1", nil)
+	emitter := newCodexTurnFeedEmitter(nil, "ct_1", "sess_1", "msg_1", "", nil)
 	payloads := make([]chatTurnEventPayload, 0, 6)
 	emitter.sink = func(payload chatTurnEventPayload) {
 		payloads = append(payloads, payload)
@@ -49,7 +53,7 @@ func TestCodexTurnFeedEmitterSplitsThinkingSegments(t *testing.T) {
 // 失败场景：若同一 itemId 被错误复用为同一个 thinking 条目，则测试失败。
 // 副作用：无；仅消费内存事件。
 func TestCodexTurnFeedEmitterSplitsSameReasoningItemAfterInterleave(t *testing.T) {
-	emitter := newCodexTurnFeedEmitter(nil, "ct_1", "sess_1", "msg_1", nil)
+	emitter := newCodexTurnFeedEmitter(nil, "ct_1", "sess_1", "msg_1", "", nil)
 	payloads := make([]chatTurnEventPayload, 0, 4)
 	emitter.sink = func(payload chatTurnEventPayload) {
 		payloads = append(payloads, payload)
@@ -79,7 +83,7 @@ func TestCodexTurnFeedEmitterSplitsSameReasoningItemAfterInterleave(t *testing.T
 // 失败场景：若仍然发出 `command execution` 之类的占位条目，则测试失败。
 // 副作用：无；仅在内存中消费单条事件。
 func TestCodexTurnFeedEmitterSkipsToolPlaceholder(t *testing.T) {
-	emitter := newCodexTurnFeedEmitter(nil, "ct_1", "sess_1", "msg_1", nil)
+	emitter := newCodexTurnFeedEmitter(nil, "ct_1", "sess_1", "msg_1", "", nil)
 	payloads := make([]chatTurnEventPayload, 0, 1)
 	emitter.sink = func(payload chatTurnEventPayload) {
 		payloads = append(payloads, payload)
@@ -95,7 +99,7 @@ func TestCodexTurnFeedEmitterSkipsToolPlaceholder(t *testing.T) {
 // 失败场景：summary 没有 replace raw，或后续 raw 仍追加导致重复时测试失败。
 // 副作用：无；仅在内存中消费结构化事件。
 func TestCodexTurnFeedEmitterPrefersSummaryReasoning(t *testing.T) {
-	emitter := newCodexTurnFeedEmitter(nil, "ct_1", "sess_1", "msg_1", nil)
+	emitter := newCodexTurnFeedEmitter(nil, "ct_1", "sess_1", "msg_1", "", nil)
 	payloads := make([]chatTurnEventPayload, 0, 3)
 	emitter.sink = func(payload chatTurnEventPayload) {
 		payloads = append(payloads, payload)
@@ -114,5 +118,71 @@ func TestCodexTurnFeedEmitterPrefersSummaryReasoning(t *testing.T) {
 	}
 	if payloads[1].EntryID != "thinking:1" || payloads[1].Op != "replace" || payloads[1].Delta != "summary-1" {
 		t.Fatalf("summary should replace raw payload: %+v", payloads[1])
+	}
+}
+
+func TestCodexTurnFeedEmitterMapsWillRetryErrorToSystem(t *testing.T) {
+	emitter := newCodexTurnFeedEmitter(nil, "ct_1", "sess_1", "msg_1", "", nil)
+	payloads := make([]chatTurnEventPayload, 0, 2)
+	emitter.sink = func(payload chatTurnEventPayload) {
+		payloads = append(payloads, payload)
+	}
+
+	emitter.consume(context.Background(), "error", json.RawMessage(`{"willRetry":true,"error":{"message":"overloaded"}}`))
+
+	if len(payloads) != 1 {
+		t.Fatalf("expected 1 payload, got %d: %+v", len(payloads), payloads)
+	}
+	if payloads[0].EntryID != "system:codex" || payloads[0].Kind != "system" || payloads[0].Status == "failed" {
+		t.Fatalf("unexpected will_retry payload: %+v", payloads[0])
+	}
+}
+
+func TestCodexTurnFeedEmitterTruncatesToolOutputAndWritesArtifacts(t *testing.T) {
+	artifactDir := t.TempDir()
+	emitter := newCodexTurnFeedEmitter(nil, "ct_1", "sess_1", "msg_1", artifactDir, nil)
+	defer emitter.Close()
+
+	payloads := make([]chatTurnEventPayload, 0, 4)
+	emitter.sink = func(payload chatTurnEventPayload) {
+		payloads = append(payloads, payload)
+	}
+	ctx := context.Background()
+
+	emitter.consume(ctx, "codex/event/exec_command_begin", json.RawMessage(`{"callId":"cmd_1","command":"echo hi"}`))
+
+	big := strings.Repeat("x", codexToolFeedTailBytes+100)
+	emitter.consume(ctx, "codex/event/exec_command_output_delta", json.RawMessage(fmt.Sprintf(`{"callId":"cmd_1","stream":"stdout","chunk":%q}`, big)))
+	emitter.consume(ctx, "codex/event/exec_command_end", json.RawMessage(`{"callId":"cmd_1","exit_code":0,"success":true}`))
+
+	var lastTool chatTurnEventPayload
+	found := false
+	for _, payload := range payloads {
+		if payload.Kind == "tool" && payload.EntryID == "tool:cmd_1" {
+			lastTool = payload
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected tool payload, got %+v", payloads)
+	}
+	if lastTool.Meta == nil {
+		t.Fatalf("expected tool meta")
+	}
+	stdout, _ := lastTool.Meta["stdout"].(string)
+	if len(stdout) != codexToolFeedTailBytes {
+		t.Fatalf("expected stdout tail len=%d, got %d", codexToolFeedTailBytes, len(stdout))
+	}
+	if truncated, _ := lastTool.Meta["stdout_truncated"].(bool); !truncated {
+		t.Fatalf("expected stdout_truncated=true, got meta=%+v", lastTool.Meta)
+	}
+
+	path := filepath.Join(artifactDir, "codex_tools", "cmd_1.stdout.log")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read artifact: %v", err)
+	}
+	if string(data) != big {
+		t.Fatalf("unexpected artifact stdout size=%d", len(data))
 	}
 }
