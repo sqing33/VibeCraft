@@ -113,6 +113,19 @@ The system MUST connect to `GET /api/v1/ws` for real-time event subscription. Th
 - **THEN** the client automatically attempts reconnection
 - **AND** resumes receiving events after reconnection
 
+### Requirement: WebSocket messages MUST support batched event envelopes
+
+The UI MUST accept WebSocket text messages that decode to either:
+- a single event envelope JSON object, or
+- an array of event envelope JSON objects.
+
+When a message contains an array of envelopes, the UI MUST process envelopes in array order and apply them as if they were delivered as separate messages.
+
+#### Scenario: Batched WebSocket message is applied in order
+- **WHEN** the UI receives a WebSocket message containing an array of multiple envelopes
+- **THEN** the UI applies each envelope in order
+- **AND** downstream state reflects all envelopes
+
 ### Daemon Communication
 
 The system MUST encapsulate all HTTP API calls in `daemon.ts`. The system MUST support daemon URL configuration via `VITE_DAEMON_URL` environment variable or runtime switching. The system MUST perform health checks via `GET /api/v1/health`.
@@ -660,4 +673,3 @@ If the WebSocket connection is disconnected, or if chat live-update events stop 
 - **AND** the backend snapshot shows the latest turn is no longer running
 - **THEN** the UI stops catch-up polling
 - **AND** the chat page converges to a completed assistant message bubble with attached process details
-
