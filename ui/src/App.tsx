@@ -13,7 +13,7 @@ import { WorkflowsPage } from '@/app/pages/WorkflowsPage'
 import { WorkflowDetailPage } from '@/app/pages/WorkflowDetailPage'
 import { fetchExperts, fetchHealth } from '@/lib/daemon'
 import { emitWsEnvelope } from '@/lib/wsBus'
-import { parseWsEnvelope } from '@/lib/ws'
+import { parseWsEnvelopes } from '@/lib/ws'
 import { useDaemonStore } from '@/stores/daemonStore'
 
 function isWorkspaceRoute(route: Route): boolean {
@@ -127,9 +127,8 @@ export default function App() {
       }
 
       socket.onmessage = (ev) => {
-        const env = parseWsEnvelope(String(ev.data ?? ''))
-        if (!env) return
-        emitWsEnvelope(env)
+        const envs = parseWsEnvelopes(String(ev.data ?? ''))
+        for (const env of envs) emitWsEnvelope(env)
       }
 
       socket.onclose = () => {

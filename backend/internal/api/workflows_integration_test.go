@@ -193,6 +193,17 @@ func TestStartWorkflowCreatesMasterExecution(t *testing.T) {
 		Type        string `json:"type"`
 		ExecutionID string `json:"execution_id"`
 	}
+	decodeEnvelopes := func(msg []byte) ([]envelope, error) {
+		var batch []envelope
+		if err := json.Unmarshal(msg, &batch); err == nil {
+			return batch, nil
+		}
+		var single envelope
+		if err := json.Unmarshal(msg, &single); err != nil {
+			return nil, err
+		}
+		return []envelope{single}, nil
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	_ = conn.SetReadDeadline(deadline)
 
@@ -201,14 +212,17 @@ func TestStartWorkflowCreatesMasterExecution(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ws read: %v", err)
 		}
-		var env envelope
-		if err := json.Unmarshal(msg, &env); err != nil {
+		envs, err := decodeEnvelopes(msg)
+		if err != nil {
 			continue
 		}
-		if env.ExecutionID == started.Execution.ID && env.Type == "execution.exited" {
-			break
+		for _, env := range envs {
+			if env.ExecutionID == started.Execution.ID && env.Type == "execution.exited" {
+				goto gotExit
+			}
 		}
 	}
+gotExit:
 
 	getWfRes, err := http.Get(httpSrv.URL + "/api/v1/workflows/" + created.ID)
 	if err != nil {

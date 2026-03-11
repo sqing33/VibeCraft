@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -44,7 +45,7 @@ func (h *Hub) Broadcast(msg []byte) {
 func (h *Hub) Serve(conn *websocket.Conn) {
 	c := &client{
 		conn: conn,
-		send: make(chan []byte, 256),
+		send: make(chan []byte, clientSendBuffer),
 	}
 
 	h.mu.Lock()
@@ -69,6 +70,13 @@ const (
 	writeWait = 10 * time.Second
 	pongWait  = 60 * time.Second
 	pingEvery = (pongWait * 9) / 10
+
+	// Make room for bursty streaming (chat deltas / node.log) without immediately
+	// dropping. Still bounded and non-blocking at broadcast time.
+	clientSendBuffer = 2048
+
+	// Upper bound of envelopes to batch into a single WS frame.
+	maxWriteBatch = 64
 )
 
 func (c *client) readPump() {
@@ -105,7 +113,37 @@ func (c *client) writePump() {
 				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-			if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+
+			closing := false
+			batch := make([]json.RawMessage, 0, maxWriteBatch)
+			batch = append(batch, msg)
+
+		drain:
+			for len(batch) < maxWriteBatch {
+				select {
+				case next, ok := <-c.send:
+					if !ok {
+						closing = true
+						break drain
+					}
+					batch = append(batch, next)
+				default:
+					break drain
+				}
+			}
+
+			payload := msg
+			if len(batch) > 1 {
+				if b, err := json.Marshal(batch); err == nil {
+					payload = b
+				}
+			}
+
+			if err := c.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+				return
+			}
+			if closing {
+				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 		case <-ticker.C:

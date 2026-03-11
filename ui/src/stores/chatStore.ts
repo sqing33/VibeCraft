@@ -455,7 +455,10 @@ export type ChatStore = {
   clearTurnFeed: (sessionId: string) => void;
   refreshSessions: (daemonUrl: string) => Promise<void>;
   loadMessages: (daemonUrl: string, sessionId: string) => Promise<void>;
-  loadTurns: (daemonUrl: string, sessionId: string) => Promise<void>;
+  loadTurns: (
+    daemonUrl: string,
+    sessionId: string,
+  ) => Promise<ChatTurnTimeline[]>;
   createSession: (
     daemonUrl: string,
     req: {
@@ -736,6 +739,7 @@ export const useChatStore = create<ChatStore>()(
       loadTurns: async (daemonUrl, sessionId) => {
         const turns = await fetchChatTurns(daemonUrl, sessionId);
         set((state) => hydrateTurnsIntoState(state, sessionId, turns));
+        return turns;
       },
       createSession: async (daemonUrl, req) => {
         const session = await createChatSession(daemonUrl, req);

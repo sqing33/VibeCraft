@@ -55,10 +55,25 @@ func TestWebSocketBroadcastExecutionLifecycle(t *testing.T) {
 		t.Fatalf("missing execution_id in start response")
 	}
 
-	type envelope struct {
-		Type        string          `json:"type"`
-		ExecutionID string          `json:"execution_id"`
-		Payload     json.RawMessage `json:"payload"`
+	type wsEnvelope struct {
+		Type            string          `json:"type"`
+		ExecutionID     string          `json:"execution_id"`
+		OrchestrationID string          `json:"orchestration_id"`
+		RoundID         string          `json:"round_id"`
+		AgentRunID      string          `json:"agent_run_id"`
+		Payload         json.RawMessage `json:"payload"`
+	}
+
+	decodeEnvelopes := func(msg []byte) ([]wsEnvelope, error) {
+		var batch []wsEnvelope
+		if err := json.Unmarshal(msg, &batch); err == nil {
+			return batch, nil
+		}
+		var single wsEnvelope
+		if err := json.Unmarshal(msg, &single); err != nil {
+			return nil, err
+		}
+		return []wsEnvelope{single}, nil
 	}
 
 	deadline := time.Now().Add(3 * time.Second)
@@ -70,20 +85,22 @@ func TestWebSocketBroadcastExecutionLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ws read: %v", err)
 		}
-		var env envelope
-		if err := json.Unmarshal(msg, &env); err != nil {
+		envs, err := decodeEnvelopes(msg)
+		if err != nil {
 			t.Fatalf("parse ws json: %v (msg=%q)", err, string(msg))
 		}
-		if env.ExecutionID != started.ID {
-			continue
-		}
-		switch env.Type {
-		case "execution.started":
-			gotStarted = true
-		case "node.log":
-			gotLog = true
-		case "execution.exited":
-			gotExited = true
+		for _, env := range envs {
+			if env.ExecutionID != started.ID {
+				continue
+			}
+			switch env.Type {
+			case "execution.started":
+				gotStarted = true
+			case "node.log":
+				gotLog = true
+			case "execution.exited":
+				gotExited = true
+			}
 		}
 	}
 
@@ -143,23 +160,38 @@ func TestCancelExecutionBroadcastsCanceledExit(t *testing.T) {
 		Payload     json.RawMessage `json:"payload"`
 	}
 
+	decodeEnvelopes := func(msg []byte) ([]envelope, error) {
+		var batch []envelope
+		if err := json.Unmarshal(msg, &batch); err == nil {
+			return batch, nil
+		}
+		var single envelope
+		if err := json.Unmarshal(msg, &single); err != nil {
+			return nil, err
+		}
+		return []envelope{single}, nil
+	}
+
 	// Wait until we see the process produce any log (ensures it's running).
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			t.Fatalf("ws read: %v", err)
 		}
-		var env envelope
-		if err := json.Unmarshal(msg, &env); err != nil {
+		envs, err := decodeEnvelopes(msg)
+		if err != nil {
 			continue
 		}
-		if env.ExecutionID != started.ID {
-			continue
-		}
-		if env.Type == "node.log" {
-			break
+		for _, env := range envs {
+			if env.ExecutionID != started.ID {
+				continue
+			}
+			if env.Type == "node.log" {
+				goto gotLog
+			}
 		}
 	}
+gotLog:
 
 	cancelRes, err := http.Post(httpSrv.URL+"/api/v1/executions/"+started.ID+"/cancel", "application/json", nil)
 	if err != nil {
@@ -170,29 +202,32 @@ func TestCancelExecutionBroadcastsCanceledExit(t *testing.T) {
 		t.Fatalf("unexpected cancel status: %s", cancelRes.Status)
 	}
 
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			t.Fatalf("ws read: %v", err)
 		}
-		var env envelope
-		if err := json.Unmarshal(msg, &env); err != nil {
+		envs, err := decodeEnvelopes(msg)
+		if err != nil {
 			continue
 		}
-		if env.ExecutionID != started.ID || env.Type != "execution.exited" {
-			continue
-		}
+		for _, env := range envs {
+			if env.ExecutionID != started.ID || env.Type != "execution.exited" {
+				continue
+			}
 
-		var payload struct {
-			Status string `json:"status"`
+			var payload struct {
+				Status string `json:"status"`
+			}
+			if err := json.Unmarshal(env.Payload, &payload); err != nil {
+				t.Fatalf("parse execution.exited payload: %v", err)
+			}
+			if payload.Status != "canceled" {
+				t.Fatalf("expected canceled status, got %q", payload.Status)
+			}
+			return
 		}
-		if err := json.Unmarshal(env.Payload, &payload); err != nil {
-			t.Fatalf("parse execution.exited payload: %v", err)
-		}
-		if payload.Status != "canceled" {
-			t.Fatalf("expected canceled status, got %q", payload.Status)
-		}
-		return
 	}
 }
 
@@ -204,6 +239,26 @@ func TestOrchestrationExecutionEventsIncludeCorrelation(t *testing.T) {
 		t.Fatalf("dial ws: %v", err)
 	}
 	defer conn.Close()
+
+	type envelope struct {
+		Type            string `json:"type"`
+		ExecutionID     string `json:"execution_id"`
+		OrchestrationID string `json:"orchestration_id"`
+		RoundID         string `json:"round_id"`
+		AgentRunID      string `json:"agent_run_id"`
+	}
+
+	decodeEnvelopes := func(msg []byte) ([]envelope, error) {
+		var batch []envelope
+		if err := json.Unmarshal(msg, &batch); err == nil {
+			return batch, nil
+		}
+		var single envelope
+		if err := json.Unmarshal(msg, &single); err != nil {
+			return nil, err
+		}
+		return []envelope{single}, nil
+	}
 
 	body, _ := json.Marshal(map[string]any{
 		"title":          "ws-orch",
@@ -238,25 +293,21 @@ func TestOrchestrationExecutionEventsIncludeCorrelation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ws read: %v", err)
 		}
-		var envMsg struct {
-			Type            string `json:"type"`
-			ExecutionID     string `json:"execution_id"`
-			OrchestrationID string `json:"orchestration_id"`
-			RoundID         string `json:"round_id"`
-			AgentRunID      string `json:"agent_run_id"`
-		}
-		if err := json.Unmarshal(msg, &envMsg); err != nil {
+		envs, err := decodeEnvelopes(msg)
+		if err != nil {
 			continue
 		}
-		if envMsg.Type != "execution.started" {
-			continue
+		for _, envMsg := range envs {
+			if envMsg.Type != "execution.started" {
+				continue
+			}
+			if envMsg.OrchestrationID != created.Orchestration.ID {
+				continue
+			}
+			if envMsg.RoundID == "" || envMsg.AgentRunID == "" || envMsg.ExecutionID == "" {
+				t.Fatalf("expected orchestration correlation ids in execution.started, got %+v", envMsg)
+			}
+			return
 		}
-		if envMsg.OrchestrationID != created.Orchestration.ID {
-			continue
-		}
-		if envMsg.RoundID == "" || envMsg.AgentRunID == "" || envMsg.ExecutionID == "" {
-			t.Fatalf("expected orchestration correlation ids in execution.started, got %+v", envMsg)
-		}
-		return
 	}
 }

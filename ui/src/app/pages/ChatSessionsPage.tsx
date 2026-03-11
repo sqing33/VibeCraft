@@ -238,6 +238,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const daemonUrl = useDaemonStore((s) => s.daemonUrl);
   const health = useDaemonStore((s) => s.health);
   const experts = useDaemonStore((s) => s.experts);
+  const wsState = useDaemonStore((s) => s.wsState);
 
   const sessions = useChatStore((s) => s.sessions);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -318,6 +319,8 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   );
   const liveUpdateFrameRef = useRef<number | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
+  const lastChatLiveEventAtBySessionRef = useRef<Record<string, number>>({});
+  const lastTurnRequestAtBySessionRef = useRef<Record<string, number>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef(0);
 
@@ -973,6 +976,69 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const pendingAssistant =
     sending || hasFeedEntries(activeTurnFeed) || streaming.length > 0;
 
+  useEffect(() => {
+    if (!activeSessionId) return;
+
+    const sessionId = activeSessionId;
+    const now = Date.now();
+
+    const hintAt = lastTurnRequestAtBySessionRef.current[sessionId] ?? 0;
+    const hasHint = hintAt > 0 && now - hintAt < 60 * 60 * 1000;
+
+    if (!pendingAssistant && !hasHint) return;
+
+    const isWsStale = () => {
+      const now = Date.now();
+      const lastWsAt = lastChatLiveEventAtBySessionRef.current[sessionId] ?? 0;
+      const wsQuiet = lastWsAt > 0 && now - lastWsAt > 20_000;
+      return useDaemonStore.getState().wsState !== "connected" || wsQuiet;
+    };
+
+    let cancelled = false;
+    let timer: number | null = null;
+    let inflight = false;
+
+    const tick = async () => {
+      if (cancelled) return;
+      if (!isWsStale()) {
+        timer = window.setTimeout(tick, 10_000);
+        return;
+      }
+      if (inflight) {
+        timer = window.setTimeout(tick, 4000);
+        return;
+      }
+      inflight = true;
+      try {
+        const [turns] = await Promise.all([
+          loadTurns(daemonUrl, sessionId),
+          loadMessages(daemonUrl, sessionId),
+        ]);
+        const stillRunning = turns.some((turn) => turn.status === "running");
+        if (!stillRunning) {
+          delete lastTurnRequestAtBySessionRef.current[sessionId];
+          return;
+        }
+      } catch {
+        // Best-effort catch-up. We'll retry later.
+      } finally {
+        inflight = false;
+      }
+
+      if (cancelled) return;
+      if (!isWsStale()) return;
+
+      timer = window.setTimeout(tick, 4000);
+    };
+
+    tick();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [activeSessionId, daemonUrl, loadMessages, loadTurns, pendingAssistant, wsState]);
+
   const flushBufferedLiveUpdates = useCallback(() => {
     const buffer = liveUpdateBufferRef.current;
     if (!hasLiveUpdateBufferContent(buffer)) return;
@@ -1086,6 +1152,12 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   );
 
   useEffect(() => {
+    const markChatLiveUpdate = (sessionId?: string) => {
+      const id = (sessionId ?? "").trim();
+      if (!id) return;
+      lastChatLiveEventAtBySessionRef.current[id] = Date.now();
+    };
+
     const bufferLiveUpdate = (env: {
       type: string;
       payload?: unknown;
@@ -1100,6 +1172,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
         ) {
           return true;
         }
+        markChatLiveUpdate(payload.session_id);
         buffer.turnEvents.push(payload);
         scheduleBufferedLiveUpdates();
         return true;
@@ -1110,6 +1183,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
           | undefined;
         if (!payload?.session_id || typeof payload.delta !== "string")
           return true;
+        markChatLiveUpdate(payload.session_id);
         buffer.thinkingBySession[payload.session_id] =
           (buffer.thinkingBySession[payload.session_id] ?? "") + payload.delta;
         scheduleBufferedLiveUpdates();
@@ -1121,6 +1195,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
           | undefined;
         if (!payload?.session_id || typeof payload.delta !== "string")
           return true;
+        markChatLiveUpdate(payload.session_id);
         buffer.thinkingTranslationStateBySession[payload.session_id] = {
           applied: true,
           failed: false,
@@ -1139,6 +1214,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
           | undefined;
         if (!payload?.session_id || typeof payload.delta !== "string")
           return true;
+        markChatLiveUpdate(payload.session_id);
         buffer.streamingBySession[payload.session_id] =
           (buffer.streamingBySession[payload.session_id] ?? "") + payload.delta;
         scheduleBufferedLiveUpdates();
@@ -1162,6 +1238,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
             }
           | undefined;
         if (!payload?.session_id) return;
+        markChatLiveUpdate(payload.session_id);
         clearStreaming(payload.session_id);
         clearThinking(payload.session_id);
         resetThinkingTranslation(payload.session_id);
@@ -1186,6 +1263,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       if (env.type === "chat.turn.thinking.translation.failed") {
         const payload = env.payload as { session_id?: string } | undefined;
         if (!payload?.session_id) return;
+        markChatLiveUpdate(payload.session_id);
         setThinkingTranslationState(payload.session_id, {
           applied: true,
           failed: true,
@@ -1214,6 +1292,8 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
             }
           | undefined;
         if (!payload?.session_id) return;
+        markChatLiveUpdate(payload.session_id);
+        delete lastTurnRequestAtBySessionRef.current[payload.session_id];
         if (
           typeof payload.reasoning_text === "string" &&
           payload.reasoning_text.trim()
@@ -1381,12 +1461,15 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
 
   const onSend = async () => {
     if (!activeSessionId) return;
+    const sessionId = activeSessionId;
     const text = input.trim();
     if (!text && selectedFiles.length === 0) return;
     const draftInput = input;
     const draftFiles = selectedFiles;
     setInput("");
     setSelectedFiles([]);
+    lastTurnRequestAtBySessionRef.current[sessionId] = Date.now();
+    lastChatLiveEventAtBySessionRef.current[sessionId] = Date.now();
     try {
       const selection = buildRuntimeRequest(
         effectiveTurnRuntimeKey,
@@ -1398,7 +1481,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
       );
       await sendTurn(
         daemonUrl,
-        activeSessionId,
+        sessionId,
         text,
         selection.expertId,
         selection.cliToolId,
@@ -1412,6 +1495,7 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     } catch (err: unknown) {
       setInput(draftInput);
       setSelectedFiles(draftFiles);
+      delete lastTurnRequestAtBySessionRef.current[sessionId];
       toast({
         variant: "destructive",
         title: "发送失败",

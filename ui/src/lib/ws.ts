@@ -10,13 +10,27 @@ export type WsEnvelope = {
   payload?: unknown
 }
 
-export function parseWsEnvelope(raw: string): WsEnvelope | null {
+function coerceWsEnvelope(value: unknown): WsEnvelope | null {
+  if (!value || typeof value !== 'object') return null
+  const obj = value as { type?: unknown }
+  if (typeof obj.type !== 'string') return null
+  return value as WsEnvelope
+}
+
+export function parseWsEnvelopes(raw: string): WsEnvelope[] {
   try {
-    const obj = JSON.parse(raw) as WsEnvelope
-    if (!obj || typeof obj !== 'object') return null
-    if (typeof obj.type !== 'string') return null
-    return obj
+    const parsed = JSON.parse(raw) as unknown
+    if (Array.isArray(parsed)) {
+      const out: WsEnvelope[] = []
+      for (const item of parsed) {
+        const env = coerceWsEnvelope(item)
+        if (env) out.push(env)
+      }
+      return out
+    }
+    const env = coerceWsEnvelope(parsed)
+    return env ? [env] : []
   } catch {
-    return null
+    return []
   }
 }
