@@ -1495,7 +1495,6 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     } catch (err: unknown) {
       setInput(draftInput);
       setSelectedFiles(draftFiles);
-      delete lastTurnRequestAtBySessionRef.current[sessionId];
       toast({
         variant: "destructive",
         title: "发送失败",
