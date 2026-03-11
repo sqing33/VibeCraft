@@ -1,9 +1,5 @@
-# mcp-skill-settings Specification
+## MODIFIED Requirements
 
-## Purpose
-
-MCP / Skill settings define how `vibe-tree` persists Codex-facing MCP registries, exposes them in the settings UI, discovers skills from project/user directories, allows local skill installation, and applies both to chat sessions without mutating the user's global Codex configuration.
-## Requirements
 ### Requirement: System MUST expose MCP settings as a JSON-native registry with per-tool defaults
 The system MUST provide settings APIs and UI for a global MCP registry.
 
@@ -57,69 +53,6 @@ The MCP settings UI MUST also expose gateway enablement, idle TTL, and a runtime
 - **THEN** the daemon persists the gateway configuration
 - **AND** future MCP settings reads return the same gateway enablement and TTL
 
-### Requirement: System MUST expose Skill settings as discovered catalog state with a global enabled switch
-The system MUST provide a dedicated `Skill` settings tab that reflects the skills currently discovered from project-scoped and user-scoped skill directories.
-
-Each skill entry MUST include:
-- stable `id`
-- description when available
-- resolved `path`
-- source/discovery metadata
-- persisted `enabled` state used by vibe-tree runtime filtering
-
-The Skill settings UI MUST present a single enable/disable switch per skill.
-The Skill settings UI MUST NOT present per-tool binding switches.
-The Skill settings UI MUST use a fixed top toolbar and a separately scrollable content area.
-Skills without an explicit persisted binding MUST default to enabled.
-
-#### Scenario: Read Skill settings
-- **WHEN** client requests Skill settings
-- **THEN** the daemon returns the currently discovered skill catalog
-- **AND** each skill entry includes id, description, path, source metadata, and enabled state
-
-#### Scenario: Discover skills from project and user roots
-- **WHEN** matching `SKILL.md` files exist under project or user skill directories
-- **THEN** the daemon includes them in the Skill settings response
-- **AND** duplicate ids are de-duplicated into a single visible skill entry
-
-#### Scenario: Disable a discovered skill
-- **WHEN** user turns off a discovered skill in settings
-- **THEN** the daemon persists that skill as disabled in `skill_bindings`
-- **AND** subsequent Skill settings reads return that skill with `enabled=false`
-
-### Requirement: System MUST support installing local skills for later Codex use
-The system MUST allow users to add local Skill packages from the Skill settings page.
-
-The system MUST accept either:
-- a zip archive containing exactly one skill root with `SKILL.md`
-- a directory upload whose reconstructed contents contain exactly one skill root with `SKILL.md`
-
-Installed skills MUST be copied into the user-level Codex skills directory at `~/.codex/skills/<skill-id>/`.
-After successful installation, the new skill MUST be discoverable from the Skill settings API.
-
-#### Scenario: Install skill from zip
-- **WHEN** user uploads a zip archive that contains one skill with `SKILL.md`
-- **THEN** the daemon installs it to `~/.codex/skills/<skill-id>/`
-- **AND** the Skill settings response includes that skill on the next read
-
-#### Scenario: Install skill from directory upload
-- **WHEN** user uploads a directory containing one skill with `SKILL.md`
-- **THEN** the daemon reconstructs the directory tree, installs the skill to `~/.codex/skills/<skill-id>/`
-- **AND** the installed skill becomes available to the runtime after discovery refresh
-
-### Requirement: Codex runtime MUST inject only enabled discovered skills
-The system MUST continue discovering skills from project and user roots.
-The vibe-tree runtime MUST only inject skills that are both discovered and enabled.
-If an expert specifies `enabled_skills`, the effective injected skill set MUST be the intersection of discovered skills, enabled skills, and `expert.enabled_skills`.
-
-#### Scenario: Runtime excludes disabled skill
-- **WHEN** a discovered skill has been disabled in Skill settings
-- **THEN** it is absent from the effective Codex skill injection set
-
-#### Scenario: Expert narrows enabled skills further
-- **WHEN** two skills are enabled globally but expert `enabled_skills` contains only one of them
-- **THEN** only that one skill is injected for that expert's Codex runtime
-
 ### Requirement: Chat sessions MUST persist current MCP selection independently of defaults
 The system MUST store the selected MCP ids for each chat session.
 New chat sessions MUST initialize that selection from the default-enabled MCP set for the chosen CLI tool.
@@ -141,4 +74,3 @@ When a session's selected MCP ids change, the daemon MUST use that updated selec
 - **WHEN** user changes the current session's selected MCP ids during an active conversation
 - **THEN** the daemon persists the updated selection before starting the next turn
 - **AND** the next turn's gateway access policy uses the updated selection
-

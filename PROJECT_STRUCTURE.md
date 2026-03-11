@@ -93,6 +93,7 @@
 | `backend/internal/chat/codex_turn_feed.go` | Codex turn feed 归一化：兼容 `item/*` 与 `codex/event/*`，把 answer/thinking/tool/plan/question/system 分层成结构化聊天事件 |
 | `backend/internal/chat/attachments.go`      | Chat 附件能力：附件类型校验、大小限制、文件落盘、provider 多模态 block 构造、调试输入摘要                                               |
 | `backend/internal/chat/codex_runtime_settings.go` | Codex 线程运行时注入：按会话注入 `config.mcp_servers`，并仅为“已发现且已启用”的 skills 追加 allowlist/path index |
+| `backend/internal/mcpgateway/manager.go`          | MCP Gateway：daemon 常驻 `/mcp` 入口、session token、下游 MCP 按需连接与 idle TTL 回收 |
 | `backend/internal/chat/provider_input.go`    | Chat 多模态重建：基于本地消息 + 附件重建 OpenAI/Anthropic provider 输入                                                                |
 | `backend/internal/chat/thinking_translation.go` | Chat 思考过程翻译：按分段阈值缓冲 reasoning、调用翻译模型并广播中文 delta / 失败事件                                             |
 | `backend/internal/config/clitools.go`                | CLI 工具配置：维护 `Codex CLI` / `Claude Code` / `iFlow CLI` / `OpenCode CLI` 的启用状态、协议族与命令路径；其中 iFlow 额外维护官方认证方式与浏览器登录镜像 |
@@ -104,7 +105,7 @@
 | `backend/internal/chat/iflow_runtime_settings.go`    | iFlow Chat 运行时注入：在实际启动 CLI 前注入 managed home、官方认证、有效 MCP 与技能说明 |
 | `backend/internal/chat/cli_runtime_settings.go`      | CLI 运行时受管配置注入：统一为 Codex / Claude / iFlow / OpenCode 注入 managed config root、来源 env 与运行参数                     |
 | `backend/internal/cliruntime/managed_configs.go`     | 受管 CLI 配置物化：写入 Codex `CODEX_HOME`、Claude `settings.json` 等应用级 config root 文件                                         |
-| `backend/internal/api/settings_mcp.go`               | MCP 设置 API：以原始 JSON 读写 MCP 注册表，并按 CLI 工具维护“默认启用”集合 |
+| `backend/internal/api/settings_mcp.go`               | MCP 设置 / Gateway API：读写 MCP 注册表、gateway 开关/TTL，并返回 `/api/v1/mcp-gateway/status` 运行态 |
 | `backend/internal/api/settings_skills.go`            | Skill 设置 API：读取/保存 skill 启用状态，并支持 zip / 文件夹安装到用户级 `~/.codex/skills` |
 | `backend/internal/skillcatalog/install.go`           | Skill 安装器：处理 zip / 目录上传、定位 `SKILL.md` 根目录，并将 skill 安装到用户级 Codex skills 目录 |
 | `backend/internal/openaicompat/compat.go`   | OpenAI 兼容适配：按模型探测/持久化 `responses` 或 `chat/completions`，并提供 endpoint mismatch 分类与 plain-text 调用帮助         |
@@ -183,6 +184,7 @@
 | OpenAI 兼容接口自动切换            | `backend/internal/openaicompat/compat.go`, `backend/internal/api/settings_llm_test_call.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/thinking_translation.go`, `backend/internal/runner/sdk_runner.go`, `backend/internal/config/openai_api_style.go` |
 | 专家设置 / AI 创建专家             | `backend/internal/api/settings_experts.go`, `backend/internal/api/settings_expert_sessions.go`, `backend/internal/expertbuilder/service.go`, `backend/internal/skillcatalog/catalog.go`, `.codex/skills/expert-creator/SKILL.md`, `ui/src/app/components/ExpertSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
 | MCP / Skill 设置                    | `backend/internal/api/settings_mcp.go`, `backend/internal/api/settings_skills.go`, `backend/internal/skillcatalog/install.go`, `backend/internal/config/mcp_skill_settings.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/MCPSettingsTab.tsx`, `ui/src/app/components/SkillSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
+| MCP Gateway 运行时                  | `backend/internal/mcpgateway/manager.go`, `backend/internal/server/server.go`, `backend/internal/api/settings_mcp.go`, `backend/internal/chat/codex_runtime_settings.go`, `backend/internal/chat/cli_runtime_settings.go`, `backend/internal/chat/iflow_runtime_settings.go`, `scripts/agent-runtimes/claude_exec.sh`, `scripts/agent-runtimes/opencode_exec.sh`, `scripts/agent-runtimes/iflow_exec.sh` |
 | Codex MCP/Skill 运行时注入          | `backend/internal/chat/codex_appserver.go`, `backend/internal/chat/codex_runtime_settings.go`, `backend/internal/config/mcp_skill_settings.go`, `backend/internal/expert/expert.go`, `backend/internal/api/chat.go` |
 | iFlow 官方认证与运行时注入          | `backend/internal/api/settings_iflow_auth.go`, `backend/internal/iflow/home.go`, `backend/internal/iflow/auth_manager.go`, `backend/internal/chat/iflow_runtime_settings.go`, `scripts/agent-runtimes/iflow_exec.sh`, `ui/src/app/components/CLIToolSettingsTab.tsx` |
 | Chat 会话 MCP 选择                  | `backend/internal/api/chat.go`, `backend/internal/store/chat.go`, `backend/internal/store/migrate.go`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/daemon.ts` |

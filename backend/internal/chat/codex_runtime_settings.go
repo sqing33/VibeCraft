@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,8 +17,12 @@ type codexRuntimeSettings struct {
 	Config           map[string]any
 }
 
+func resolveCodexRuntimeSettings(sess store.ChatSession, spec runner.RunSpec, expertID, cliToolID string) (codexRuntimeSettings, error) {
+	return (*Manager)(nil).resolveCodexRuntimeSettings(sess, spec, expertID, cliToolID)
+}
+
 func (m *Manager) buildCodexThreadRequest(sess store.ChatSession, spec runner.RunSpec, expertID string, cliToolID *string, resumeThreadID string) (codexAppServerThreadRequest, error) {
-	runtime, err := resolveCodexRuntimeSettings(sess, spec, expertID, firstNonEmptyTrimmed(pointerStringValue(cliToolID), spec.Env["VIBE_TREE_CLI_TOOL_ID"], pointerStringValue(sess.CLIToolID)))
+	runtime, err := m.resolveCodexRuntimeSettings(sess, spec, expertID, firstNonEmptyTrimmed(pointerStringValue(cliToolID), spec.Env["VIBE_TREE_CLI_TOOL_ID"], pointerStringValue(sess.CLIToolID)))
 	if err != nil {
 		return codexAppServerThreadRequest{}, err
 	}
@@ -30,7 +35,7 @@ func (m *Manager) buildCodexThreadRequest(sess store.ChatSession, spec runner.Ru
 	}, nil
 }
 
-func resolveCodexRuntimeSettings(sess store.ChatSession, spec runner.RunSpec, expertID, cliToolID string) (codexRuntimeSettings, error) {
+func (m *Manager) resolveCodexRuntimeSettings(sess store.ChatSession, spec runner.RunSpec, expertID, cliToolID string) (codexRuntimeSettings, error) {
 	baseInstructions := strings.TrimSpace(spec.Env["VIBE_TREE_SYSTEM_PROMPT"])
 	cliToolID = strings.TrimSpace(cliToolID)
 	if cliToolID == "" {
@@ -42,7 +47,17 @@ func resolveCodexRuntimeSettings(sess store.ChatSession, spec runner.RunSpec, ex
 	}
 	effectiveMCPs := config.EffectiveMCPServers(cfg, cliToolID, sess.MCPServerIDs)
 	runtimeConfig := map[string]any{"mcp_servers": map[string]any{}}
-	if effectiveMCPs != nil {
+	if m != nil && m.mcpGateway != nil {
+		info, accessErr := m.mcpGateway.EnsureSessionAccess(context.Background(), sess.ID, sess.WorkspacePath, sortedKeys(effectiveMCPs))
+		if accessErr != nil {
+			return codexRuntimeSettings{}, fmt.Errorf("prepare codex gateway access: %w", accessErr)
+		}
+		if info != nil {
+			runtimeConfig["mcp_servers"] = map[string]any{info.ServerID: info.CodexServerConfig()}
+		} else if effectiveMCPs != nil {
+			runtimeConfig["mcp_servers"] = effectiveMCPs
+		}
+	} else if effectiveMCPs != nil {
 		runtimeConfig["mcp_servers"] = effectiveMCPs
 	}
 	if sess.ReasoningEffort != nil && strings.TrimSpace(*sess.ReasoningEffort) != "" {

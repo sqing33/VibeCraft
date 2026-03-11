@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -14,6 +15,10 @@ import (
 )
 
 func prepareIFLOWRunSpec(sess store.ChatSession, spec runner.RunSpec, expertID string) (runner.RunSpec, error) {
+	return (*Manager)(nil).prepareIFLOWRunSpec(sess, spec, expertID)
+}
+
+func (m *Manager) prepareIFLOWRunSpec(sess store.ChatSession, spec runner.RunSpec, expertID string) (runner.RunSpec, error) {
 	if runner.NormalizeCLIFamily(spec.Env["VIBE_TREE_CLI_FAMILY"]) != "iflow" {
 		return spec, nil
 	}
@@ -59,6 +64,28 @@ func prepareIFLOWRunSpec(sess store.ChatSession, spec runner.RunSpec, expertID s
 	}
 	if base := strings.TrimSpace(env["VIBE_TREE_SYSTEM_PROMPT"]); base != "" || len(effectiveSkills) > 0 {
 		env["VIBE_TREE_SYSTEM_PROMPT"] = appendCodexSkillInstructions(base, effectiveSkills)
+	}
+	if m != nil && m.mcpGateway != nil {
+		info, err := m.mcpGateway.EnsureSessionAccess(context.Background(), sess.ID, sess.WorkspacePath, sortedKeys(effectiveMCPs))
+		if err != nil {
+			return runner.RunSpec{}, fmt.Errorf("prepare iflow gateway access: %w", err)
+		}
+		if info != nil {
+			payload, err := json.Marshal(map[string]any{
+				info.ServerID: map[string]any{
+					"type":    "http",
+					"httpUrl": info.URL,
+					"headers": info.Headers,
+				},
+			})
+			if err != nil {
+				return runner.RunSpec{}, fmt.Errorf("marshal iflow gateway settings: %w", err)
+			}
+			env["VIBE_TREE_IFLOW_MCP_SERVERS_JSON"] = string(payload)
+			env["VIBE_TREE_IFLOW_ALLOWED_MCP_SERVERS"] = info.ServerID
+			spec.Env = env
+			return spec, nil
+		}
 	}
 	if len(effectiveMCPs) > 0 {
 		payload, err := json.Marshal(effectiveMCPs)

@@ -17,6 +17,7 @@ import (
 	openai_shared "github.com/openai/openai-go/shared"
 
 	"vibe-tree/backend/internal/cliruntime"
+	"vibe-tree/backend/internal/mcpgateway"
 	"vibe-tree/backend/internal/openaicompat"
 	"vibe-tree/backend/internal/runner"
 	"vibe-tree/backend/internal/store"
@@ -45,6 +46,7 @@ type Options struct {
 	ThinkingTranslationIdle       time.Duration
 	ThinkingTranslator            ThinkingTranslatorFunc
 	Runner                        runner.Runner
+	MCPGateway                    *mcpgateway.Manager
 }
 
 type Manager struct {
@@ -66,6 +68,7 @@ type Manager struct {
 	thinkingTranslationIdle       time.Duration
 	thinkingTranslator            ThinkingTranslatorFunc
 	codexRuntimePool              *codexRuntimePool
+	mcpGateway                    *mcpgateway.Manager
 }
 
 type TurnParams struct {
@@ -165,6 +168,7 @@ func NewManager(st *store.Store, hub *ws.Hub, opts Options) *Manager {
 		thinkingTranslationIdle:       thinkingTranslationIdle,
 		thinkingTranslator:            opts.ThinkingTranslator,
 		codexRuntimePool:              newCodexRuntimePool(defaultCodexRuntimeIdleTTL, defaultCodexRuntimeReapTick),
+		mcpGateway:                    opts.MCPGateway,
 	}
 }
 
@@ -448,7 +452,7 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 		} else {
 			delete(runSpec.Env, "VIBE_TREE_RESUME_SESSION_ID")
 		}
-		preparedRunSpec, prepErr := prepareCLIRuntimeRunSpec(sess, runSpec, expertID)
+		preparedRunSpec, prepErr := m.prepareCLIRuntimeRunSpec(sess, runSpec, expertID)
 		if prepErr != nil {
 			return "", "", "", prepErr
 		}

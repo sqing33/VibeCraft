@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"vibe-tree/backend/internal/expert"
 	iflowcli "vibe-tree/backend/internal/iflow"
 	"vibe-tree/backend/internal/logx"
+	"vibe-tree/backend/internal/mcpgateway"
 	"vibe-tree/backend/internal/orchestration"
 	"vibe-tree/backend/internal/paths"
 	"vibe-tree/backend/internal/repolib"
@@ -92,7 +95,17 @@ func main() {
 	}
 	execMgr := execution.NewManager(execRunner, grace, hub)
 	experts := expert.NewRegistry(cfg)
-	chatMgr := chat.NewManager(stateStore, hub, chat.Options{Runner: execRunner})
+	baseURL := "http://" + cfg.Addr()
+	if strings.HasPrefix(cfg.Server.Host, "0.0.0.0") || strings.TrimSpace(cfg.Server.Host) == "" {
+		baseURL = "http://127.0.0.1:" + strconv.Itoa(cfg.Server.Port)
+	}
+	mcpGateway := mcpgateway.New(baseURL, cfg)
+	defer func() {
+		if err := mcpGateway.Close(); err != nil {
+			logx.Warn("daemon", "close-mcp-gateway", "关闭 MCP Gateway 失败", "err", err)
+		}
+	}()
+	chatMgr := chat.NewManager(stateStore, hub, chat.Options{Runner: execRunner, MCPGateway: mcpGateway})
 	defer func() {
 		if err := chatMgr.Close(); err != nil {
 			logx.Warn("daemon", "close-chat-runtime", "关闭 Chat 暖运行时失败", "err", err)
@@ -146,7 +159,7 @@ func main() {
 
 	engine := server.New(
 		server.Options{DevCORS: server.DevCORSFromEnv()},
-		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore, Experts: experts, Chat: chatMgr, Orchestration: orchMgr, RepoLibrary: repoLibSvc, IFLOWAuth: iflowAuthMgr},
+		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore, Experts: experts, Chat: chatMgr, MCPGateway: mcpGateway, Orchestration: orchMgr, RepoLibrary: repoLibSvc, IFLOWAuth: iflowAuthMgr},
 	)
 	srv := &http.Server{
 		Addr:              cfg.Addr(),

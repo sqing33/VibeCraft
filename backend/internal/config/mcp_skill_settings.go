@@ -11,6 +11,20 @@ import (
 	"vibe-tree/backend/internal/skillcatalog"
 )
 
+const defaultMCPGatewayIdleTTLSeconds = 600
+
+func NormalizeMCPGatewaySettings(settings **MCPGatewaySettings) {
+	if settings == nil {
+		return
+	}
+	if *settings == nil {
+		*settings = &MCPGatewaySettings{}
+	}
+	if (*settings).IdleTTLSeconds <= 0 {
+		(*settings).IdleTTLSeconds = defaultMCPGatewayIdleTTLSeconds
+	}
+}
+
 func NormalizeMCPServers(servers *[]MCPServerConfig, cliTools []CLIToolConfig) error {
 	if servers == nil {
 		return nil

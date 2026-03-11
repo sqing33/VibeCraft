@@ -15,11 +15,17 @@ type Config struct {
 	Experts       []ExpertConfig        `json:"experts"`
 	CLITools      []CLIToolConfig       `json:"cli_tools,omitempty"`
 	MCPServers    []MCPServerConfig     `json:"mcp_servers,omitempty"`
+	MCPGateway    *MCPGatewaySettings   `json:"mcp_gateway,omitempty"`
 	SkillBindings []SkillBindingConfig  `json:"skill_bindings,omitempty"`
 	Basic         *BasicSettings        `json:"basic,omitempty"`
 	LLM           *LLMSettings          `json:"llm,omitempty"`
 	APISources    []APISourceConfig     `json:"api_sources,omitempty"`
 	RuntimeModels *RuntimeModelSettings `json:"runtime_model_settings,omitempty"`
+}
+
+type MCPGatewaySettings struct {
+	Enabled        bool `json:"enabled"`
+	IdleTTLSeconds int  `json:"idle_ttl_seconds,omitempty"`
 }
 
 type MCPServerConfig struct {
@@ -180,8 +186,9 @@ func Default() Config {
 			MaxConcurrency: 6,
 			KillGraceMs:    1500,
 		},
-		CLITools:      defaultCLITools(),
-		APISources:    nil,
+		CLITools:   defaultCLITools(),
+		MCPGateway: &MCPGatewaySettings{Enabled: false, IdleTTLSeconds: 600},
+		APISources: nil,
 		RuntimeModels: nil,
 		Experts: []ExpertConfig{
 			{
@@ -320,6 +327,7 @@ func Load() (Config, string, error) {
 			if err := NormalizeMCPServers(&cfg.MCPServers, cfg.CLITools); err != nil {
 				return Config{}, "", err
 			}
+			NormalizeMCPGatewaySettings(&cfg.MCPGateway)
 			if err := NormalizeSkillBindings(&cfg.SkillBindings, cfg.CLITools); err != nil {
 				return Config{}, "", err
 			}
@@ -351,6 +359,7 @@ func Load() (Config, string, error) {
 	if err := NormalizeMCPServers(&cfg.MCPServers, cfg.CLITools); err != nil {
 		return Config{}, "", err
 	}
+	NormalizeMCPGatewaySettings(&cfg.MCPGateway)
 	if err := NormalizeSkillBindings(&cfg.SkillBindings, cfg.CLITools); err != nil {
 		return Config{}, "", err
 	}
@@ -384,6 +393,7 @@ func LoadPersisted() (Config, string, error) {
 			if err := NormalizeMCPServers(&cfg.MCPServers, cfg.CLITools); err != nil {
 				return Config{}, "", err
 			}
+			NormalizeMCPGatewaySettings(&cfg.MCPGateway)
 			if err := NormalizeSkillBindings(&cfg.SkillBindings, cfg.CLITools); err != nil {
 				return Config{}, "", err
 			}
@@ -408,6 +418,7 @@ func LoadPersisted() (Config, string, error) {
 	if err := NormalizeMCPServers(&cfg.MCPServers, cfg.CLITools); err != nil {
 		return Config{}, "", err
 	}
+	NormalizeMCPGatewaySettings(&cfg.MCPGateway)
 	if err := NormalizeSkillBindings(&cfg.SkillBindings, cfg.CLITools); err != nil {
 		return Config{}, "", err
 	}

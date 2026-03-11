@@ -324,13 +324,37 @@ export type MCPServerSetting = {
   config?: Record<string, unknown>;
 };
 
+export type MCPGatewaySettings = {
+  enabled: boolean;
+  idle_ttl_seconds: number;
+  reachable?: boolean;
+  sessions?: number;
+  status_path?: string;
+};
+
+export type MCPGatewayStatus = {
+  enabled: boolean;
+  reachable: boolean;
+  idle_ttl_seconds: number;
+  sessions: number;
+  downstreams: {
+    workspace_path: string;
+    server_id: string;
+    running: boolean;
+    last_used_at?: number;
+    last_error?: string;
+  }[];
+};
+
 export type MCPSettings = {
   servers: MCPServerSetting[];
   tools: CLITool[];
+  gateway: MCPGatewaySettings;
 };
 
 export type PutMCPSettingsRequest = {
   servers: MCPServerSetting[];
+  gateway?: MCPGatewaySettings;
 };
 
 export async function fetchMCPSettings(
@@ -358,6 +382,17 @@ export async function putMCPSettings(
     throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim());
   }
   return (await res.json()) as MCPSettings;
+}
+
+export async function fetchMCPGatewayStatus(
+  daemonUrl: string,
+): Promise<MCPGatewayStatus> {
+  const res = await fetch(`${daemonUrl}/api/v1/mcp-gateway/status`);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim());
+  }
+  return (await res.json()) as MCPGatewayStatus;
 }
 
 export type SkillBindingSetting = {

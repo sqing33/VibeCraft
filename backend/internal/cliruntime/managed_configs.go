@@ -110,3 +110,90 @@ func WriteClaudeSettingsFile(toolID string, payload map[string]any) (string, err
 	}
 	return settingsPath, nil
 }
+
+func WriteClaudeMCPConfigFile(toolID string, payload map[string]any) (string, error) {
+	root, err := ManagedRuntimeRoot(firstNonEmpty(toolID, "claude"))
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", fmt.Errorf("mkdir claude managed root: %w", err)
+	}
+	path := filepath.Join(root, "mcp.json")
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal claude mcp config: %w", err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", fmt.Errorf("write claude mcp config: %w", err)
+	}
+	return path, nil
+}
+
+func WriteOpenCodeGatewayConfig(toolID string, payload map[string]any) (string, error) {
+	root, err := ManagedRuntimeRoot(firstNonEmpty(toolID, "opencode"))
+	if err != nil {
+		return "", err
+	}
+	configDir := filepath.Join(root, "opencode")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		return "", fmt.Errorf("mkdir opencode managed root: %w", err)
+	}
+	path := filepath.Join(configDir, "opencode.json")
+	base := map[string]any{
+		"$schema": "https://opencode.ai/config.json",
+	}
+	for key, value := range payload {
+		base[key] = value
+	}
+	data, err := json.MarshalIndent(base, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal opencode gateway config: %w", err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", fmt.Errorf("write opencode gateway config: %w", err)
+	}
+	return path, nil
+}
+
+func ClaudeGatewayPayloadFromEnv(env map[string]string) (map[string]any, bool) {
+	name := strings.TrimSpace(env["VIBE_TREE_MCP_GATEWAY_NAME"])
+	url := strings.TrimSpace(env["VIBE_TREE_MCP_GATEWAY_URL"])
+	token := strings.TrimSpace(env["VIBE_TREE_MCP_GATEWAY_TOKEN"])
+	if name == "" || url == "" || token == "" {
+		return nil, false
+	}
+	return map[string]any{
+		"mcpServers": map[string]any{
+			name: map[string]any{
+				"type": "http",
+				"url":  url,
+				"headers": map[string]string{
+					"Authorization": "Bearer " + token,
+				},
+			},
+		},
+	}, true
+}
+
+func OpenCodeGatewayPayloadFromEnv(env map[string]string) (map[string]any, bool) {
+	name := strings.TrimSpace(env["VIBE_TREE_MCP_GATEWAY_NAME"])
+	url := strings.TrimSpace(env["VIBE_TREE_MCP_GATEWAY_URL"])
+	token := strings.TrimSpace(env["VIBE_TREE_MCP_GATEWAY_TOKEN"])
+	if name == "" || url == "" || token == "" {
+		return nil, false
+	}
+	return map[string]any{
+		"mcp": map[string]any{
+			name: map[string]any{
+				"type": "remote",
+				"url":  url,
+				"headers": map[string]string{
+					"Authorization": "Bearer " + token,
+				},
+			},
+		},
+	}, true
+}

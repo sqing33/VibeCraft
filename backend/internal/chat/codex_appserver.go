@@ -106,7 +106,7 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 	attemptResume := strings.TrimSpace(pointerStringValue(sess.CLISessionID))
 
 	runOnce := func(prompt string, contextMode string, resumeThreadID string) (TurnResult, error) {
-		runSpec, prepErr := prepareCLIRuntimeRunSpec(sess, spec, expertID)
+		runSpec, prepErr := m.prepareCLIRuntimeRunSpec(sess, spec, expertID)
 		if prepErr != nil {
 			return TurnResult{}, prepErr
 		}

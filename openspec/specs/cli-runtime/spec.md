@@ -159,18 +159,25 @@ The daemon MUST evict or close warm runtimes when they become idle for too long,
 - **THEN** all warm Codex chat runtimes are closed before process exit
 
 ### Requirement: Codex chat runtime MUST inject only session-selected MCP servers
-When a chat turn runs through the Codex app-server transport, the system MUST derive the effective MCP server set from the chat session and selected CLI tool, then pass only that set through the thread request `config` overrides.
+When a chat turn runs through the Codex app-server transport, the system MUST derive the effective MCP server set from the chat session and selected CLI tool.
+
+When the managed MCP gateway is enabled, the runtime MUST pass a single gateway MCP entry through the thread request `config` overrides instead of directly embedding each saved downstream MCP server.
+That gateway entry MUST carry daemon-managed connection information and credentials that authorize only the session's current effective MCP selection.
 
 When the chat session has no explicit MCP selection yet, the system MUST fall back to the MCP ids that are default-enabled for the selected CLI tool.
+When the managed MCP gateway is disabled, the runtime MAY continue to inject the effective saved MCP entries directly as a backward-compatible fallback.
 The effective MCP candidate set MUST come from the saved MCP registry and MUST NOT depend on a separate tool-level enabled binding.
 
-#### Scenario: Thread start injects selected MCPs
+#### Scenario: Thread start injects gateway for selected MCPs
 - **WHEN** a new Codex-backed chat session has two selected MCP ids
-- **THEN** `thread/start` includes only those two MCP servers in `config.mcp_servers`
+- **AND** the managed MCP gateway is enabled
+- **THEN** `thread/start` includes one managed gateway entry in `config.mcp_servers`
+- **AND** that gateway entry is authorized for only those two selected MCP servers
 
-#### Scenario: Thread resume preserves selected MCPs
-- **WHEN** a Codex-backed chat session resumes an existing thread
-- **THEN** `thread/resume` includes the same effective `config.mcp_servers` selection for that session
+#### Scenario: Gateway-disabled fallback injects direct servers
+- **WHEN** the managed MCP gateway is disabled
+- **AND** a Codex-backed chat session has selected MCP ids
+- **THEN** the runtime injects only those selected saved MCP server entries directly in `config.mcp_servers`
 
 ### Requirement: Codex chat runtime MUST inject effective skill guidance
 When a chat turn runs through the Codex app-server transport, the system MUST append an effective skill allowlist to the thread base instructions.
@@ -205,6 +212,8 @@ CLI runtimes MUST apply source-specific configuration through application-manage
 
 Managed config state MUST live under the application's data directory.
 The runtime MUST NOT directly overwrite project-local `.codex`, `.claude`, `.iflow`, or user-global default config files as part of normal execution.
+When the managed MCP gateway is enabled, each supported CLI runtime MUST materialize only the managed gateway MCP connection into its runtime-specific config shape.
+The runtime MUST NOT require the user to separately copy the saved MCP registry into each CLI tool's own config file.
 
 #### Scenario: Codex runtime uses managed CODEX_HOME
 - **WHEN** the system launches a Codex CLI turn with a selected runtime model binding
@@ -220,4 +229,19 @@ The runtime MUST NOT directly overwrite project-local `.codex`, `.claude`, `.ifl
 - **WHEN** the system launches an OpenCode CLI turn with a selected runtime model binding
 - **THEN** it materializes a managed OpenCode config root under the application data directory
 - **AND** launches OpenCode with `XDG_CONFIG_HOME` pointing to that managed root
+
+#### Scenario: Claude runtime receives gateway MCP only
+- **WHEN** the managed MCP gateway is enabled for a Claude chat turn
+- **THEN** the managed Claude settings file contains only the gateway MCP connection entry
+- **AND** it does not need the full saved downstream MCP registry
+
+#### Scenario: OpenCode runtime receives gateway MCP only
+- **WHEN** the managed MCP gateway is enabled for an OpenCode chat turn
+- **THEN** the managed OpenCode config contains only the gateway MCP connection entry
+- **AND** OpenCode can reach all session-authorized downstream tools through that gateway
+
+#### Scenario: iFlow runtime receives gateway MCP only
+- **WHEN** the managed MCP gateway is enabled for an iFlow chat turn
+- **THEN** the runtime syncs only the gateway MCP connection into the managed iFlow project config
+- **AND** iFlow can use session-authorized downstream tools through that gateway
 

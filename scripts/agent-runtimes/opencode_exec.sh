@@ -90,6 +90,7 @@ elif [[ -n "${HOME:-}" && -f "$HOME/.config/opencode/opencode.json" ]]; then
 fi
 
 state_root=""
+managed_gateway_config="${VIBE_TREE_OPENCODE_CONFIG_PATH:-}"
 if [[ -n "$artifact_dir" ]]; then
   session_scope="$artifact_dir"
   artifact_parent="$(dirname "$artifact_dir")"
@@ -117,14 +118,15 @@ export VIBE_TREE_OPENCODE_OPENAI_API_KEY="$openai_api_key"
 export VIBE_TREE_OPENCODE_OPENAI_BASE_URL="$openai_base_url"
 export VIBE_TREE_OPENCODE_ANTHROPIC_API_KEY="$anthropic_api_key"
 export VIBE_TREE_OPENCODE_ANTHROPIC_BASE_URL="$anthropic_base_url"
-python3 - "$base_config_file" "$config_root/opencode/opencode.json" <<'PY'
+python3 - "$base_config_file" "$managed_gateway_config" "$config_root/opencode/opencode.json" <<'PY'
 import json
 import os
 import sys
 from pathlib import Path
 
 base_path = Path(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1] else None
-out_path = Path(sys.argv[2])
+gateway_path = Path(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2] else None
+out_path = Path(sys.argv[3])
 config = {}
 if base_path and base_path.exists():
     try:
@@ -133,6 +135,15 @@ if base_path and base_path.exists():
             config = loaded
     except Exception:
         config = {}
+
+if gateway_path and gateway_path.exists():
+    try:
+        loaded = json.loads(gateway_path.read_text(encoding='utf-8', errors='ignore') or '{}')
+        if isinstance(loaded, dict):
+            for key, value in loaded.items():
+                config[key] = value
+    except Exception:
+        pass
 
 provider_id = (os.environ.get('VIBE_TREE_OPENCODE_PROVIDER') or 'openai').strip().lower() or 'openai'
 model_name = (os.environ.get('VIBE_TREE_OPENCODE_MODEL_NAME') or '').strip()

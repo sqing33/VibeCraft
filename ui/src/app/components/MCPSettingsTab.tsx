@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Skeleton, Switch, Textarea } from '@heroui/react'
+import { Alert, Button, Input, Skeleton, Switch, Textarea } from '@heroui/react'
 import { Plus, Save, Trash2 } from 'lucide-react'
 
 import {
   fetchMCPSettings,
+  fetchMCPGatewayStatus,
+  type MCPGatewayStatus,
   putMCPSettings,
   type MCPServerSetting,
   type MCPSettings,
@@ -99,16 +101,20 @@ export function MCPSettingsTab() {
   const [data, setData] = useState<MCPSettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [gatewayStatus, setGatewayStatus] = useState<MCPGatewayStatus | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const res = await fetchMCPSettings(daemonUrl)
+      const status = await fetchMCPGatewayStatus(daemonUrl).catch(() => null)
       setData({
         ...res,
         servers: res.servers ?? [],
         tools: res.tools ?? [],
+        gateway: res.gateway ?? { enabled: false, idle_ttl_seconds: 600 },
       })
+      setGatewayStatus(status)
     } catch (err: unknown) {
       toast({
         variant: 'destructive',
@@ -181,12 +187,16 @@ export function MCPSettingsTab() {
           default_enabled_cli_tool_ids: normalizeStringList(server.default_enabled_cli_tool_ids ?? []),
           config: server.config,
         })),
+        gateway: data.gateway,
       })
       setData({
         ...res,
         servers: res.servers ?? [],
         tools: res.tools ?? [],
+        gateway: res.gateway ?? { enabled: false, idle_ttl_seconds: 600 },
       })
+      const status = await fetchMCPGatewayStatus(daemonUrl).catch(() => null)
+      setGatewayStatus(status)
       toast({ title: 'MCP 设置已保存' })
     } catch (err: unknown) {
       toast({
@@ -223,6 +233,63 @@ export function MCPSettingsTab() {
         </>
       }
     >
+        <section className="mb-4 space-y-3 rounded-xl border bg-card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold">Managed MCP Gateway</div>
+              <div className="text-sm text-muted-foreground">
+                所有 CLI 统一连接 daemon 的 `/mcp` 入口，下游 MCP 按需唤醒。
+              </div>
+            </div>
+            <Switch
+              isSelected={Boolean(data.gateway?.enabled)}
+              onValueChange={(selected) =>
+                setData((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        gateway: {
+                          ...(prev.gateway ?? { idle_ttl_seconds: 600 }),
+                          enabled: selected,
+                        },
+                      }
+                    : prev,
+                )
+              }
+            >
+              启用 Gateway
+            </Switch>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Input
+              type="number"
+              label="空闲回收 TTL（秒）"
+              className="max-w-xs"
+              value={String(data.gateway?.idle_ttl_seconds ?? 600)}
+              onValueChange={(value) =>
+                setData((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        gateway: {
+                          ...(prev.gateway ?? { enabled: false }),
+                          idle_ttl_seconds: Number(value || 600),
+                        },
+                      }
+                    : prev,
+                )
+              }
+            />
+            <div className="text-sm text-muted-foreground">
+              状态：{gatewayStatus?.enabled ? '已启用' : '未启用'} · {gatewayStatus?.reachable ? '可达' : '不可达'} · 活跃会话 {gatewayStatus?.sessions ?? 0}
+            </div>
+          </div>
+          {gatewayStatus?.downstreams?.length ? (
+            <div className="rounded-lg border bg-default-50 px-3 py-2 text-xs text-muted-foreground">
+              已跟踪下游：{gatewayStatus.downstreams.map((item) => `${item.server_id}${item.running ? '（运行中）' : ''}`).join('，')}
+            </div>
+          ) : null}
+        </section>
         {data.servers.length === 0 ? (
           <div className="rounded-xl border border-dashed px-4 py-6 text-sm text-muted-foreground">
             还没有 MCP 配置，点击右上角“新增 MCP JSON”开始添加。

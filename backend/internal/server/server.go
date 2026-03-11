@@ -40,6 +40,9 @@ func New(opts Options, deps api.Deps) *gin.Engine {
 
 	v1 := r.Group("/api/v1")
 	api.Register(v1, deps)
+	if deps.MCPGateway != nil {
+		r.Any("/mcp", gin.WrapH(deps.MCPGateway.HTTPHandler()))
+	}
 
 	maybeServeUIBuild(r)
 

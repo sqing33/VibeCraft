@@ -10,6 +10,7 @@ workspace="${VIBE_TREE_WORKSPACE:-$PWD}"
 cli_cmd="${VIBE_TREE_CLI_COMMAND_PATH:-claude}"
 resume_session_id="${VIBE_TREE_RESUME_SESSION_ID:-}"
 managed_settings_path="${VIBE_TREE_CLAUDE_SETTINGS_PATH:-}"
+managed_mcp_config_path="${VIBE_TREE_CLAUDE_MCP_CONFIG_PATH:-}"
 cli_tool_id="${VIBE_TREE_CLI_TOOL_ID:-claude}"
 anthropic_api_key="${ANTHROPIC_API_KEY:-}"
 anthropic_base_url="${ANTHROPIC_BASE_URL:-}"
@@ -69,6 +70,9 @@ if [[ -n "$resume_session_id" ]]; then
 fi
 if [[ -n "$managed_settings_path" ]]; then
   args+=(--settings "$managed_settings_path")
+fi
+if [[ -n "$managed_mcp_config_path" ]]; then
+  args+=(--mcp-config "$managed_mcp_config_path")
 fi
 
 if ! command -v "$cli_cmd" >/dev/null 2>&1; then

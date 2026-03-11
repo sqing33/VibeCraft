@@ -16,6 +16,7 @@ import (
 	"vibe-tree/backend/internal/execution"
 	"vibe-tree/backend/internal/expert"
 	iflowcli "vibe-tree/backend/internal/iflow"
+	"vibe-tree/backend/internal/mcpgateway"
 	"vibe-tree/backend/internal/orchestration"
 	"vibe-tree/backend/internal/repolib"
 	"vibe-tree/backend/internal/runner"
@@ -29,6 +30,7 @@ type Deps struct {
 	Store         *store.Store
 	Experts       *expert.Registry
 	Chat          *chat.Manager
+	MCPGateway    *mcpgateway.Manager
 	Orchestration *orchestration.Manager
 	RepoLibrary   *repolib.Service
 	IFLOWAuth     *iflowcli.BrowserAuthManager
@@ -56,8 +58,9 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 	v1.GET("/settings/cli-tools/iflow/browser-auth/:id", getIFLOWBrowserAuthHandler(deps))
 	v1.POST("/settings/cli-tools/iflow/browser-auth/:id/code", submitIFLOWBrowserAuthCodeHandler(deps))
 	v1.POST("/settings/cli-tools/iflow/browser-auth/:id/cancel", cancelIFLOWBrowserAuthHandler(deps))
-	v1.GET("/settings/mcp", getMCPSettingsHandler())
-	v1.PUT("/settings/mcp", putMCPSettingsHandler())
+	v1.GET("/settings/mcp", getMCPSettingsHandler(deps))
+	v1.PUT("/settings/mcp", putMCPSettingsHandler(deps))
+	v1.GET("/mcp-gateway/status", getMCPGatewayStatusHandler(deps))
 	v1.GET("/settings/skills", getSkillSettingsHandler())
 	v1.PUT("/settings/skills", putSkillSettingsHandler())
 	v1.POST("/settings/skills/install", installSkillSettingsHandler())
