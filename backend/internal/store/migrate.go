@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const schemaVersion = 11
+const schemaVersion = 12
 
 // Migrate 功能：执行 state DB schema 迁移（MVP：使用 PRAGMA user_version 管理版本）。
 // 参数/返回：ctx 控制超时；成功返回 nil。
@@ -118,6 +118,14 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		}
 		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 11;"); err != nil {
 			return fmt.Errorf("set user_version=11: %w", err)
+		}
+	}
+	if userVersion < 12 {
+		if err := migrateV12(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 12;"); err != nil {
+			return fmt.Errorf("set user_version=12: %w", err)
 		}
 	}
 
@@ -1065,6 +1073,223 @@ func migrateV11(ctx context.Context, tx *sql.Tx) error {
 	}
 	if _, err := tx.ExecContext(ctx, `ALTER TABLE chat_sessions ADD COLUMN reasoning_effort TEXT;`); err != nil {
 		return fmt.Errorf("add chat_sessions.reasoning_effort: %w", err)
+	}
+	return nil
+}
+
+func migrateV12(ctx context.Context, tx *sql.Tx) error {
+	resultsExists, err := tableExists(ctx, tx, "repo_analysis_results")
+	if err != nil {
+		return err
+	}
+	if resultsExists {
+		return nil
+	}
+
+	snapshotsExists, err := tableExists(ctx, tx, "repo_snapshots")
+	if err != nil {
+		return err
+	}
+	runsExists, err := tableExists(ctx, tx, "repo_analysis_runs")
+	if err != nil {
+		return err
+	}
+	cardsExists, err := tableExists(ctx, tx, "repo_knowledge_cards")
+	if err != nil {
+		return err
+	}
+	evidenceExists, err := tableExists(ctx, tx, "repo_knowledge_evidence")
+	if err != nil {
+		return err
+	}
+
+	// Rename legacy tables out of the way so we can create the new unified schema
+	// with stable final names. (Repo Library no longer separates snapshot/run.)
+	if evidenceExists {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE repo_knowledge_evidence RENAME TO repo_knowledge_evidence_old;`); err != nil {
+			return fmt.Errorf("rename repo_knowledge_evidence: %w", err)
+		}
+	}
+	if cardsExists {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE repo_knowledge_cards RENAME TO repo_knowledge_cards_old;`); err != nil {
+			return fmt.Errorf("rename repo_knowledge_cards: %w", err)
+		}
+	}
+	if runsExists {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE repo_analysis_runs RENAME TO repo_analysis_runs_old;`); err != nil {
+			return fmt.Errorf("rename repo_analysis_runs: %w", err)
+		}
+	}
+	if snapshotsExists {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE repo_snapshots RENAME TO repo_snapshots_old;`); err != nil {
+			return fmt.Errorf("rename repo_snapshots: %w", err)
+		}
+	}
+
+	stmts := []string{
+		`
+CREATE TABLE IF NOT EXISTS repo_analysis_results (
+  id TEXT PRIMARY KEY,
+  repo_source_id TEXT NOT NULL,
+  requested_ref TEXT NOT NULL,
+  resolved_ref TEXT,
+  commit_sha TEXT,
+  storage_path TEXT NOT NULL,
+  report_path TEXT,
+  subagent_results_path TEXT,
+  execution_id TEXT,
+  chat_session_id TEXT,
+  chat_user_message_id TEXT,
+  chat_assistant_message_id TEXT,
+  runtime_kind TEXT,
+  cli_tool_id TEXT,
+  model_id TEXT,
+  status TEXT NOT NULL,
+  language TEXT,
+  depth TEXT,
+  agent_mode TEXT,
+  features_json TEXT NOT NULL,
+  summary TEXT,
+  error_message TEXT,
+  result_json TEXT,
+  started_at INTEGER,
+  ended_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(repo_source_id) REFERENCES repo_sources(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_analysis_results_source_created ON repo_analysis_results(repo_source_id, created_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_analysis_results_status ON repo_analysis_results(status, created_at DESC);`,
+		`
+CREATE TABLE IF NOT EXISTS repo_knowledge_cards (
+  id TEXT PRIMARY KEY,
+  repo_source_id TEXT NOT NULL,
+  analysis_result_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  card_type TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  mechanism TEXT,
+  confidence TEXT,
+  tags_json TEXT,
+  section_title TEXT,
+  sort_index INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(repo_source_id) REFERENCES repo_sources(id),
+  FOREIGN KEY(analysis_result_id) REFERENCES repo_analysis_results(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_knowledge_cards_analysis ON repo_knowledge_cards(analysis_result_id, sort_index, created_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_knowledge_cards_source_created ON repo_knowledge_cards(repo_source_id, created_at DESC);`,
+		`
+CREATE TABLE IF NOT EXISTS repo_knowledge_evidence (
+  id TEXT PRIMARY KEY,
+  card_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  line INTEGER,
+  snippet TEXT,
+  dimension TEXT,
+  sort_index INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(card_id) REFERENCES repo_knowledge_cards(id)
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_knowledge_evidence_card ON repo_knowledge_evidence(card_id, sort_index, created_at);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("exec migration stmt: %w", err)
+		}
+	}
+
+	if runsExists && snapshotsExists {
+		// Use snapshot id as the unified analysis-result id because it is already
+		// the stable on-disk artifact root and is referenced by derived data.
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO repo_analysis_results (
+  id, repo_source_id, requested_ref, resolved_ref, commit_sha, storage_path, report_path, subagent_results_path,
+  execution_id, chat_session_id, chat_user_message_id, chat_assistant_message_id, runtime_kind, cli_tool_id, model_id,
+  status, language, depth, agent_mode, features_json, summary, error_message, result_json, started_at, ended_at,
+  created_at, updated_at
+)
+SELECT
+  s.id,
+  r.repo_source_id,
+  s.requested_ref,
+  s.resolved_ref,
+  s.commit_sha,
+  s.storage_path,
+  COALESCE(r.report_path, s.report_path),
+  s.subagent_results_path,
+  r.execution_id,
+  r.chat_session_id,
+  r.chat_user_message_id,
+  r.chat_assistant_message_id,
+  r.runtime_kind,
+  r.cli_tool_id,
+  r.model_id,
+  r.status,
+  r.language,
+  r.depth,
+  r.agent_mode,
+  r.features_json,
+  r.summary,
+  r.error_message,
+  r.result_json,
+  r.started_at,
+  r.ended_at,
+  s.created_at,
+  CASE WHEN r.updated_at > s.updated_at THEN r.updated_at ELSE s.updated_at END
+FROM repo_analysis_runs_old r
+JOIN repo_snapshots_old s ON s.id = r.repo_snapshot_id;
+`); err != nil {
+			return fmt.Errorf("migrate repo_analysis_results: %w", err)
+		}
+	}
+
+	if cardsExists {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO repo_knowledge_cards (
+  id, repo_source_id, analysis_result_id, title, card_type, summary, mechanism, confidence, tags_json, section_title, sort_index, created_at
+)
+SELECT
+  id, repo_source_id, repo_snapshot_id, title, card_type, summary, mechanism, confidence, tags_json, section_title, sort_index, created_at
+FROM repo_knowledge_cards_old;
+`); err != nil {
+			return fmt.Errorf("migrate repo_knowledge_cards: %w", err)
+		}
+	}
+
+	if evidenceExists {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO repo_knowledge_evidence (
+  id, card_id, path, line, snippet, dimension, sort_index, created_at
+)
+SELECT
+  id, card_id, path, line, snippet, dimension, sort_index, created_at
+FROM repo_knowledge_evidence_old;
+`); err != nil {
+			return fmt.Errorf("migrate repo_knowledge_evidence: %w", err)
+		}
+	}
+
+	// Drop legacy tables in dependency order.
+	if evidenceExists {
+		if _, err := tx.ExecContext(ctx, `DROP TABLE repo_knowledge_evidence_old;`); err != nil {
+			return fmt.Errorf("drop repo_knowledge_evidence_old: %w", err)
+		}
+	}
+	if cardsExists {
+		if _, err := tx.ExecContext(ctx, `DROP TABLE repo_knowledge_cards_old;`); err != nil {
+			return fmt.Errorf("drop repo_knowledge_cards_old: %w", err)
+		}
+	}
+	if runsExists {
+		if _, err := tx.ExecContext(ctx, `DROP TABLE repo_analysis_runs_old;`); err != nil {
+			return fmt.Errorf("drop repo_analysis_runs_old: %w", err)
+		}
+	}
+	if snapshotsExists {
+		if _, err := tx.ExecContext(ctx, `DROP TABLE repo_snapshots_old;`); err != nil {
+			return fmt.Errorf("drop repo_snapshots_old: %w", err)
+		}
 	}
 	return nil
 }

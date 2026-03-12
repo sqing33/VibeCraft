@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Selection } from '@react-types/shared'
-import { Alert, Button, Chip, Input, Select, SelectItem, Skeleton, Textarea } from '@heroui/react'
-import { Plus, RefreshCcw, Search, Sparkles } from 'lucide-react'
+import { Button, Chip, Input, Select, SelectItem, Textarea } from '@heroui/react'
+import { Plus, RefreshCcw, Search, Sparkles, Wand2 } from 'lucide-react'
 
 import { goToRepoLibraryPatternSearch, goToRepoLibraryRepository } from '@/app/routes'
 import {
@@ -9,10 +9,11 @@ import {
   createRepoLibraryAnalysis,
   fetchCLIToolSettings,
   fetchRepoLibraryRepositories,
+  fetchRepoLibraryRepository,
   fetchRuntimeModelSettings,
   type CLITool,
   type RepoLibraryAnalysisRequest,
-  type RepoLibraryAnalysisRun,
+  type RepoLibraryAnalysisResult,
   type RepoLibraryCreateAnalysisResponse,
   type RepoLibraryDepth,
   type RuntimeModelSettings,
@@ -26,8 +27,8 @@ import { toast } from '@/lib/toast'
 import { useDaemonStore } from '@/stores/daemonStore'
 import { useRepoLibraryUIStore } from '@/stores/repoLibraryUIStore'
 
-import { LoadingVeil } from '@/app/components/LoadingVeil'
-import { RepoLibraryShell, RepoLibrarySidebarRepositoryItem } from '@/app/components/RepoLibraryShell'
+import { RepoLibraryShell } from '@/app/components/RepoLibraryShell'
+import { RepoLibrarySidebarRepositoryList } from '@/app/components/repo-library/RepoLibrarySidebarRepositoryList'
 
 function selectionToString(keys: Selection) {
   if (keys === 'all') return ''
@@ -57,16 +58,6 @@ function analysisStatusColor(status: string): 'default' | 'success' | 'danger' |
   return 'default'
 }
 
-function EmptyRepositories() {
-  return (
-    <div className="space-y-2">
-      <Skeleton className="h-[58px] w-full rounded-[22px]" />
-      <Skeleton className="h-[58px] w-full rounded-[22px]" />
-      <Skeleton className="h-[58px] w-full rounded-[22px]" />
-    </div>
-  )
-}
-
 /**
  * 功能：展示 Repo Library 仓库列表，并允许用户提交新的仓库分析任务。
  * 参数/返回：无入参；返回仓库列表页与 Analyze Repo 表单。
@@ -81,6 +72,8 @@ export function RepoLibraryRepositoriesPage() {
   const loading = useRepoLibraryUIStore((s) => s.repositoriesRefreshing)
   const error = useRepoLibraryUIStore((s) => s.repositoriesError)
   const setRepositoriesState = useRepoLibraryUIStore((s) => s.setRepositoriesState)
+  const analysisDraft = useRepoLibraryUIStore((s) => s.analysisDraft)
+  const clearAnalysisDraft = useRepoLibraryUIStore((s) => s.clearAnalysisDraft)
 
   const [repoUrl, setRepoUrl] = useState('')
   const [ref, setRef] = useState('HEAD')
@@ -94,11 +87,6 @@ export function RepoLibraryRepositoriesPage() {
   const [runtimeModelSettings, setRuntimeModelSettings] = useState<RuntimeModelSettings | null>(null)
   const [selectedCliToolId, setSelectedCliToolId] = useState('')
   const [selectedModelId, setSelectedModelId] = useState('')
-
-  const hasRepositoryCache = useMemo(
-    () => repositoriesLoaded || items.length > 0,
-    [items.length, repositoriesLoaded],
-  )
 
   const refresh = useCallback(async (options?: { force?: boolean }) => {
     const force = options?.force ?? false
@@ -120,6 +108,19 @@ export function RepoLibraryRepositoriesPage() {
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  useEffect(() => {
+    if (!analysisDraft) return
+    setRepoUrl(analysisDraft.repo_url || '')
+    setRef(analysisDraft.ref || 'HEAD')
+    setFeaturesText((analysisDraft.features ?? []).join('\n'))
+    setDepth(analysisDraft.depth)
+    setLanguage(analysisDraft.language)
+    setAnalyzerMode(analysisDraft.analyzer_mode)
+    setSelectedCliToolId(analysisDraft.cli_tool_id || '')
+    setSelectedModelId(analysisDraft.model_id || '')
+    clearAnalysisDraft()
+  }, [analysisDraft, clearAnalysisDraft])
 
   useEffect(() => {
     let cancelled = false
@@ -203,33 +204,68 @@ export function RepoLibraryRepositoriesPage() {
     }
   }
 
-  const createdAnalysis: RepoLibraryAnalysisRun | null = created?.analysis ?? null
+  const createdAnalysis: RepoLibraryAnalysisResult | null = created?.analysis ?? null
   const createdRepositoryId = created?.repository?.repository_id ?? null
 
+  const fillDraftFromAnalysis = useCallback((analysis: RepoLibraryAnalysisResult, repoUrlValue: string) => {
+    setRepoUrl(repoUrlValue)
+    setRef((analysis.resolved_ref || analysis.requested_ref || 'HEAD').trim() || 'HEAD')
+    setFeaturesText((analysis.features ?? []).join('\n'))
+    setDepth((analysis.depth as RepoLibraryDepth) || 'standard')
+    setLanguage((analysis.language as 'zh-CN' | 'en') || 'zh-CN')
+    setAnalyzerMode((analysis.agent_mode as 'full' | 'compact') || 'full')
+    setSelectedCliToolId(analysis.cli_tool_id || '')
+    setSelectedModelId(analysis.model_id || '')
+  }, [])
+
+  const onPrefillFromRepository = useCallback(async (repositoryId: string, repoUrlValue: string, latestAnalysis: RepoLibraryAnalysisResult | null) => {
+    // If latestAnalysis from list is partial, fall back to fetching repository detail once.
+    if (latestAnalysis && Array.isArray(latestAnalysis.features) && latestAnalysis.features.length > 0) {
+      fillDraftFromAnalysis(latestAnalysis, repoUrlValue)
+      return
+    }
+    try {
+      const detail = await fetchRepoLibraryRepository(daemonUrl, repositoryId)
+      const analyses = detail.analyses ?? []
+      const latest = analyses.reduce<RepoLibraryAnalysisResult | null>((acc, item) => {
+        if (!item?.analysis_id) return acc
+        if (!acc) return item
+        const a = acc.updated_at ?? acc.created_at ?? 0
+        const b = item.updated_at ?? item.created_at ?? 0
+        return b >= a ? item : acc
+      }, null)
+      if (!latest) {
+        toast({ variant: 'destructive', title: '未找到可复用的分析记录' })
+        return
+      }
+      fillDraftFromAnalysis(latest, repoUrlValue)
+    } catch (err: unknown) {
+      toast({ variant: 'destructive', title: '读取仓库详情失败', description: err instanceof Error ? err.message : String(err) })
+    }
+  }, [daemonUrl, fillDraftFromAnalysis])
+
   const sidebarContent = (
-    <div className="relative min-h-[120px]">
-      {error && !hasRepositoryCache ? <Alert color="danger" title="加载失败" description={error} className="mt-0" /> : null}
-      {!hasRepositoryCache && loading ? (
-        <EmptyRepositories />
-      ) : items.length === 0 ? (
-        <div className="rounded-2xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
-          还没有仓库分析结果，先添加一个 GitHub 仓库试试。
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {items.map((item) => (
-            <RepoLibrarySidebarRepositoryItem
-              key={item.repository_id}
-              title={item.full_name || item.name || item.repo_url}
-              subtitle={item.default_branch ? `默认分支：${item.default_branch}` : item.repo_url}
-              meta={item.updated_at ? formatRelativeTime(item.updated_at) : '未知'}
-              onPress={() => goToRepoLibraryRepository(item.repository_id)}
-            />
-          ))}
-        </div>
+    <RepoLibrarySidebarRepositoryList
+      repositories={items}
+      loaded={repositoriesLoaded}
+      loading={loading}
+      error={error}
+      emptyHint="还没有仓库分析结果，先添加一个 GitHub 仓库试试。"
+      onSelect={(id) => goToRepoLibraryRepository(id)}
+      renderAction={(item) => (
+        <Button
+          size="sm"
+          variant="light"
+          isIconOnly
+          aria-label="用其他模型分析"
+          title="用其他模型分析"
+          className="h-6 min-h-6 w-6 min-w-6 p-0"
+          onPress={() => void onPrefillFromRepository(item.repository_id, item.repo_url, item.latest_analysis ?? null)}
+        >
+          <Wand2 className="h-3.5 w-3.5" />
+        </Button>
       )}
-      <LoadingVeil visible={loading && hasRepositoryCache} />
-    </div>
+    />
   )
 
   return (

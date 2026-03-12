@@ -3,8 +3,8 @@ import { Alert, Button, Chip, Input, Skeleton, Textarea } from '@heroui/react'
 import { FolderSearch, Plus, RefreshCcw } from 'lucide-react'
 
 import { goToRepoLibraryRepositories, goToRepoLibraryRepository } from '@/app/routes'
-import { LoadingVeil } from '@/app/components/LoadingVeil'
-import { RepoLibraryShell, RepoLibrarySidebarRepositoryItem } from '@/app/components/RepoLibraryShell'
+import { RepoLibraryShell } from '@/app/components/RepoLibraryShell'
+import { RepoLibrarySidebarRepositoryList } from '@/app/components/repo-library/RepoLibrarySidebarRepositoryList'
 import {
   fetchRepoLibraryRepositories,
   searchRepoLibrary,
@@ -118,33 +118,14 @@ export function RepoLibraryPatternSearchPage() {
   }
 
   const sidebarContent = (
-    <div className="relative min-h-[120px]">
-      {repositoriesError && !hasRepositoryCache ? <Alert color="danger" title="加载仓库失败" description={repositoriesError} /> : null}
-      {!hasRepositoryCache && repositoriesLoading ? (
-        <div className="space-y-2">
-          <Skeleton className="h-[58px] w-full rounded-[22px]" />
-          <Skeleton className="h-[58px] w-full rounded-[22px]" />
-          <Skeleton className="h-[58px] w-full rounded-[22px]" />
-        </div>
-      ) : repositories.length === 0 ? (
-        <div className="rounded-2xl border border-dashed px-3 py-4 text-xs text-muted-foreground">
-          暂无仓库。完成至少一次分析后，这里会出现仓库列表。
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {repositories.map((item) => (
-            <RepoLibrarySidebarRepositoryItem
-              key={item.repository_id}
-              title={item.full_name || item.name || item.repo_url}
-              subtitle={item.repo_url}
-              meta={formatRelativeTime(item.created_at || item.updated_at || 0)}
-              onPress={() => goToRepoLibraryRepository(item.repository_id)}
-            />
-          ))}
-        </div>
-      )}
-      <LoadingVeil visible={repositoriesLoading && hasRepositoryCache} compact label="正在刷新仓库列表…" />
-    </div>
+    <RepoLibrarySidebarRepositoryList
+      repositories={repositories}
+      loaded={repositoriesLoaded}
+      loading={repositoriesLoading}
+      error={repositoriesError}
+      emptyHint="暂无仓库。完成至少一次分析后，这里会出现仓库列表。"
+      onSelect={(id) => goToRepoLibraryRepository(id)}
+    />
   )
 
   return (
@@ -240,12 +221,15 @@ export function RepoLibraryPatternSearchPage() {
             <div className="space-y-3">
               {results.map((item, index) => {
                 const repository = item.repository ?? repositoriesById.get(item.repository_id)
+                const analysisId = item.analysis_id || item.analysis?.analysis_id
                 return (
                   <div key={item.result_id || `${item.repository_id}-${item.card_id || index}`} className="rounded-2xl border bg-card p-5 shadow-sm">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="space-y-2">
+                      <div className="min-w-0 flex-1 space-y-2">
                         <div className="flex flex-wrap items-center gap-2">
-                          <div className="text-base font-semibold">{item.title || item.card?.title || '未命名结果'}</div>
+                          <div className="break-words text-base font-semibold">
+                            {item.title || item.card?.title || '未命名结果'}
+                          </div>
                           <Chip variant="flat" size="sm">
                             相关度 {formatScore(item.score)}
                           </Chip>
@@ -255,12 +239,17 @@ export function RepoLibraryPatternSearchPage() {
                             </Chip>
                           ) : null}
                         </div>
-                        <div className="text-sm text-muted-foreground">
+                        <div className="break-words text-sm text-muted-foreground">
                           {item.summary || item.card?.summary || item.rationale || '暂无摘要'}
                         </div>
                       </div>
 
-                      <Button variant="flat" size="sm" onPress={() => goToRepoLibraryRepository(item.repository_id)}>
+                      <Button
+                        variant="flat"
+                        size="sm"
+                        className="shrink-0 whitespace-nowrap min-w-fit"
+                        onPress={() => goToRepoLibraryRepository(item.repository_id, analysisId)}
+                      >
                         打开仓库详情
                       </Button>
                     </div>
@@ -273,9 +262,9 @@ export function RepoLibraryPatternSearchPage() {
                         </div>
                       </div>
                       <div className="rounded-xl border bg-muted/20 p-3">
-                        <div className="text-xs uppercase tracking-wide text-muted-foreground/80">快照</div>
+                        <div className="text-xs uppercase tracking-wide text-muted-foreground/80">分析</div>
                         <div className="mt-1 font-medium text-foreground">
-                          {item.snapshot?.resolved_ref || item.snapshot?.commit_sha?.slice(0, 12) || item.snapshot_id || '—'}
+                          {item.analysis?.resolved_ref || item.analysis?.commit_sha?.slice(0, 12) || analysisId || '—'}
                         </div>
                       </div>
                       <div className="rounded-xl border bg-muted/20 p-3">
@@ -290,7 +279,6 @@ export function RepoLibraryPatternSearchPage() {
           )}
         </section>
 
-        <LoadingVeil visible={submitting && hasSearchCache} label="正在刷新检索结果…" />
       </div>
     </RepoLibraryShell>
   )

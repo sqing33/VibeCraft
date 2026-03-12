@@ -11,10 +11,11 @@ import { RepoLibraryRepositoriesPage } from '@/app/pages/RepoLibraryRepositories
 import { RepoLibraryRepositoryDetailPage } from '@/app/pages/RepoLibraryRepositoryDetailPage'
 import { WorkflowsPage } from '@/app/pages/WorkflowsPage'
 import { WorkflowDetailPage } from '@/app/pages/WorkflowDetailPage'
-import { fetchExperts, fetchHealth } from '@/lib/daemon'
+import { fetchExperts, fetchHealth, fetchRepoLibraryRepositories } from '@/lib/daemon'
 import { emitWsEnvelope } from '@/lib/wsBus'
 import { parseWsEnvelopes } from '@/lib/ws'
 import { useDaemonStore } from '@/stores/daemonStore'
+import { useRepoLibraryUIStore } from '@/stores/repoLibraryUIStore'
 
 function isWorkspaceRoute(route: Route): boolean {
   return (
@@ -39,6 +40,40 @@ function workspaceNavForRoute(route: Route): 'chat' | 'orchestrations' | 'repo_l
   return 'orchestrations'
 }
 
+function isRepoLibraryRoute(route: Route): boolean {
+  return (
+    route.name === 'repo_library_repositories' ||
+    route.name === 'repo_library_repository_detail' ||
+    route.name === 'repo_library_pattern_search'
+  )
+}
+
+type RepoLibraryAnalysisUpdatedPayload = {
+  repository_id?: string
+  analysis_id?: string
+  status?: string
+  updated_at?: number
+}
+
+function parseRepoLibraryAnalysisUpdatedPayload(ev: Event): RepoLibraryAnalysisUpdatedPayload | null {
+  if (!(ev instanceof MessageEvent)) return null
+  const raw = typeof ev.data === 'string' ? ev.data : ''
+  if (!raw.trim()) return null
+  try {
+    const body = JSON.parse(raw) as unknown
+    if (!body || typeof body !== 'object') return null
+    const record = body as Record<string, unknown>
+    return {
+      repository_id: typeof record.repository_id === 'string' ? record.repository_id : undefined,
+      analysis_id: typeof record.analysis_id === 'string' ? record.analysis_id : undefined,
+      status: typeof record.status === 'string' ? record.status : undefined,
+      updated_at: typeof record.updated_at === 'number' ? record.updated_at : undefined,
+    }
+  } catch {
+    return null
+  }
+}
+
 function renderRoute(route: Route) {
   if (route.name === 'orchestrations') return <OrchestrationsPage />
   if (route.name === 'orchestration_detail') {
@@ -47,7 +82,7 @@ function renderRoute(route: Route) {
   if (route.name === 'repo_library_repositories') return <RepoLibraryRepositoriesPage />
   if (route.name === 'repo_library_pattern_search') return <RepoLibraryPatternSearchPage />
   if (route.name === 'repo_library_repository_detail') {
-    return <RepoLibraryRepositoryDetailPage repositoryId={route.repositoryId} />
+    return <RepoLibraryRepositoryDetailPage repositoryId={route.repositoryId} analysisId={route.analysisId} />
   }
   if (route.name === 'workflows') return <WorkflowsPage />
   if (route.name === 'chat') return <ChatSessionsPage sessionId={route.sessionId} />
@@ -70,6 +105,7 @@ export default function App() {
   const setWsState = useDaemonStore((s) => s.setWsState)
   const setExperts = useDaemonStore((s) => s.setExperts)
   const setExpertsError = useDaemonStore((s) => s.setExpertsError)
+  const setRepositoriesState = useRepoLibraryUIStore((s) => s.setRepositoriesState)
 
   useEffect(() => {
     const abortController = new AbortController()
@@ -150,6 +186,83 @@ export default function App() {
       socket?.close()
     }
   }, [wsUrl, setWsState])
+
+  useEffect(() => {
+    if (!isRepoLibraryRoute(route)) return
+
+    let stopped = false
+    let refreshTimer: number | undefined
+    let refreshing = false
+
+    const triggerDetailRefresh = (repositoryId?: string) => {
+      const activeRepositoryId =
+        route.name === 'repo_library_repository_detail' ? route.repositoryId : null
+      const target = repositoryId?.trim() || activeRepositoryId || ''
+      if (!target) return
+      if (activeRepositoryId && target !== activeRepositoryId) return
+      window.dispatchEvent(new CustomEvent('repo-library:analysis-updated', { detail: { repositoryId: target } }))
+    }
+
+    const scheduleRefresh = () => {
+      if (stopped) return
+      if (refreshTimer) window.clearTimeout(refreshTimer)
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = undefined
+        if (stopped) return
+        if (refreshing) return
+        refreshing = true
+
+        setRepositoriesState({ refreshing: true, error: null })
+        fetchRepoLibraryRepositories(daemonUrl)
+          .then((repositories) => {
+            if (stopped) return
+            setRepositoriesState({ repositories, loaded: true, refreshing: false, error: null })
+          })
+          .catch((err: unknown) => {
+            if (stopped) return
+            setRepositoriesState({ refreshing: false, error: err instanceof Error ? err.message : String(err) })
+          })
+          .finally(() => {
+            refreshing = false
+          })
+      }, 250)
+    }
+
+    const url = `${daemonUrl}/api/v1/repo-library/stream`
+    const es = new EventSource(url)
+    const onUpdate = (ev: Event) => {
+      const payload = parseRepoLibraryAnalysisUpdatedPayload(ev)
+      scheduleRefresh()
+      triggerDetailRefresh(payload?.repository_id)
+    }
+    es.addEventListener('repo_library.analysis.updated', onUpdate as EventListener)
+    es.onopen = () => {
+      scheduleRefresh()
+      triggerDetailRefresh()
+    }
+
+    const onFocus = () => {
+      scheduleRefresh()
+      triggerDetailRefresh()
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        scheduleRefresh()
+        triggerDetailRefresh()
+      }
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      stopped = true
+      if (refreshTimer) window.clearTimeout(refreshTimer)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+      es.removeEventListener('repo_library.analysis.updated', onUpdate as EventListener)
+      es.close()
+    }
+  }, [daemonUrl, route, setRepositoriesState])
 
   return (
     <div className={workspaceRoute ? 'h-screen overflow-hidden' : 'min-h-screen'}>

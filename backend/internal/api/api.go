@@ -35,6 +35,7 @@ type Deps struct {
 	MCPGateway    *mcpgateway.Manager
 	Orchestration *orchestration.Manager
 	RepoLibrary   *repolib.Service
+	RepoLibraryStream *repolib.SSEBroker
 	IFLOWAuth     *iflowcli.BrowserAuthManager
 }
 
@@ -101,14 +102,17 @@ func Register(v1 *gin.RouterGroup, deps Deps) {
 
 	v1.POST("/repo-library/analyses", createRepoAnalysisHandler(deps))
 	v1.POST("/repo-library/analyses/:id/sync-chat", syncRepoAnalysisChatHandler(deps))
+	v1.DELETE("/repo-library/analyses/:id", deleteRepoAnalysisHandler(deps))
+	v1.GET("/repo-library/analyses/:id/report", getRepoAnalysisReportHandler(deps))
 	v1.GET("/repo-library/repositories", listRepoRepositoriesHandler(deps))
 	v1.GET("/repo-library/repositories/:id", getRepoRepositoryHandler(deps))
-	v1.GET("/repo-library/repositories/:id/snapshots", listRepoSnapshotsHandler(deps))
-	v1.GET("/repo-library/snapshots/:id/report", getRepoSnapshotReportHandler(deps))
+	v1.GET("/repo-library/repositories/:id/view", getRepoRepositoryViewHandler(deps))
+	v1.GET("/repo-library/stream", repoLibraryStreamHandler(deps))
 	v1.GET("/repo-library/cards", listRepoCardsHandler(deps))
 	v1.GET("/repo-library/cards/:id", getRepoCardHandler(deps))
 	v1.GET("/repo-library/cards/:id/evidence", listRepoCardEvidenceHandler(deps))
 	v1.POST("/repo-library/search", searchRepoLibraryHandler(deps))
+	v1.POST("/repo-library/search/rebuild", rebuildRepoLibrarySearchIndexHandler(deps))
 
 	v1.GET("/workflows", listWorkflowsHandler(deps))
 	v1.POST("/workflows", createWorkflowHandler(deps))

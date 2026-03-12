@@ -17,19 +17,22 @@ type RepoLibraryShellProps = {
 
 type RepoLibrarySidebarRepositoryItemProps = {
   title: string
-  subtitle: string
-  meta: string
+  subtitle?: string
+  meta?: string
   active?: boolean
   onPress: () => void
+  action?: ReactNode
 }
 
 export function RepoLibrarySidebarRepositoryItem(props: RepoLibrarySidebarRepositoryItemProps) {
-  const { title, subtitle, meta, active = false, onPress } = props
+  const { title, subtitle, meta, active = false, onPress, action } = props
+  const subtitleText = (subtitle ?? '').trim()
+  const metaText = (meta ?? '').trim()
 
   return (
     <button
       type="button"
-      className={`w-full rounded-[22px] border px-3 py-3 text-left transition ${
+      className={`w-full min-h-[36px] rounded-[18px] border px-3 py-[6px] text-left transition ${
         active
           ? 'border-primary/50 bg-primary/5 shadow-sm'
           : 'border-transparent bg-background/40 hover:border-default-200 hover:bg-background/80'
@@ -37,10 +40,21 @@ export function RepoLibrarySidebarRepositoryItem(props: RepoLibrarySidebarReposi
       onClick={onPress}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0 truncate text-sm font-medium">{title}</div>
-        <span className="shrink-0 text-xs text-muted-foreground">{meta}</span>
+        <div className="min-w-0 truncate text-[13px] font-medium leading-snug">{title}</div>
+        <div className="flex shrink-0 items-center gap-2">
+          {action ? (
+            <span
+              onClick={(ev) => ev.stopPropagation()}
+              onMouseDown={(ev) => ev.stopPropagation()}
+              className="flex items-center"
+            >
+              {action}
+            </span>
+          ) : null}
+          {metaText ? <span className="text-[11px] text-muted-foreground">{metaText}</span> : null}
+        </div>
       </div>
-      <div className="mt-1 truncate text-xs text-muted-foreground">{subtitle}</div>
+      {subtitleText ? <div className="mt-0 truncate text-[11px] leading-snug text-muted-foreground">{subtitleText}</div> : null}
     </button>
   )
 }
@@ -88,7 +102,7 @@ export function RepoLibraryShell(props: RepoLibraryShellProps) {
         <div className="flex items-center justify-end gap-2">{headerActions}</div>
       </WorkspacePortal>
       <WorkspacePortal target="content">
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div className="thin-scrollbar flex h-full min-h-0 flex-1 flex-col overflow-y-auto">
           <div className={`mx-auto flex w-full flex-col ${contentPaddingClassName} ${contentMaxWidthClassName}`}>
             {children}
           </div>

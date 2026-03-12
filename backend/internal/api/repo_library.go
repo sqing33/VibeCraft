@@ -69,7 +69,7 @@ func createRepoAnalysisHandler(deps Deps) gin.HandlerFunc {
 // 副作用：读取 SQLite。
 
 // syncRepoAnalysisChatHandler 功能：将关联分析 Chat 的最新 assistant 回复同步回 Repo Library report/cards/search。
-// 参数/返回：依赖 repo library service；返回更新后的 analysis run。
+// 参数/返回：依赖 repo library service；返回更新后的 analysis result。
 // 失败场景：依赖缺失、分析不存在或同步失败时返回 4xx/5xx。
 // 副作用：重写 report.md、刷新 cards 与搜索索引。
 func syncRepoAnalysisChatHandler(deps Deps) gin.HandlerFunc {
@@ -78,20 +78,51 @@ func syncRepoAnalysisChatHandler(deps Deps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "repo library service not configured"})
 			return
 		}
-		run, err := deps.RepoLibrary.SyncAnalysisFromChat(c.Request.Context(), c.Param("id"))
+		analysis, err := deps.RepoLibrary.SyncAnalysisFromChat(c.Request.Context(), c.Param("id"))
 		if err != nil {
 			if errors.Is(err, store.ErrValidation) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
 			if errors.Is(err, os.ErrNotExist) {
-				c.JSON(http.StatusNotFound, gin.H{"error": "analysis run not found"})
+				c.JSON(http.StatusNotFound, gin.H{"error": "analysis not found"})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"analysis_run": run})
+		c.JSON(http.StatusOK, gin.H{"analysis": analysis})
+	}
+}
+
+// deleteRepoAnalysisHandler 功能：删除指定 Repo Library 分析结果；若其为仓库最后一份分析，可选择连带删除仓库。
+// 参数/返回：query `delete_repository_if_last=true|1` 控制级联删除；成功返回删除结果摘要 JSON。
+// 失败场景：依赖缺失、analysis 不存在、analysis 正在执行或缺少级联确认时返回 4xx/5xx。
+// 副作用：删除 analysis 的 DB 记录、知识卡片与搜索索引；可能删除仓库记录与落盘目录。
+func deleteRepoAnalysisHandler(deps Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.RepoLibrary == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "repo library service not configured"})
+			return
+		}
+		raw := strings.TrimSpace(strings.ToLower(c.Query("delete_repository_if_last")))
+		deleteRepoIfLast := raw == "1" || raw == "true" || raw == "yes" || raw == "y"
+		result, err := deps.RepoLibrary.DeleteAnalysis(c.Request.Context(), c.Param("id"), repolib.DeleteAnalysisOptions{
+			DeleteRepositoryIfLast: deleteRepoIfLast,
+		})
+		if err != nil {
+			if errors.Is(err, store.ErrValidation) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			if errors.Is(err, os.ErrNotExist) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "analysis not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, result)
 	}
 }
 
@@ -134,22 +165,64 @@ func getRepoRepositoryHandler(deps Deps) gin.HandlerFunc {
 	}
 }
 
-// listRepoSnapshotsHandler 功能：读取某仓库的快照列表。
-// 参数/返回：依赖 repo library service；返回 RepoSnapshot[]。
-// 失败场景：依赖缺失或查询失败时返回 500。
-// 副作用：读取 SQLite。
-func listRepoSnapshotsHandler(deps Deps) gin.HandlerFunc {
+// getRepoRepositoryViewHandler 功能：聚合返回仓库详情页首屏/全量数据（减少网络请求数）。
+// 参数/返回：mode=lite|full；analysis_id 可选（lite 可省略，full 必填）；返回聚合 JSON。
+// 失败场景：校验失败、未命中或查询失败时返回 4xx/5xx。
+// 副作用：读取 SQLite；full 模式会读取 report.md。
+func getRepoRepositoryViewHandler(deps Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.RepoLibrary == nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "repo library service not configured"})
 			return
 		}
-		items, err := deps.RepoLibrary.ListRepositorySnapshots(c.Request.Context(), c.Param("id"), queryLimit(c, 100))
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		mode := strings.TrimSpace(strings.ToLower(c.Query("mode")))
+		if mode == "" {
+			mode = string(repolib.RepositoryViewLite)
+		}
+		repoID := strings.TrimSpace(c.Param("id"))
+		analysisID := strings.TrimSpace(c.Query("analysis_id"))
+
+		switch mode {
+		case string(repolib.RepositoryViewFull):
+			if analysisID == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "analysis_id is required for mode=full"})
+				return
+			}
+			payload, err := deps.RepoLibrary.GetRepositoryViewFull(c.Request.Context(), repoID, analysisID)
+			if err != nil {
+				if errors.Is(err, store.ErrValidation) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+				if errors.Is(err, os.ErrNotExist) {
+					c.JSON(http.StatusNotFound, gin.H{"error": "repository not found"})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, payload)
+			return
+		case string(repolib.RepositoryViewLite):
+			payload, err := deps.RepoLibrary.GetRepositoryViewLite(c.Request.Context(), repoID, analysisID)
+			if err != nil {
+				if errors.Is(err, store.ErrValidation) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+				if errors.Is(err, os.ErrNotExist) {
+					c.JSON(http.StatusNotFound, gin.H{"error": "repository not found"})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, payload)
+			return
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode (expected lite|full)"})
 			return
 		}
-		c.JSON(http.StatusOK, items)
 	}
 }
 
@@ -164,9 +237,8 @@ func listRepoCardsHandler(deps Deps) gin.HandlerFunc {
 			return
 		}
 		items, err := deps.RepoLibrary.ListCards(c.Request.Context(), store.ListRepoCardsParams{
-			RepoSourceID:   strings.TrimSpace(c.Query("repository_id")),
-			RepoSnapshotID: strings.TrimSpace(c.Query("snapshot_id")),
-			AnalysisRunID:  strings.TrimSpace(c.Query("analysis_run_id")),
+			RepoSourceID: strings.TrimSpace(c.Query("repository_id")),
+			AnalysisID:   strings.TrimSpace(c.Query("analysis_id")),
 			Limit:          queryLimit(c, 500),
 		})
 		if err != nil {
@@ -219,17 +291,17 @@ func listRepoCardEvidenceHandler(deps Deps) gin.HandlerFunc {
 	}
 }
 
-// getRepoSnapshotReportHandler 功能：读取某个快照的 Markdown 报告内容。
+// getRepoAnalysisReportHandler 功能：读取某个分析结果的 Markdown 报告内容。
 // 参数/返回：依赖 repo library service；返回 report markdown 文本。
 // 失败场景：未命中返回 404，其他失败返回 500。
 // 副作用：读取磁盘文件。
-func getRepoSnapshotReportHandler(deps Deps) gin.HandlerFunc {
+func getRepoAnalysisReportHandler(deps Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.RepoLibrary == nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "repo library service not configured"})
 			return
 		}
-		report, err := deps.RepoLibrary.GetSnapshotReport(c.Request.Context(), c.Param("id"))
+		report, err := deps.RepoLibrary.GetAnalysisReport(c.Request.Context(), c.Param("id"))
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "report not found"})
@@ -238,7 +310,7 @@ func getRepoSnapshotReportHandler(deps Deps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"snapshot_id": c.Param("id"), "report_markdown": report})
+		c.JSON(http.StatusOK, gin.H{"analysis_id": c.Param("id"), "report_markdown": report})
 	}
 }
 
@@ -269,6 +341,25 @@ func searchRepoLibraryHandler(deps Deps) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, result)
+	}
+}
+
+// rebuildRepoLibrarySearchIndexHandler 功能：重建 Repo Library 的本地 go-searchdb 检索索引。
+// 参数/返回：依赖 repo library service；返回 rebuild summary JSON。
+// 失败场景：依赖缺失或执行失败时返回 500。
+// 副作用：写入本地 searchdb（SQLite）。
+func rebuildRepoLibrarySearchIndexHandler(deps Deps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.RepoLibrary == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "repo library service not configured"})
+			return
+		}
+		summary, err := deps.RepoLibrary.RebuildSearchIndex(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, summary)
 	}
 }
 

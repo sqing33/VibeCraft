@@ -6,7 +6,7 @@ export type Route =
   | { name: 'workflows' }
   | { name: 'chat'; sessionId?: string }
   | { name: 'repo_library_repositories' }
-  | { name: 'repo_library_repository_detail'; repositoryId: string }
+  | { name: 'repo_library_repository_detail'; repositoryId: string; analysisId?: string }
   | { name: 'repo_library_pattern_search' }
   | { name: 'workflow_detail'; workflowId: string }
 
@@ -25,6 +25,14 @@ export function parseRouteFromHash(hash: string): Route {
   }
   if (/^#\/repo-library\/search$/.test(raw)) {
     return { name: 'repo_library_pattern_search' }
+  }
+  const repositoryAnalysisMatch = raw.match(/^#\/repo-library\/repositories\/([^/]+)\/analyses\/([^/]+)$/)
+  if (repositoryAnalysisMatch) {
+    return {
+      name: 'repo_library_repository_detail',
+      repositoryId: decodeURIComponent(repositoryAnalysisMatch[1]),
+      analysisId: decodeURIComponent(repositoryAnalysisMatch[2]),
+    }
   }
   const repositoryMatch = raw.match(/^#\/repo-library\/repositories\/([^/]+)$/)
   if (repositoryMatch) {
@@ -84,8 +92,10 @@ export function goToRepoLibraryRepositories() {
   window.location.hash = '#/repo-library/repositories'
 }
 
-export function goToRepoLibraryRepository(repositoryId: string) {
-  window.location.hash = `#/repo-library/repositories/${encodeURIComponent(repositoryId)}`
+export function goToRepoLibraryRepository(repositoryId: string, analysisId?: string) {
+  window.location.hash = analysisId?.trim()
+    ? `#/repo-library/repositories/${encodeURIComponent(repositoryId)}/analyses/${encodeURIComponent(analysisId)}`
+    : `#/repo-library/repositories/${encodeURIComponent(repositoryId)}`
 }
 
 export function goToRepoLibraryPatternSearch() {

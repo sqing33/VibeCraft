@@ -83,10 +83,10 @@ func main() {
 	} else if fixed > 0 {
 		logx.Warn("daemon", "recover-orchestrations", "检测到未收敛的 running agent run，已标记为 failed", "count", fixed)
 	}
-	if fixed, err := stateStore.RecoverRepoAnalysisRunsAfterRestart(context.Background()); err != nil {
+	if fixed, err := stateStore.RecoverRepoAnalysesAfterRestart(context.Background()); err != nil {
 		logx.Warn("daemon", "recover-repo-analysis", "Repo analysis 启动恢复失败（将由后续状态机兜底）", "err", err)
 	} else if fixed > 0 {
-		logx.Warn("daemon", "recover-repo-analysis", "检测到未收敛的 repo analysis run，已标记为 failed", "count", fixed)
+		logx.Warn("daemon", "recover-repo-analysis", "检测到未收敛的 repo analysis，已标记为 failed", "count", fixed)
 	}
 
 	hub := ws.NewHub()
@@ -113,7 +113,8 @@ func main() {
 		}
 	}()
 	codexHistorySvc := codexhistory.NewService(stateStore, codexhistory.Options{})
-	repoLibSvc, err := repolib.NewService(stateStore, execMgr, chatMgr, experts)
+	repoLibStream := repolib.NewSSEBroker()
+	repoLibSvc, err := repolib.NewService(stateStore, execMgr, chatMgr, experts, repoLibStream)
 	if err != nil {
 		logx.Error("daemon", "repo-library", "初始化 Repo Library service 失败", "err", err)
 		os.Exit(1)
@@ -161,7 +162,19 @@ func main() {
 
 	engine := server.New(
 		server.Options{DevCORS: server.DevCORSFromEnv()},
-		api.Deps{Executions: execMgr, Hub: hub, Store: stateStore, Experts: experts, Chat: chatMgr, CodexHistory: codexHistorySvc, MCPGateway: mcpGateway, Orchestration: orchMgr, RepoLibrary: repoLibSvc, IFLOWAuth: iflowAuthMgr},
+		api.Deps{
+			Executions:        execMgr,
+			Hub:               hub,
+			Store:             stateStore,
+			Experts:           experts,
+			Chat:              chatMgr,
+			CodexHistory:      codexHistorySvc,
+			MCPGateway:        mcpGateway,
+			Orchestration:     orchMgr,
+			RepoLibrary:       repoLibSvc,
+			RepoLibraryStream: repoLibStream,
+			IFLOWAuth:         iflowAuthMgr,
+		},
 	)
 	srv := &http.Server{
 		Addr:              cfg.Addr(),

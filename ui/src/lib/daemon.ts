@@ -1997,19 +1997,19 @@ export type RepoLibraryAnalysisRequest = {
   model_id?: string;
 };
 
-export type RepoLibraryAnalysisRun = {
+export type RepoLibraryAnalysisResult = {
   analysis_id: string;
   repository_id: string;
-  snapshot_id?: string;
   execution_id?: string;
-  repo_url: string;
-  ref?: string;
+  requested_ref?: string;
   resolved_ref?: string;
   commit_sha?: string;
+  storage_path?: string;
+  report_path?: string;
   features: string[];
   depth?: RepoLibraryDepth;
   language?: string;
-  analyzer_mode?: string;
+  agent_mode?: string;
   cli_tool_id?: string;
   model_id?: string;
   runtime_kind?: string;
@@ -2017,29 +2017,13 @@ export type RepoLibraryAnalysisRun = {
   chat_user_message_id?: string;
   chat_assistant_message_id?: string;
   status: string;
-  failure_message?: string;
-  storage_path?: string;
-  report_path?: string;
-  report_url?: string;
-  created_at: number;
-  updated_at: number;
-  finished_at?: number;
-};
-
-export type RepoLibrarySnapshot = {
-  snapshot_id: string;
-  repository_id: string;
-  ref?: string;
-  resolved_ref?: string;
-  commit_sha?: string;
-  storage_path?: string;
-  report_path?: string;
-  report_url?: string;
-  report_excerpt?: string;
-  report_markdown?: string;
+  summary?: string;
+  error_message?: string;
+  started_at?: number;
+  ended_at?: number;
   report_context_summary?: RepoLibraryReportContextSummary;
   created_at: number;
-  updated_at?: number;
+  updated_at: number;
 };
 
 export type RepoLibraryReportContextSummary = {
@@ -2068,24 +2052,41 @@ export type RepoLibraryRepository = {
 };
 
 export type RepoLibraryRepositorySummary = RepoLibraryRepository & {
-  latest_snapshot?: RepoLibrarySnapshot | null;
-  latest_analysis?: RepoLibraryAnalysisRun | null;
+  latest_analysis?: RepoLibraryAnalysisResult | null;
 };
 
 export type RepoLibraryRepositoryDetail = {
   repository: RepoLibraryRepository;
-  latest_snapshot?: RepoLibrarySnapshot | null;
-  latest_analysis?: RepoLibraryAnalysisRun | null;
-  analysis_runs?: RepoLibraryAnalysisRun[];
-  report_excerpt?: string;
+  analyses: RepoLibraryAnalysisResult[];
+  cards?: RepoLibraryCard[];
+};
+
+export type RepoLibraryRepositoryViewLiteResponse = {
+  repositories: RepoLibraryRepositorySummary[];
+  detail: RepoLibraryRepositoryDetail;
+  selected_analysis_id?: string;
+  cards?: RepoLibraryCard[];
+  selected_card_id?: string;
+  selected_card?: RepoLibraryCard;
+  selected_evidence?: RepoLibraryCardEvidence[];
+  selected_integration_section_markdown?: string;
+};
+
+export type RepoLibraryCardHydration = {
+  card: RepoLibraryCard;
+  evidence: RepoLibraryCardEvidence[];
+};
+
+export type RepoLibraryRepositoryViewFullResponse = {
+  analysis_id: string;
   report_markdown?: string;
+  cards_full?: RepoLibraryCardHydration[];
 };
 
 export type RepoLibraryCard = {
   card_id: string;
   repository_id: string;
-  snapshot_id?: string;
-  analysis_id?: string;
+  analysis_id: string;
   card_type: string;
   title: string;
   section_title?: string;
@@ -2103,7 +2104,6 @@ export type RepoLibraryCardEvidence = {
   evidence_id: string;
   card_id?: string;
   repository_id?: string;
-  snapshot_id?: string;
   source_path: string;
   start_line?: number;
   end_line?: number;
@@ -2112,15 +2112,13 @@ export type RepoLibraryCardEvidence = {
 };
 
 export type RepoLibraryCreateAnalysisResponse = {
-  analysis: RepoLibraryAnalysisRun;
+  analysis: RepoLibraryAnalysisResult;
   repository?: RepoLibraryRepository;
-  snapshot?: RepoLibrarySnapshot;
 };
 
 export type RepoLibrarySyncChatResponse = {
   ok?: boolean;
-  analysis?: RepoLibraryAnalysisRun;
-  detail?: RepoLibraryRepositoryDetail;
+  analysis?: RepoLibraryAnalysisResult;
 };
 
 export type RepoLibrarySearchRequest = {
@@ -2132,14 +2130,14 @@ export type RepoLibrarySearchRequest = {
 export type RepoLibrarySearchResult = {
   result_id?: string;
   repository_id: string;
-  snapshot_id?: string;
+  analysis_id?: string;
   card_id?: string;
   score?: number;
   title?: string;
   summary?: string;
   rationale?: string;
   repository?: RepoLibraryRepositorySummary;
-  snapshot?: RepoLibrarySnapshot;
+  analysis?: RepoLibraryAnalysisResult;
   card?: RepoLibraryCard;
   evidence_preview?: RepoLibraryCardEvidence[];
 };
@@ -2203,16 +2201,46 @@ function normalizeRepoLibraryRepository(body: unknown): RepoLibraryRepository {
   };
 }
 
-function normalizeRepoLibrarySnapshot(body: unknown): RepoLibrarySnapshot {
+function normalizeRepoLibraryReportContextSummary(
+  body: unknown,
+): RepoLibraryReportContextSummary {
   const record = (body ?? {}) as Record<string, unknown>;
   return {
-    snapshot_id: String(record.snapshot_id ?? record.id ?? ""),
+    generated_at:
+      typeof record.generated_at === "string" ? record.generated_at : undefined,
+    stack_overview:
+      typeof record.stack_overview === "string"
+        ? record.stack_overview
+        : undefined,
+    backend_summary:
+      typeof record.backend_summary === "string"
+        ? record.backend_summary
+        : undefined,
+    frontend_summary:
+      typeof record.frontend_summary === "string"
+        ? record.frontend_summary
+        : undefined,
+    other_modules_summary:
+      typeof record.other_modules_summary === "string"
+        ? record.other_modules_summary
+        : undefined,
+  };
+}
+
+function normalizeRepoLibraryAnalysisResult(
+  body: unknown,
+): RepoLibraryAnalysisResult {
+  const record = (body ?? {}) as Record<string, unknown>;
+  return {
+    analysis_id: String(record.analysis_id ?? record.id ?? ""),
     repository_id: String(record.repository_id ?? record.repo_source_id ?? ""),
-    ref:
-      typeof record.ref === "string"
-        ? record.ref
-        : typeof record.requested_ref === "string"
-          ? record.requested_ref
+    execution_id:
+      typeof record.execution_id === "string" ? record.execution_id : undefined,
+    requested_ref:
+      typeof record.requested_ref === "string"
+        ? record.requested_ref
+        : typeof record.ref === "string"
+          ? record.ref
           : undefined,
     resolved_ref:
       typeof record.resolved_ref === "string" ? record.resolved_ref : undefined,
@@ -2222,50 +2250,6 @@ function normalizeRepoLibrarySnapshot(body: unknown): RepoLibrarySnapshot {
       typeof record.storage_path === "string" ? record.storage_path : undefined,
     report_path:
       typeof record.report_path === "string" ? record.report_path : undefined,
-    report_url:
-      typeof record.report_url === "string" ? record.report_url : undefined,
-    report_excerpt:
-      typeof record.report_excerpt === "string"
-        ? record.report_excerpt
-        : undefined,
-    report_markdown:
-      typeof record.report_markdown === "string"
-        ? record.report_markdown
-        : undefined,
-    created_at: typeof record.created_at === "number" ? record.created_at : 0,
-    updated_at:
-      typeof record.updated_at === "number" ? record.updated_at : undefined,
-  };
-}
-
-function normalizeRepoLibraryAnalysisRun(
-  body: unknown,
-): RepoLibraryAnalysisRun {
-  const record = (body ?? {}) as Record<string, unknown>;
-  return {
-    analysis_id: String(
-      record.analysis_id ?? record.analysis_run_id ?? record.id ?? "",
-    ),
-    repository_id: String(record.repository_id ?? record.repo_source_id ?? ""),
-    snapshot_id:
-      typeof record.snapshot_id === "string"
-        ? record.snapshot_id
-        : typeof record.repo_snapshot_id === "string"
-          ? record.repo_snapshot_id
-          : undefined,
-    execution_id:
-      typeof record.execution_id === "string" ? record.execution_id : undefined,
-    repo_url: typeof record.repo_url === "string" ? record.repo_url : "",
-    ref:
-      typeof record.ref === "string"
-        ? record.ref
-        : typeof record.requested_ref === "string"
-          ? record.requested_ref
-          : undefined,
-    resolved_ref:
-      typeof record.resolved_ref === "string" ? record.resolved_ref : undefined,
-    commit_sha:
-      typeof record.commit_sha === "string" ? record.commit_sha : undefined,
     features: Array.isArray(record.features)
       ? record.features.filter(
           (item): item is string => typeof item === "string",
@@ -2276,12 +2260,8 @@ function normalizeRepoLibraryAnalysisRun(
         ? record.depth
         : undefined,
     language: typeof record.language === "string" ? record.language : undefined,
-    analyzer_mode:
-      typeof record.analyzer_mode === "string"
-        ? record.analyzer_mode
-        : typeof record.agent_mode === "string"
-          ? record.agent_mode
-          : undefined,
+    agent_mode:
+      typeof record.agent_mode === "string" ? record.agent_mode : undefined,
     cli_tool_id:
       typeof record.cli_tool_id === "string"
         ? record.cli_tool_id
@@ -2310,26 +2290,19 @@ function normalizeRepoLibraryAnalysisRun(
           ? record.chatAssistantMessageId
           : undefined,
     status: typeof record.status === "string" ? record.status : "unknown",
-    failure_message:
-      typeof record.failure_message === "string"
-        ? record.failure_message
-        : typeof record.error_message === "string"
-          ? record.error_message
-          : undefined,
-    storage_path:
-      typeof record.storage_path === "string" ? record.storage_path : undefined,
-    report_path:
-      typeof record.report_path === "string" ? record.report_path : undefined,
-    report_url:
-      typeof record.report_url === "string" ? record.report_url : undefined,
+    summary: typeof record.summary === "string" ? record.summary : undefined,
+    error_message:
+      typeof record.error_message === "string" ? record.error_message : undefined,
+    started_at:
+      typeof record.started_at === "number" ? record.started_at : undefined,
+    ended_at: typeof record.ended_at === "number" ? record.ended_at : undefined,
+    report_context_summary:
+      record.report_context_summary &&
+      typeof record.report_context_summary === "object"
+        ? normalizeRepoLibraryReportContextSummary(record.report_context_summary)
+        : undefined,
     created_at: typeof record.created_at === "number" ? record.created_at : 0,
     updated_at: typeof record.updated_at === "number" ? record.updated_at : 0,
-    finished_at:
-      typeof record.finished_at === "number"
-        ? record.finished_at
-        : typeof record.ended_at === "number"
-          ? record.ended_at
-          : undefined,
   };
 }
 
@@ -2346,21 +2319,21 @@ function normalizeRepoLibraryCard(body: unknown): RepoLibraryCard {
   return {
     card_id: String(record.card_id ?? record.id ?? ""),
     repository_id: String(record.repository_id ?? record.repo_source_id ?? ""),
-    snapshot_id:
-      typeof record.snapshot_id === "string"
-        ? record.snapshot_id
-        : typeof record.repo_snapshot_id === "string"
-          ? record.repo_snapshot_id
-          : undefined,
-    analysis_id:
-      typeof record.analysis_id === "string"
-        ? record.analysis_id
-        : typeof record.analysis_run_id === "string"
-          ? record.analysis_run_id
-          : undefined,
+    analysis_id: String(
+      record.analysis_id ??
+        record.analysis_result_id ??
+        record.analysis_run_id ??
+        "",
+    ),
     card_type: String(record.card_type ?? ""),
     title: String(record.title ?? ""),
     summary: typeof record.summary === "string" ? record.summary : undefined,
+    conclusion:
+      typeof record.conclusion === "string" ? record.conclusion : undefined,
+    mechanism:
+      typeof record.mechanism === "string" ? record.mechanism : undefined,
+    section_title:
+      typeof record.section_title === "string" ? record.section_title : undefined,
     detail:
       typeof record.detail === "string"
         ? record.detail
@@ -2390,12 +2363,6 @@ function normalizeRepoLibraryCardEvidence(
         ? record.repository_id
         : typeof record.repo_source_id === "string"
           ? record.repo_source_id
-          : undefined,
-    snapshot_id:
-      typeof record.snapshot_id === "string"
-        ? record.snapshot_id
-        : typeof record.repo_snapshot_id === "string"
-          ? record.repo_snapshot_id
           : undefined,
     source_path: String(record.source_path ?? record.path ?? ""),
     start_line:
@@ -2432,28 +2399,20 @@ function normalizeRepoLibraryRepositorySummary(
   const repository = normalizeRepoLibraryRepository(body);
   return {
     ...repository,
-    latest_snapshot:
-      record.latest_snapshot && typeof record.latest_snapshot === "object"
-        ? normalizeRepoLibrarySnapshot(record.latest_snapshot)
-        : record.latest_snapshot_id ||
-            record.latest_commit_sha ||
-            record.latest_resolved_ref
-          ? normalizeRepoLibrarySnapshot({
-              snapshot_id: record.latest_snapshot_id,
-              repository_id: repository.repository_id,
-              commit_sha: record.latest_commit_sha,
-              resolved_ref: record.latest_resolved_ref,
-            })
-          : null,
     latest_analysis:
       record.latest_analysis && typeof record.latest_analysis === "object"
-        ? normalizeRepoLibraryAnalysisRun(record.latest_analysis)
-        : record.latest_analysis_run_id || record.latest_analysis_status
-          ? normalizeRepoLibraryAnalysisRun({
-              analysis_run_id: record.latest_analysis_run_id,
+        ? normalizeRepoLibraryAnalysisResult(record.latest_analysis)
+        : record.latest_analysis_id ||
+            record.latest_analysis_run_id ||
+            record.latest_analysis_status
+          ? normalizeRepoLibraryAnalysisResult({
+              analysis_id:
+                record.latest_analysis_id ?? record.latest_analysis_run_id,
               repository_id: repository.repository_id,
               status: record.latest_analysis_status,
               updated_at: record.latest_analysis_updated_at,
+              commit_sha: record.latest_commit_sha,
+              resolved_ref: record.latest_resolved_ref,
             })
           : null,
   };
@@ -2464,27 +2423,21 @@ function normalizeRepoLibraryRepositoryDetail(
 ): RepoLibraryRepositoryDetail {
   const record = (body ?? {}) as Record<string, unknown>;
   const repository = normalizeRepoLibraryRepository(record.repository ?? body);
-  const snapshots = Array.isArray(record.snapshots)
-    ? record.snapshots.map((item) => normalizeRepoLibrarySnapshot(item))
-    : [];
-  const analysisRuns = Array.isArray(record.analysis_runs)
-    ? record.analysis_runs.map((item) => normalizeRepoLibraryAnalysisRun(item))
-    : Array.isArray(record.runs)
-      ? record.runs.map((item) => normalizeRepoLibraryAnalysisRun(item))
-      : [];
+  const analyses = Array.isArray(record.analyses)
+    ? record.analyses.map((item) => normalizeRepoLibraryAnalysisResult(item))
+    : Array.isArray(record.analysis_runs)
+      ? record.analysis_runs.map((item) =>
+          normalizeRepoLibraryAnalysisResult(item),
+        )
+      : Array.isArray(record.runs)
+        ? record.runs.map((item) => normalizeRepoLibraryAnalysisResult(item))
+        : [];
   return {
     repository,
-    latest_snapshot: snapshots[0] ?? null,
-    latest_analysis: analysisRuns[0] ?? null,
-    analysis_runs: analysisRuns,
-    report_excerpt:
-      typeof record.report_excerpt === "string"
-        ? record.report_excerpt
-        : undefined,
-    report_markdown:
-      typeof record.report_markdown === "string"
-        ? record.report_markdown
-        : undefined,
+    analyses,
+    cards: Array.isArray(record.cards)
+      ? record.cards.map((item) => normalizeRepoLibraryCard(item))
+      : undefined,
   };
 }
 
@@ -2496,10 +2449,12 @@ function normalizeRepoLibrarySearchResult(
     record.repository && typeof record.repository === "object"
       ? record.repository
       : null;
-  const snapshotPayload =
-    record.snapshot && typeof record.snapshot === "object"
-      ? record.snapshot
+  const analysisPayload =
+    record.analysis && typeof record.analysis === "object"
+      ? record.analysis
       : null;
+  const cardPayload =
+    record.card && typeof record.card === "object" ? record.card : null;
   return {
     result_id:
       typeof record.result_id === "string"
@@ -2513,12 +2468,12 @@ function normalizeRepoLibrarySearchResult(
         record.repository_id ??
         "",
     ),
-    snapshot_id:
-      typeof record.snapshot_id === "string"
-        ? record.snapshot_id
-        : typeof (snapshotPayload as Record<string, unknown> | null)
-              ?.snapshot_id === "string"
-          ? String((snapshotPayload as Record<string, unknown>).snapshot_id)
+    analysis_id:
+      typeof record.analysis_id === "string"
+        ? record.analysis_id
+        : typeof (analysisPayload as Record<string, unknown> | null)
+              ?.analysis_id === "string"
+          ? String((analysisPayload as Record<string, unknown>).analysis_id)
           : undefined,
     card_id: typeof record.card_id === "string" ? record.card_id : undefined,
     score: typeof record.score === "number" ? record.score : undefined,
@@ -2540,9 +2495,10 @@ function normalizeRepoLibrarySearchResult(
     repository: repositoryPayload
       ? normalizeRepoLibraryRepositorySummary(repositoryPayload)
       : undefined,
-    snapshot: snapshotPayload
-      ? normalizeRepoLibrarySnapshot(snapshotPayload)
+    analysis: analysisPayload
+      ? normalizeRepoLibraryAnalysisResult(analysisPayload)
       : undefined,
+    card: cardPayload ? normalizeRepoLibraryCard(cardPayload) : undefined,
     evidence_preview: Array.isArray(record.evidence_preview)
       ? record.evidence_preview.map((item) =>
           normalizeRepoLibraryCardEvidence(item),
@@ -2579,31 +2535,23 @@ function normalizeRepoLibraryCreateAnalysisResponse(
   const record = body as Record<string, unknown>;
   if (record.analysis && typeof record.analysis === "object") {
     return {
-      analysis: normalizeRepoLibraryAnalysisRun(record.analysis),
+      analysis: normalizeRepoLibraryAnalysisResult(record.analysis),
       repository:
         record.repository && typeof record.repository === "object"
           ? normalizeRepoLibraryRepository(record.repository)
-          : undefined,
-      snapshot:
-        record.snapshot && typeof record.snapshot === "object"
-          ? normalizeRepoLibrarySnapshot(record.snapshot)
           : undefined,
     };
   }
   if (record.run && typeof record.run === "object") {
     return {
-      analysis: normalizeRepoLibraryAnalysisRun(record.run),
+      analysis: normalizeRepoLibraryAnalysisResult(record.run),
       repository:
         record.repository && typeof record.repository === "object"
           ? normalizeRepoLibraryRepository(record.repository)
           : undefined,
-      snapshot:
-        record.snapshot && typeof record.snapshot === "object"
-          ? normalizeRepoLibrarySnapshot(record.snapshot)
-          : undefined,
     };
   }
-  return { analysis: normalizeRepoLibraryAnalysisRun(body) };
+  return { analysis: normalizeRepoLibraryAnalysisResult(body) };
 }
 
 function normalizeRepoLibrarySyncChatResponse(
@@ -2613,25 +2561,21 @@ function normalizeRepoLibrarySyncChatResponse(
     return {};
   }
   const record = body as Record<string, unknown>;
-  const detail =
-    record.detail && typeof record.detail === "object"
-      ? normalizeRepoLibraryRepositoryDetail(record.detail)
-      : record.repository && typeof record.repository === "object"
-        ? normalizeRepoLibraryRepositoryDetail(body)
-        : undefined;
   const analysis =
     record.analysis && typeof record.analysis === "object"
-      ? normalizeRepoLibraryAnalysisRun(record.analysis)
+      ? normalizeRepoLibraryAnalysisResult(record.analysis)
       : record.run && typeof record.run === "object"
-        ? normalizeRepoLibraryAnalysisRun(record.run)
-        : undefined;
+        ? normalizeRepoLibraryAnalysisResult(record.run)
+        : record.analysis_run && typeof record.analysis_run === "object"
+          ? normalizeRepoLibraryAnalysisResult(record.analysis_run)
+          : undefined;
   const ok =
     typeof record.ok === "boolean"
       ? record.ok
       : typeof record.success === "boolean"
         ? record.success
         : undefined;
-  return { ok, analysis, detail };
+  return { ok, analysis };
 }
 
 /**
@@ -2711,7 +2655,7 @@ export async function fetchRepoLibraryRepositories(
 
 /**
  * 功能：读取单个 Repo Library 仓库详情（`GET /api/v1/repo-library/repositories/{id}`）。
- * 参数/返回：接收 daemonUrl 与 repositoryId；返回仓库详情、最近快照与分析运行概览。
+ * 参数/返回：接收 daemonUrl 与 repositoryId；返回仓库详情与分析结果概览。
  * 失败场景：HTTP 非 2xx 或返回体缺少仓库详情结构时抛出 Error。
  * 副作用：发起 HTTP 请求。
  */
@@ -2734,46 +2678,130 @@ export async function fetchRepoLibraryRepository(
   if (record.repository && typeof record.repository === "object") {
     return normalizeRepoLibraryRepositoryDetail(body);
   }
-  return { repository: normalizeRepoLibraryRepository(body) };
+  return { repository: normalizeRepoLibraryRepository(body), analyses: [] };
 }
 
 /**
- * 功能：读取指定仓库下的快照列表（`GET /api/v1/repo-library/repositories/{id}/snapshots`）。
- * 参数/返回：接收 daemonUrl 与 repositoryId；返回快照数组。
- * 失败场景：HTTP 非 2xx 或返回体不是数组/已知列表包装时抛出 Error。
+ * 功能：获取仓库详情页的聚合视图数据（`GET /api/v1/repo-library/repositories/{id}/view`）。
+ * 参数/返回：mode=lite|full；analysisId 可选（full 必填）。
+ * 失败场景：HTTP 非 2xx 或返回体非预期时抛出 Error。
  * 副作用：发起 HTTP 请求。
  */
-export async function fetchRepoLibrarySnapshots(
+export async function fetchRepoLibraryRepositoryView(
   daemonUrl: string,
   repositoryId: string,
-): Promise<RepoLibrarySnapshot[]> {
-  const res = await fetch(
-    `${daemonUrl}/api/v1/repo-library/repositories/${repositoryId}/snapshots`,
+  opts?: { mode?: "lite" | "full"; analysis_id?: string },
+): Promise<RepoLibraryRepositoryViewLiteResponse | RepoLibraryRepositoryViewFullResponse> {
+  const url = new URL(
+    `${daemonUrl}/api/v1/repo-library/repositories/${encodeURIComponent(repositoryId)}/view`,
   );
+  if (opts?.mode) url.searchParams.set("mode", opts.mode);
+  if (opts?.analysis_id)
+    url.searchParams.set("analysis_id", String(opts.analysis_id));
+  const res = await fetch(url);
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim());
   }
-  return readRepoLibraryList<unknown>(await res.json(), [
-    "items",
-    "snapshots",
-  ]).map((item) => normalizeRepoLibrarySnapshot(item));
+  const body = (await res.json()) as unknown;
+  if (!body || typeof body !== "object") {
+    throw new Error("unexpected response shape");
+  }
+  const record = body as Record<string, unknown>;
+  if (record.detail && typeof record.detail === "object") {
+    const repositories = Array.isArray(record.repositories)
+      ? record.repositories.map((item) => normalizeRepoLibraryRepositorySummary(item))
+      : [];
+    const cards = Array.isArray(record.cards)
+      ? record.cards.map((item) => normalizeRepoLibraryCard(item))
+      : [];
+    const selectedCard =
+      record.selected_card && typeof record.selected_card === "object"
+        ? normalizeRepoLibraryCard(record.selected_card)
+        : undefined;
+    const selectedEvidence = Array.isArray(record.selected_evidence)
+      ? record.selected_evidence.map((item) => normalizeRepoLibraryCardEvidence(item))
+      : [];
+    return {
+      repositories,
+      detail: normalizeRepoLibraryRepositoryDetail(record.detail),
+      selected_analysis_id:
+        typeof record.selected_analysis_id === "string"
+          ? record.selected_analysis_id
+          : undefined,
+      cards,
+      selected_card_id:
+        typeof record.selected_card_id === "string"
+          ? record.selected_card_id
+          : undefined,
+      selected_card: selectedCard,
+      selected_evidence: selectedEvidence,
+      selected_integration_section_markdown:
+        typeof record.selected_integration_section_markdown === "string"
+          ? record.selected_integration_section_markdown
+          : undefined,
+    } satisfies RepoLibraryRepositoryViewLiteResponse;
+  }
+
+  const cardsFullRaw = Array.isArray(record.cards_full) ? record.cards_full : [];
+  const cards_full = cardsFullRaw
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const entry = item as Record<string, unknown>;
+      const card =
+        entry.card && typeof entry.card === "object"
+          ? normalizeRepoLibraryCard(entry.card)
+          : null;
+      if (!card) return null;
+      const evidence = Array.isArray(entry.evidence)
+        ? entry.evidence.map((ev) => normalizeRepoLibraryCardEvidence(ev))
+        : [];
+      return { card, evidence } satisfies RepoLibraryCardHydration;
+    })
+    .filter((item): item is RepoLibraryCardHydration => Boolean(item));
+  return {
+    analysis_id: String(record.analysis_id ?? ""),
+    report_markdown:
+      typeof record.report_markdown === "string" ? record.report_markdown : undefined,
+    cards_full,
+  } satisfies RepoLibraryRepositoryViewFullResponse;
+}
+
+export type DeleteRepoLibraryAnalysisResponse = {
+  repository_id: string;
+  deleted_repository: boolean;
+  deleted_analysis_id: string;
+};
+
+export async function deleteRepoLibraryAnalysis(
+  daemonUrl: string,
+  analysisId: string,
+  opts?: { delete_repository_if_last?: boolean },
+): Promise<DeleteRepoLibraryAnalysisResponse> {
+  const url = new URL(`${daemonUrl}/api/v1/repo-library/analyses/${encodeURIComponent(analysisId)}`);
+  if (opts?.delete_repository_if_last) url.searchParams.set("delete_repository_if_last", "true");
+  const res = await fetch(url, { method: "DELETE" });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim());
+  }
+  return (await res.json()) as DeleteRepoLibraryAnalysisResponse;
 }
 
 /**
- * 功能：按仓库或快照读取 Repo Library 卡片列表（`GET /api/v1/repo-library/cards`）。
+ * 功能：按仓库或分析结果读取 Repo Library 卡片列表（`GET /api/v1/repo-library/cards`）。
  * 参数/返回：接收 daemonUrl 与可选过滤参数；返回知识卡片数组。
  * 失败场景：HTTP 非 2xx 或返回体不是数组/已知列表包装时抛出 Error。
  * 副作用：发起 HTTP 请求。
  */
 export async function fetchRepoLibraryCards(
   daemonUrl: string,
-  opts?: { repository_id?: string; snapshot_id?: string; limit?: number },
+  opts?: { repository_id?: string; analysis_id?: string; limit?: number },
 ): Promise<RepoLibraryCard[]> {
   const url = new URL(`${daemonUrl}/api/v1/repo-library/cards`);
   if (opts?.repository_id)
     url.searchParams.set("repository_id", opts.repository_id);
-  if (opts?.snapshot_id) url.searchParams.set("snapshot_id", opts.snapshot_id);
+  if (opts?.analysis_id) url.searchParams.set("analysis_id", opts.analysis_id);
   if (typeof opts?.limit === "number")
     url.searchParams.set("limit", String(opts.limit));
   const res = await fetch(url);
@@ -2827,18 +2855,18 @@ export async function fetchRepoLibraryCardEvidence(
   ]).map((item) => normalizeRepoLibraryCardEvidence(item));
 }
 
-export async function fetchRepoLibrarySnapshotReport(
+export async function fetchRepoLibraryAnalysisReport(
   daemonUrl: string,
-  snapshotId: string,
-): Promise<{ snapshot_id: string; report_markdown: string }> {
+  analysisId: string,
+): Promise<{ analysis_id: string; report_markdown: string }> {
   const res = await fetch(
-    `${daemonUrl}/api/v1/repo-library/snapshots/${snapshotId}/report`,
+    `${daemonUrl}/api/v1/repo-library/analyses/${encodeURIComponent(analysisId)}/report`,
   );
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(text || `HTTP ${res.status} ${res.statusText}`.trim());
   }
-  return (await res.json()) as { snapshot_id: string; report_markdown: string };
+  return (await res.json()) as { analysis_id: string; report_markdown: string };
 }
 
 /**

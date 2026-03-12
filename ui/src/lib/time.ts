@@ -28,3 +28,21 @@ export function formatRelativeTime(ms: number): string {
   const year = Math.round(month / 12)
   return `${year} 年前`
 }
+
+/**
+ * 功能：将 Unix ms 时间戳格式化为本地绝对时间（YYYY-MM-DD HH:mm）。
+ * 参数/返回：接收 ms；返回字符串。
+ * 失败场景：ms 非法时返回 `-`。
+ * 副作用：无。
+ */
+export function formatAbsoluteTime(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '-'
+  const d = new Date(ms)
+  const pad2 = (n: number) => String(n).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  const mm = pad2(d.getMonth() + 1)
+  const dd = pad2(d.getDate())
+  const hh = pad2(d.getHours())
+  const min = pad2(d.getMinutes())
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`
+}

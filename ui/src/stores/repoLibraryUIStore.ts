@@ -3,20 +3,32 @@ import { create } from 'zustand'
 import type {
   RepoLibraryCard,
   RepoLibraryCardEvidence,
+  RepoLibraryDepth,
   RepoLibraryRepositoryDetail,
   RepoLibraryRepositorySummary,
   RepoLibrarySearchResult,
-  RepoLibrarySnapshot,
 } from '@/lib/daemon'
+
+export type RepoLibraryAnalysisDraft = {
+  repo_url: string
+  ref: string
+  features: string[]
+  depth: RepoLibraryDepth
+  language: 'zh-CN' | 'en'
+  analyzer_mode: 'full' | 'compact'
+  cli_tool_id?: string
+  model_id?: string
+}
 
 type RepoLibraryDetailCache = {
   detail: RepoLibraryRepositoryDetail | null
-  snapshots: RepoLibrarySnapshot[]
   cards: RepoLibraryCard[]
+  cardsById: Record<string, RepoLibraryCard>
+  evidenceByCardId: Record<string, RepoLibraryCardEvidence[]>
   selectedCard: RepoLibraryCard | null
   evidence: RepoLibraryCardEvidence[]
   reportMarkdown: string
-  selectedSnapshotId: string | null
+  reportExcerptMarkdown: string
   selectedAnalysisId: string | null
   selectedCardId: string | null
   loading: boolean
@@ -39,6 +51,10 @@ type RepoLibraryUIStore = {
     refreshing?: boolean
     error?: string | null
   }) => void
+
+  analysisDraft: RepoLibraryAnalysisDraft | null
+  setAnalysisDraft: (draft: RepoLibraryAnalysisDraft | null) => void
+  clearAnalysisDraft: () => void
 
   searchQuery: string
   searchLimit: string
@@ -65,12 +81,13 @@ type RepoLibraryUIStore = {
 function createEmptyDetailCache(): RepoLibraryDetailCache {
   return {
     detail: null,
-    snapshots: [],
     cards: [],
+    cardsById: {},
+    evidenceByCardId: {},
     selectedCard: null,
     evidence: [],
     reportMarkdown: '',
-    selectedSnapshotId: null,
+    reportExcerptMarkdown: '',
     selectedAnalysisId: null,
     selectedCardId: null,
     loading: false,
@@ -95,6 +112,10 @@ export const useRepoLibraryUIStore = create<RepoLibraryUIStore>((set) => ({
       repositoriesRefreshing: payload.refreshing ?? state.repositoriesRefreshing,
       repositoriesError: payload.error === undefined ? state.repositoriesError : payload.error,
     })),
+
+  analysisDraft: null,
+  setAnalysisDraft: (draft) => set({ analysisDraft: draft }),
+  clearAnalysisDraft: () => set({ analysisDraft: null }),
 
   searchQuery: '认证流程是如何落地的？',
   searchLimit: '8',
