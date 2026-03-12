@@ -11,16 +11,18 @@ Machine validation MUST check required report structure, feature-to-section mapp
 #### Scenario: Candidate report passes validation
 - **WHEN** an automated repository analysis produces a candidate final report
 - **THEN** the system validates the report before finalizing analysis results
-- **AND** only a passing report is persisted as the official snapshot report
+- **AND** only a passing report is persisted as the official analysis result report
 - **AND** downstream card extraction and search refresh continue from that validated report
 
 #### Scenario: Candidate report fails validation
 - **WHEN** a candidate final report does not satisfy structure or extractability checks
-- **THEN** the system does not treat it as the official snapshot report
+- **THEN** the system does not treat it as the official analysis result report
 - **AND** the system records validation errors for follow-up handling
 
 ### Requirement: Repo Library MUST retry formal report generation with validator feedback
 When a candidate report fails validation, the system MUST request a full corrected report from the linked AI chat session using the validation failures as explicit feedback.
+
+The corrective prompt MUST be short and format-focused, and MUST NOT re-send the original large analysis prompt.
 
 The retry loop MUST stop after a bounded number of attempts.
 
@@ -29,6 +31,11 @@ The retry loop MUST stop after a bounded number of attempts.
 - **THEN** the system sends a corrective follow-up prompt to the same analysis chat session
 - **AND** the prompt includes the blocking validation errors
 - **AND** the assistant is asked to return a full corrected final report instead of a patch or explanation
+
+#### Scenario: Sync validates latest reply before requesting repair
+- **WHEN** the user triggers sync on an analysis result linked to a chat session
+- **THEN** the system validates the latest assistant reply directly
+- **AND** only if validation fails does the system send a corrective follow-up prompt
 
 #### Scenario: Validation eventually succeeds within retry budget
 - **WHEN** one of the retry attempts produces a passing report
@@ -44,3 +51,4 @@ The system MUST NOT publish cards or search index updates from an invalid final 
 - **WHEN** the final retry attempt still fails validation
 - **THEN** the system stores the invalid final draft and validation output as diagnostic artifacts
 - **AND** the analysis does not update official cards or search corpus from that invalid draft
+

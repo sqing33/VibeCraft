@@ -45,13 +45,13 @@ type validatedReportResult struct {
 	Attempts   int
 }
 
-func (s *Service) resolveAnalysisTurnRuntime(session store.ChatSession, run store.RepoAnalysisRun) (expert.Resolved, error) {
-	toolID := firstNonEmptyTrimmed(pointerValue(session.CLIToolID), pointerValue(run.CLIToolID), session.ExpertID)
-	modelID := firstNonEmptyTrimmed(pointerValue(session.ModelID), pointerValue(run.ModelID))
+func (s *Service) resolveAnalysisTurnRuntime(session store.ChatSession, analysis store.RepoAnalysisResult) (expert.Resolved, error) {
+	toolID := firstNonEmptyTrimmed(pointerValue(session.CLIToolID), pointerValue(analysis.CLIToolID), session.ExpertID)
+	modelID := firstNonEmptyTrimmed(pointerValue(session.ModelID), pointerValue(analysis.ModelID))
 	return s.experts.ResolveWithOptions(session.ExpertID, "", session.WorkspacePath, expert.ResolveOptions{CLIToolID: toolID, ModelID: modelID})
 }
 
-func (s *Service) validateAndFinalizeFormalReport(ctx context.Context, source store.RepoSource, snapshot store.RepoSnapshot, run store.RepoAnalysisRun, prepared analysisPrepareResult, layout pipelineLayout, session store.ChatSession, resolved expert.Resolved, initial reportCandidate) (validatedReportResult, error) {
+func (s *Service) validateAndFinalizeFormalReport(ctx context.Context, source store.RepoSource, analysis store.RepoAnalysisResult, prepared analysisPrepareResult, layout analysisLayout, session store.ChatSession, resolved expert.Resolved, initial reportCandidate) (validatedReportResult, error) {
 	if err := os.MkdirAll(layout.DerivedDir, 0o755); err != nil {
 		return validatedReportResult{}, err
 	}
@@ -59,18 +59,18 @@ func (s *Service) validateAndFinalizeFormalReport(ctx context.Context, source st
 	maxAttempts := maxFormalReportValidationRetries + 1
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if _, err := s.store.UpdateRepoAnalysisChatBinding(ctx, store.UpdateRepoAnalysisChatBindingParams{
-			RunID:                  run.ID,
+			AnalysisID:             analysis.ID,
 			ChatSessionID:          &session.ID,
 			ChatUserMessageID:      candidate.UserMessageID,
 			ChatAssistantMessageID: stringPtrIfNotEmpty(candidate.AssistantMessageID),
 		}); err != nil {
-			logx.Warn("repo-library", "report-validation", "更新分析会话绑定失败", "run_id", run.ID, "attempt", attempt, "err", err)
+			logx.Warn("repo-library", "report-validation", "更新分析会话绑定失败", "analysis_id", analysis.ID, "attempt", attempt, "err", err)
 		}
 		reportMarkdown := sanitizeReportMarkdown(candidate.Markdown)
 		attemptBase := filepath.Join(layout.DerivedDir, fmt.Sprintf("report.attempt-%d", attempt))
 		attemptReportPath := attemptBase + ".md"
 		attemptValidationPath := attemptBase + ".validation.json"
-		validation, err := s.validateCandidateReport(ctx, source, snapshot, run, layout, reportMarkdown, attemptReportPath, attemptValidationPath)
+		validation, err := s.validateCandidateReport(ctx, source, analysis, layout, reportMarkdown, attemptReportPath, attemptValidationPath)
 		if err != nil {
 			return validatedReportResult{}, err
 		}
@@ -98,11 +98,11 @@ func (s *Service) validateAndFinalizeFormalReport(ctx context.Context, source st
 			return validatedReportResult{}, fmt.Errorf("formal report validation failed after %d attempts: %s", attempt, strings.Join(validation.Errors, "; "))
 		}
 		summary := fmt.Sprintf("正式报告未通过校验，正在请求 AI 修订（%d/%d）…", attempt, maxFormalReportValidationRetries)
-		if _, err := s.store.UpdateRepoAnalysisChatBinding(ctx, store.UpdateRepoAnalysisChatBindingParams{RunID: run.ID, ChatSessionID: &session.ID, Summary: &summary}); err != nil {
-			logx.Warn("repo-library", "report-validation", "更新修订状态摘要失败", "run_id", run.ID, "attempt", attempt, "err", err)
+		if _, err := s.store.UpdateRepoAnalysisChatBinding(ctx, store.UpdateRepoAnalysisChatBindingParams{AnalysisID: analysis.ID, ChatSessionID: &session.ID, Summary: &summary}); err != nil {
+			logx.Warn("repo-library", "report-validation", "更新修订状态摘要失败", "analysis_id", analysis.ID, "attempt", attempt, "err", err)
 		}
-		logx.Warn("repo-library", "report-validation", "正式报告未通过校验，准备请求 AI 修订", "run_id", run.ID, "attempt", attempt, "error_count", len(validation.Errors))
-		repairPrompt := buildReportRepairTurnPrompt(source, snapshot, run, prepared, validation.Errors, attempt, maxFormalReportValidationRetries)
+		logx.Warn("repo-library", "report-validation", "正式报告未通过校验，准备请求 AI 修订", "analysis_id", analysis.ID, "attempt", attempt, "error_count", len(validation.Errors))
+		repairPrompt := buildReportRepairTurnPrompt(source, analysis, prepared, validation.Errors, attempt, maxFormalReportValidationRetries)
 		turn, err := s.runAutomatedAnalysisTurn(ctx, session, resolved, repairPrompt)
 		if err != nil {
 			return validatedReportResult{}, err
@@ -112,7 +112,7 @@ func (s *Service) validateAndFinalizeFormalReport(ctx context.Context, source st
 	return validatedReportResult{}, fmt.Errorf("formal report validation loop exited unexpectedly")
 }
 
-func (s *Service) validateCandidateReport(ctx context.Context, source store.RepoSource, snapshot store.RepoSnapshot, run store.RepoAnalysisRun, layout pipelineLayout, reportMarkdown, reportPath, outputPath string) (reportValidationResult, error) {
+func (s *Service) validateCandidateReport(ctx context.Context, source store.RepoSource, analysis store.RepoAnalysisResult, layout analysisLayout, reportMarkdown, reportPath, outputPath string) (reportValidationResult, error) {
 	if strings.TrimSpace(reportMarkdown) == "" {
 		validation := reportValidationResult{
 			Status:     "ok",
@@ -138,12 +138,12 @@ func (s *Service) validateCandidateReport(ctx context.Context, source store.Repo
 		"--report-path", reportPath,
 		"--repo-url", source.RepoURL,
 		"--repo-key", source.RepoKey,
-		"--snapshot-id", snapshot.ID,
-		"--snapshot-dir", layout.SnapshotDir,
-		"--run-id", run.ID,
+		"--snapshot-id", analysis.ID,
+		"--snapshot-dir", layout.AnalysisDir,
+		"--run-id", analysis.ID,
 		"--output", outputPath,
 	}
-	for _, feature := range run.Features {
+	for _, feature := range analysis.Features {
 		trimmed := strings.TrimSpace(feature)
 		if trimmed == "" {
 			continue

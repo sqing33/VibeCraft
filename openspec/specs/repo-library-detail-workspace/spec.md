@@ -2,7 +2,6 @@
 
 ## Purpose
 Define the fixed asymmetric repository detail workspace for Repo Library, including context selectors, report access, and pane-scoped scrolling.
-
 ## Requirements
 ### Requirement: Repo Library detail MUST present a bounded asymmetric knowledge workspace
 The repository detail view MUST present its main content as an asymmetric two-region workspace optimized for browsing repository context, cards, and evidence together.
@@ -14,7 +13,7 @@ The workspace MUST split the main reading area into:
 - a right region that takes roughly three-fifths of the width
 
 The left region MUST stack:
-- a compact context control panel for snapshot and analysis selection
+- a compact context control panel for analysis selection
 - a repository context panel for stack overview and module summaries whose content can scroll vertically when needed
 
 The right region MUST use a single visual container that stacks:
@@ -31,21 +30,21 @@ The right region MUST use a single visual container that stacks:
 The repository detail view MUST expose the full markdown report through an explicit `查看报告` action instead of rendering the entire report body inline in the main workspace.
 
 #### Scenario: User opens the full report
-- **WHEN** the selected snapshot has `report_markdown`, `report_excerpt`, or a report file path available
+- **WHEN** the selected analysis result has `report_markdown`, `report_excerpt`, or a report file path available
 - **THEN** the detail page shows a `查看报告` action
 - **AND** activating that action opens a dedicated reading surface for the full report content
 
 ### Requirement: Repo Library detail MUST use selectors for snapshot and analysis context
-The repository detail view MUST present snapshot selection and analysis-run selection as compact selectors inside the top area of the left context region.
+The repository detail view MUST present analysis selection as a compact selector inside the top area of the left context region.
 
 The controls MUST remain visually separate from the repository context summary below them.
-The page header MUST show the current snapshot's generated time in place of the previous relative activity text.
+The page header MUST show the current analysis result's generated time in place of the previous relative activity text.
 
 #### Scenario: User changes snapshot or analysis
-- **WHEN** the user selects a different snapshot or analysis run
+- **WHEN** the user selects a different analysis result
 - **THEN** the page updates the current repository context, cards, and detail panel based on that selection
 - **AND** the selector area remains compact enough not to compete with the repository context summary
-- **AND** the header updates the displayed generated time for the currently selected snapshot
+- **AND** the header updates the displayed generated time for the currently selected analysis result
 
 ### Requirement: Repo Library detail MUST scope scrolling to content panes
 The repository detail page MUST keep the overall workspace stable and assign scrolling to dedicated pane regions.
@@ -58,3 +57,4 @@ The card detail content area MUST scroll vertically as a whole when its content 
 - **WHEN** the selected repository has many cards and the selected card has long evidence content
 - **THEN** the user can horizontally scroll the card-selection strip without moving the left context region
 - **AND** can vertically scroll the repository context area and card detail area independently inside the bounded workspace
+

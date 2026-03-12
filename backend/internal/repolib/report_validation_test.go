@@ -125,11 +125,10 @@ func TestValidateCandidateReportAcceptsCanonicalReportV2(t *testing.T) {
 	service := newValidationTestService(t)
 	layout := newValidationTestLayout(t)
 	source := store.RepoSource{RepoURL: "https://github.com/example/repo", RepoKey: "example-repo"}
-	snapshot := store.RepoSnapshot{ID: "rp_demo"}
-	run := store.RepoAnalysisRun{ID: "rr_demo", Features: []string{validationTestFeatureRaw1, validationTestFeatureRaw2}}
+	analysis := store.RepoAnalysisResult{ID: "ra_demo", RequestedRef: "main", StoragePath: layout.AnalysisDir, Features: []string{validationTestFeatureRaw1, validationTestFeatureRaw2}}
 	outputPath := filepath.Join(layout.DerivedDir, "report.validation.json")
 
-	result, err := service.validateCandidateReport(context.Background(), source, snapshot, run, layout, validCanonicalReportV2, filepath.Join(layout.DerivedDir, "report.md"), outputPath)
+	result, err := service.validateCandidateReport(context.Background(), source, analysis, layout, validCanonicalReportV2, filepath.Join(layout.DerivedDir, "report.md"), outputPath)
 	if err != nil {
 		t.Fatalf("validateCandidateReport returned error: %v", err)
 	}
@@ -148,10 +147,9 @@ func TestValidateCandidateReportRejectsWrongHeadingLevelsV2(t *testing.T) {
 	service := newValidationTestService(t)
 	layout := newValidationTestLayout(t)
 	source := store.RepoSource{RepoURL: "https://github.com/example/repo", RepoKey: "example-repo"}
-	snapshot := store.RepoSnapshot{ID: "rp_demo"}
-	run := store.RepoAnalysisRun{ID: "rr_demo", Features: []string{validationTestFeatureRaw1, validationTestFeatureRaw2}}
+	analysis := store.RepoAnalysisResult{ID: "ra_demo", RequestedRef: "main", StoragePath: layout.AnalysisDir, Features: []string{validationTestFeatureRaw1, validationTestFeatureRaw2}}
 
-	result, err := service.validateCandidateReport(context.Background(), source, snapshot, run, layout, invalidWrongLevelsReportV2, filepath.Join(layout.DerivedDir, "report.invalid.md"), filepath.Join(layout.DerivedDir, "report.validation.json"))
+	result, err := service.validateCandidateReport(context.Background(), source, analysis, layout, invalidWrongLevelsReportV2, filepath.Join(layout.DerivedDir, "report.invalid.md"), filepath.Join(layout.DerivedDir, "report.validation.json"))
 	if err != nil {
 		t.Fatalf("validateCandidateReport returned error: %v", err)
 	}
@@ -172,15 +170,15 @@ func newValidationTestService(t *testing.T) *Service {
 	return &Service{projectRoot: projectRoot, pythonBin: "python3"}
 }
 
-func newValidationTestLayout(t *testing.T) pipelineLayout {
+func newValidationTestLayout(t *testing.T) analysisLayout {
 	t.Helper()
 	root := t.TempDir()
 	derived := filepath.Join(root, "derived")
 	if err := os.MkdirAll(derived, 0o755); err != nil {
 		t.Fatalf("mkdir derived: %v", err)
 	}
-	return pipelineLayout{
-		SnapshotDir:  root,
+	return analysisLayout{
+		AnalysisDir:  root,
 		DerivedDir:   derived,
 		ReportPath:   filepath.Join(root, "report.md"),
 		ArtifactsDir: filepath.Join(root, "artifacts"),

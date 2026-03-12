@@ -54,22 +54,20 @@ func TestBuildSearchChunksKeepsReportChunkIDsStable(t *testing.T) {
 ## 第五部分：实现定位与证据
 ### 问题 1: 多 Agent 并行机制
 - src/agent/router.go:10 [control-flow] - route
-`
+	`
 
-	source := store.RepoSource{ID: "rs_demo", RepoURL: "https://github.com/a/b", RepoKey: "a-b"}
-	snapshot := store.RepoSnapshot{ID: "rp_demo", StoragePath: "/tmp/x"}
-	run := store.RepoAnalysisRun{ID: "rr_demo"}
-	line := int64(10)
-	card := store.RepoKnowledgeCard{
-		ID:             "rc_demo",
-		RepoSourceID:   source.ID,
-		RepoSnapshotID: snapshot.ID,
-		AnalysisRunID:  run.ID,
-		Title:          "多 Agent 并行机制",
-		CardType:       "feature_pattern",
-		Summary:        "先拆任务，再调度，再合并。",
-		SectionTitle:   pointer("问题 1: 多 Agent 并行机制"),
-	}
+		source := store.RepoSource{ID: "rs_demo", RepoURL: "https://github.com/a/b", RepoKey: "a-b"}
+		analysis := store.RepoAnalysisResult{ID: "ra_demo"}
+		line := int64(10)
+		card := store.RepoKnowledgeCard{
+			ID:             "rc_demo",
+			RepoSourceID:   source.ID,
+			AnalysisID:     analysis.ID,
+			Title:          "多 Agent 并行机制",
+			CardType:       "feature_pattern",
+			Summary:        "先拆任务，再调度，再合并。",
+			SectionTitle:   pointer("问题 1: 多 Agent 并行机制"),
+		}
 	evidenceByCard := map[string][]store.RepoKnowledgeEvidence{
 		card.ID: {
 			{
@@ -80,13 +78,13 @@ func TestBuildSearchChunksKeepsReportChunkIDsStable(t *testing.T) {
 				SortIndex: 1,
 			},
 		},
-	}
+		}
 
-	chunks1 := buildSearchChunks(source, snapshot, run, report, []store.RepoKnowledgeCard{card}, evidenceByCard)
-	chunks2 := buildSearchChunks(source, snapshot, run, report, []store.RepoKnowledgeCard{card}, evidenceByCard)
-	if len(chunks1) == 0 || len(chunks2) == 0 {
-		t.Fatalf("expected chunks")
-	}
+		chunks1 := buildSearchChunks(source, analysis, report, []store.RepoKnowledgeCard{card}, evidenceByCard)
+		chunks2 := buildSearchChunks(source, analysis, report, []store.RepoKnowledgeCard{card}, evidenceByCard)
+		if len(chunks1) == 0 || len(chunks2) == 0 {
+			t.Fatalf("expected chunks")
+		}
 	ids1 := map[string]struct{}{}
 	for _, chunk := range chunks1 {
 		ids1[chunk.ChunkID] = struct{}{}
@@ -122,24 +120,22 @@ func TestBuildSearchChunksMapsReportAndEvidenceBackToCard(t *testing.T) {
 ## 第五部分：实现定位与证据
 ### 问题 1: 多 Agent 并行机制
 - src/agent/router.go:10 [control-flow] - route
-`
+	`
 
-	source := store.RepoSource{ID: "rs_demo", RepoURL: "https://github.com/a/b", RepoKey: "a-b"}
-	snapshot := store.RepoSnapshot{ID: "rp_demo", StoragePath: "/tmp/x"}
-	run := store.RepoAnalysisRun{ID: "rr_demo"}
-	line := int64(10)
-	conclusion := "编排层统一负责拆分与合并。"
-	card := store.RepoKnowledgeCard{
-		ID:             "rc_demo",
-		RepoSourceID:   source.ID,
-		RepoSnapshotID: snapshot.ID,
-		AnalysisRunID:  run.ID,
-		Title:          "多 Agent 并行机制",
-		CardType:       "feature_pattern",
-		Conclusion:     &conclusion,
-		Summary:        "先拆分，再调度。",
-		SectionTitle:   pointer("问题 1: 多 Agent 并行机制"),
-	}
+		source := store.RepoSource{ID: "rs_demo", RepoURL: "https://github.com/a/b", RepoKey: "a-b"}
+		analysis := store.RepoAnalysisResult{ID: "ra_demo"}
+		line := int64(10)
+		conclusion := "编排层统一负责拆分与合并。"
+		card := store.RepoKnowledgeCard{
+			ID:             "rc_demo",
+			RepoSourceID:   source.ID,
+			AnalysisID:     analysis.ID,
+			Title:          "多 Agent 并行机制",
+			CardType:       "feature_pattern",
+			Conclusion:     &conclusion,
+			Summary:        "先拆分，再调度。",
+			SectionTitle:   pointer("问题 1: 多 Agent 并行机制"),
+		}
 	evidenceByCard := map[string][]store.RepoKnowledgeEvidence{
 		card.ID: {
 			{
@@ -149,13 +145,13 @@ func TestBuildSearchChunksMapsReportAndEvidenceBackToCard(t *testing.T) {
 				Line:      &line,
 				SortIndex: 1,
 			},
-		},
-	}
+			},
+		}
 
-	chunks := buildSearchChunks(source, snapshot, run, report, []store.RepoKnowledgeCard{card}, evidenceByCard)
-	if len(chunks) != 3 {
-		t.Fatalf("expected report/card/evidence chunks, got %d", len(chunks))
-	}
+		chunks := buildSearchChunks(source, analysis, report, []store.RepoKnowledgeCard{card}, evidenceByCard)
+		if len(chunks) != 3 {
+			t.Fatalf("expected report/card/evidence chunks, got %d", len(chunks))
+		}
 	foundReport := false
 	foundEvidence := false
 	for _, chunk := range chunks {
@@ -207,16 +203,15 @@ func TestSearchDBKeywordWorksWithoutVec(t *testing.T) {
 	}
 	chunks := []searchdb.Chunk{
 		{
-			ChunkID:        "card:rc_demo",
-			RepoSourceID:   "rs_demo",
-			RepoSnapshotID: "rp_demo",
-			AnalysisRunID:  "rr_demo",
-			SourceKind:     "card",
-			SourceRefID:    "rc_demo",
-			Title:          "Circuit Breaker",
-			DisplayText:    "Circuit Breaker\n\nhalf-open",
-			SearchText:     "Circuit Breaker\nhalf-open circuit breaker",
-			TextExcerpt:    "Circuit Breaker half-open",
+			ChunkID:      "card:rc_demo",
+			RepoSourceID: "rs_demo",
+			AnalysisID:   "ra_demo",
+			SourceKind:   "card",
+			SourceRefID:  "rc_demo",
+			Title:        "Circuit Breaker",
+			DisplayText:  "Circuit Breaker\n\nhalf-open",
+			SearchText:   "Circuit Breaker\nhalf-open circuit breaker",
+			TextExcerpt:  "Circuit Breaker half-open",
 		},
 	}
 	if err := sdb.UpsertChunks(context.Background(), chunks); err != nil {

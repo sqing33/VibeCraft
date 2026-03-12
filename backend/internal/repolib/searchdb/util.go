@@ -19,17 +19,17 @@ func packFloat32LE(values []float32) ([]byte, error) {
 	return out, nil
 }
 
-func buildFilterWhere(repoSnapshotFilters []string, sourceKinds []string) (string, []any) {
+func buildFilterWhere(analysisFilters []string, sourceKinds []string) (string, []any) {
 	args := []any{}
 	clauses := []string{}
-	if len(repoSnapshotFilters) > 0 {
-		placeholders := make([]string, 0, len(repoSnapshotFilters))
-		for _, id := range uniqueTrimmed(repoSnapshotFilters) {
+	if len(analysisFilters) > 0 {
+		placeholders := make([]string, 0, len(analysisFilters))
+		for _, id := range uniqueTrimmed(analysisFilters) {
 			placeholders = append(placeholders, "?")
 			args = append(args, id)
 		}
 		if len(placeholders) > 0 {
-			clauses = append(clauses, "AND c.repo_snapshot_id IN ("+strings.Join(placeholders, ",")+")")
+			clauses = append(clauses, "AND c.analysis_id IN ("+strings.Join(placeholders, ",")+")")
 		}
 	}
 	if len(sourceKinds) > 0 {
@@ -48,17 +48,17 @@ func buildFilterWhere(repoSnapshotFilters []string, sourceKinds []string) (strin
 	return " " + strings.Join(clauses, " "), args
 }
 
-func buildVecFilterWhere(repoSnapshotFilters []string, sourceKinds []string) (string, []any) {
+func buildVecFilterWhere(analysisFilters []string, sourceKinds []string) (string, []any) {
 	args := []any{}
 	clauses := []string{}
-	if len(repoSnapshotFilters) > 0 {
-		placeholders := make([]string, 0, len(repoSnapshotFilters))
-		for _, id := range uniqueTrimmed(repoSnapshotFilters) {
+	if len(analysisFilters) > 0 {
+		placeholders := make([]string, 0, len(analysisFilters))
+		for _, id := range uniqueTrimmed(analysisFilters) {
 			placeholders = append(placeholders, "?")
 			args = append(args, id)
 		}
 		if len(placeholders) > 0 {
-			clauses = append(clauses, "AND repo_snapshot_id IN ("+strings.Join(placeholders, ",")+")")
+			clauses = append(clauses, "AND analysis_id IN ("+strings.Join(placeholders, ",")+")")
 		}
 	}
 	if len(sourceKinds) > 0 {

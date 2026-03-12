@@ -9,11 +9,10 @@ import (
 
 func TestBuildFinalReportTurnPromptEnumeratesQuestions(t *testing.T) {
 	source := store.RepoSource{RepoURL: "https://github.com/example/repo", Owner: "example", Repo: "repo"}
-	snapshot := store.RepoSnapshot{RequestedRef: "main"}
-	run := store.RepoAnalysisRun{Depth: "deep", Features: []string{"1. 多 agent 并行编排如何实现", "2、不同 AI 如何调用（原生 SDK 还是 CLI），以及本地文件修改路径如何确定，用表格展示"}}
+	analysis := store.RepoAnalysisResult{RequestedRef: "main", Depth: "deep", Language: "zh", Features: []string{"1. 多 agent 并行编排如何实现", "2、不同 AI 如何调用（原生 SDK 还是 CLI），以及本地文件修改路径如何确定，用表格展示"}}
 	prepared := analysisPrepareResult{ResolvedRef: "main", CommitSHA: "abc123", SourceDir: "/tmp/source", CodeIndexPath: "/tmp/code_index.json"}
 
-	prompt := buildFinalReportTurnPrompt(source, snapshot, run, prepared)
+	prompt := buildFinalReportTurnPrompt(source, analysis, prepared)
 
 	checks := []string{
 		"# GitHub 功能实现原理报告",
@@ -37,12 +36,11 @@ func TestBuildFinalReportTurnPromptEnumeratesQuestions(t *testing.T) {
 
 func TestBuildReportRepairTurnPromptIncludesValidationErrors(t *testing.T) {
 	source := store.RepoSource{RepoURL: "https://github.com/example/repo", Owner: "example", Repo: "repo"}
-	snapshot := store.RepoSnapshot{RequestedRef: "main"}
-	run := store.RepoAnalysisRun{Depth: "deep", Features: []string{"worktree 如何实现"}}
+	analysis := store.RepoAnalysisResult{RequestedRef: "main", Depth: "deep", Language: "zh", Features: []string{"worktree 如何实现"}}
 	prepared := analysisPrepareResult{ResolvedRef: "main", CommitSHA: "abc123", SourceDir: "/tmp/source", CodeIndexPath: "/tmp/code_index.json"}
 
-	prompt := buildReportRepairTurnPrompt(source, snapshot, run, prepared, []string{"缺少 `## 第二部分` 标题", "feature 数量不匹配"}, 2, 5)
-	if !strings.Contains(prompt, "当前是修订轮次：2/5") {
+	prompt := buildReportRepairTurnPrompt(source, analysis, prepared, []string{"缺少 `## 第二部分` 标题", "feature 数量不匹配"}, 2, 5)
+	if !strings.Contains(prompt, "修订轮次：2/5") {
 		t.Fatalf("expected retry counter in repair prompt\n%s", prompt)
 	}
 	if !strings.Contains(prompt, "- 缺少 `## 第二部分` 标题") {

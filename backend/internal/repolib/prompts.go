@@ -13,13 +13,13 @@ type analysisPrepareResult struct {
 	ResolvedRef   string
 	CommitSHA     string
 	CodeIndexPath string
-	SnapshotDir   string
+	AnalysisDir   string
 	SourceDir     string
 	ReportPath    string
 }
 
-func buildPlanningTurnPrompt(source store.RepoSource, snapshot store.RepoSnapshot, run store.RepoAnalysisRun, prepared analysisPrepareResult) string {
-	features := strings.Join(run.Features, "；")
+func buildPlanningTurnPrompt(source store.RepoSource, analysis store.RepoAnalysisResult, prepared analysisPrepareResult) string {
+	features := strings.Join(analysis.Features, "；")
 	return strings.TrimSpace(fmt.Sprintf(`你正在为 vibe-tree 的 Repo Library 执行一次真实仓库分析。你当前工作目录就是目标仓库源码目录。
 
 分析上下文：
@@ -42,7 +42,7 @@ func buildPlanningTurnPrompt(source store.RepoSource, snapshot store.RepoSnapsho
    - 哪些点最可能缺证据或需要标记为 inference
    - 下一步你将如何产出最终报告
 4. 只输出中文 Markdown，不要输出 JSON。
-5. 不要编造证据；如果还没验证，只能写待验证项。`, source.RepoURL, source.Owner, source.Repo, snapshot.RequestedRef, prepared.ResolvedRef, prepared.CommitSHA, run.Depth, run.Language, features, prepared.CodeIndexPath))
+5. 不要编造证据；如果还没验证，只能写待验证项。`, source.RepoURL, source.Owner, source.Repo, analysis.RequestedRef, prepared.ResolvedRef, prepared.CommitSHA, analysis.Depth, analysis.Language, features, prepared.CodeIndexPath))
 }
 
 type reportFeaturePrompt struct {
@@ -51,14 +51,105 @@ type reportFeaturePrompt struct {
 	RequiresTable bool
 }
 
-func buildFinalReportTurnPrompt(source store.RepoSource, snapshot store.RepoSnapshot, run store.RepoAnalysisRun, prepared analysisPrepareResult) string {
-	features := buildReportFeaturePrompts(run.Features)
-	return buildFormalReportPrompt(source, snapshot, run, prepared, features, nil, 0, 0)
+func buildFinalReportTurnPrompt(source store.RepoSource, analysis store.RepoAnalysisResult, prepared analysisPrepareResult) string {
+	features := buildReportFeaturePrompts(analysis.Features)
+	return buildFormalReportPrompt(source, analysis, prepared, features, nil, 0, 0)
 }
 
-func buildReportRepairTurnPrompt(source store.RepoSource, snapshot store.RepoSnapshot, run store.RepoAnalysisRun, prepared analysisPrepareResult, errors []string, attempt, maxRetry int) string {
-	features := buildReportFeaturePrompts(run.Features)
-	return buildFormalReportPrompt(source, snapshot, run, prepared, features, errors, attempt, maxRetry)
+func buildReportRepairTurnPrompt(source store.RepoSource, analysis store.RepoAnalysisResult, prepared analysisPrepareResult, errors []string, attempt, maxRetry int) string {
+	// Keep this prompt short and format-focused; do NOT re-send the original
+	// large analysis prompt. We rely on chat context + validator errors.
+	features := buildReportFeaturePrompts(analysis.Features)
+	var b strings.Builder
+	b.WriteString("你的正式报告未通过系统格式校验。请完整重写整份正式报告（不要输出解释、diff、补丁或局部修订）。\n")
+	if maxRetry > 0 {
+		b.WriteString("修订轮次：")
+		b.WriteString(strconv.Itoa(attempt))
+		b.WriteString("/")
+		b.WriteString(strconv.Itoa(maxRetry))
+		b.WriteString("。\n")
+	}
+	if len(errors) > 0 {
+		b.WriteString("必须修复的阻塞错误：\n")
+		for _, item := range errors {
+			trimmed := strings.TrimSpace(item)
+			if trimmed == "" {
+				continue
+			}
+			b.WriteString("- ")
+			b.WriteString(trimmed)
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString("\n硬性要求：\n")
+	b.WriteString("1. 第一行必须是 `# GitHub 功能实现原理报告`。\n")
+	b.WriteString("2. 只输出最终 Markdown 报告正文；禁止输出代码围栏（```）。\n")
+	b.WriteString("3. 第一到第四部分禁止出现 `file:line`；只允许在第五部分出现。\n")
+	b.WriteString("4. 第四部分的问题数量/顺序必须与关注点一致。\n")
+	b.WriteString("5. 第五部分必须为每个“特点 N”和“问题 N”给出至少 1 条 `path/to/file.ext:123` 证据。\n\n")
+
+	b.WriteString("模板（标题/字段名/顺序必须一致；请把占位符替换成你的实际内容）：\n\n")
+	b.WriteString("# GitHub 功能实现原理报告\n\n")
+	b.WriteString("## Run 1\n\n")
+
+	b.WriteString("## 第一部分：技术栈与模块语言\n")
+	b.WriteString("- 仓库: ")
+	b.WriteString(source.RepoURL)
+	b.WriteString("\n- 请求 Ref: ")
+	b.WriteString(analysis.RequestedRef)
+	b.WriteString("\n- 解析 Ref: ")
+	b.WriteString(prepared.ResolvedRef)
+	b.WriteString("\n- Commit: ")
+	b.WriteString(prepared.CommitSHA)
+	b.WriteString("\n- 生成时间: <由你填写当前分析时间>\n")
+	b.WriteString("- 主要语言/技术栈总览: <一句话概括>\n")
+	b.WriteString("- 后端: <语言 + 框架/库 + 运行方式 + 模块拆分>\n")
+	b.WriteString("- 前端: <语言 + UI 框架/组件库 + 状态管理 + 构建工具>\n")
+	b.WriteString("- 其它模块: <例如 scripts/services/cli 等，如果没有写无>\n\n")
+
+	b.WriteString("## 第二部分：项目用途与核心特点\n")
+	b.WriteString("- 项目做什么用: <中文说明>\n")
+	b.WriteString("- 典型使用场景: <中文说明>\n")
+	b.WriteString("- 核心特点概览: <用 3-7 条要点概括>\n\n")
+	b.WriteString("### 风险与局限\n")
+	b.WriteString("- <列出 3-7 条风险/局限；没有写无>\n\n")
+
+	b.WriteString("## 第三部分：特点实现思路\n\n")
+	b.WriteString("### 特点 1: <标题>\n")
+	b.WriteString("- 动机: <为什么要做>\n")
+	b.WriteString("- 目标: <要解决什么问题>\n")
+	b.WriteString("- 思路: <实现思路与取舍>\n")
+	b.WriteString("- 取舍: <代价/限制>\n")
+	b.WriteString("- 置信度: high|medium|low\n\n")
+	b.WriteString("（如有更多特点，继续输出 特点 2/3/...，编号从 1 连续递增。）\n\n")
+
+	b.WriteString("## 第四部分：提问与解答\n\n")
+	for _, feature := range features {
+		b.WriteString("### 问题 ")
+		b.WriteString(strconv.Itoa(feature.Index))
+		b.WriteString(": ")
+		b.WriteString(feature.Title)
+		b.WriteString("\n")
+		b.WriteString("- 结论: <一句话结论>\n")
+		b.WriteString("- 思路: <实现逻辑>\n")
+		b.WriteString("- 取舍: <代价/限制>\n")
+		b.WriteString("- 置信度: high|medium|low\n\n")
+	}
+
+	b.WriteString("## 第五部分：实现定位与证据\n\n")
+	b.WriteString("### 特点 1: <标题（必须与第三部分完全一致）>\n")
+	b.WriteString("- <file:line> [dimension] - <snippet>\n\n")
+	b.WriteString("（按第三部分特点数量继续输出 特点 2/3/...）\n\n")
+	for _, feature := range features {
+		b.WriteString("### 问题 ")
+		b.WriteString(strconv.Itoa(feature.Index))
+		b.WriteString(": ")
+		b.WriteString(feature.Title)
+		b.WriteString("\n")
+		b.WriteString("- <file:line> [dimension] - <snippet>\n\n")
+	}
+	b.WriteString("请现在直接输出最终报告。")
+	return strings.TrimSpace(b.String())
 }
 
 var leadingNumberPrefix = regexp.MustCompile(`^\s*\d+\s*[\.、:：)）]\s*|^\s*\d+\s+`)
@@ -94,7 +185,7 @@ func featureRequiresTable(feature string) bool {
 	return strings.Contains(trimmed, "表格") || strings.Contains(trimmed, "table")
 }
 
-func buildFormalReportPrompt(source store.RepoSource, snapshot store.RepoSnapshot, run store.RepoAnalysisRun, prepared analysisPrepareResult, features []reportFeaturePrompt, validationErrors []string, attempt, maxRetry int) string {
+func buildFormalReportPrompt(source store.RepoSource, analysis store.RepoAnalysisResult, prepared analysisPrepareResult, features []reportFeaturePrompt, validationErrors []string, attempt, maxRetry int) string {
 	var b strings.Builder
 	b.WriteString("现在请基于你刚才的分析计划与实际代码阅读结果，输出最终分析报告。\n\n")
 	if len(validationErrors) > 0 {
@@ -138,7 +229,7 @@ func buildFormalReportPrompt(source store.RepoSource, snapshot store.RepoSnapsho
 	b.WriteString("- 仓库: ")
 	b.WriteString(source.RepoURL)
 	b.WriteString("\n- 请求 Ref: ")
-	b.WriteString(snapshot.RequestedRef)
+	b.WriteString(analysis.RequestedRef)
 	b.WriteString("\n- 解析 Ref: ")
 	b.WriteString(prepared.ResolvedRef)
 	b.WriteString("\n- Commit: ")

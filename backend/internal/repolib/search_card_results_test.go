@@ -29,31 +29,23 @@ func TestCollapseSearchHitsToCardsMergesSourcesAndNormalizesDisplayScore(t *test
 	if err != nil {
 		t.Fatalf("upsert repo source: %v", err)
 	}
-	snapshot, err := st.CreateRepoSnapshot(ctx, store.CreateRepoSnapshotParams{
-		SnapshotID:   "rp_demo",
+	analysis, err := st.CreateRepoAnalysisResult(ctx, store.CreateRepoAnalysisResultParams{
+		AnalysisID:   "ra_demo",
 		RepoSourceID: source.ID,
 		RequestedRef: "main",
 		StoragePath:  t.TempDir(),
+		Language:     "zh",
+		Depth:        "standard",
+		AgentMode:    "single",
+		Features:     []string{"多 Agent 并行机制", "日志链路"},
 	})
 	if err != nil {
-		t.Fatalf("create snapshot: %v", err)
-	}
-	run, err := st.CreateRepoAnalysisRun(ctx, store.CreateRepoAnalysisRunParams{
-		RepoSourceID:   source.ID,
-		RepoSnapshotID: snapshot.ID,
-		Language:       "zh",
-		Depth:          "standard",
-		AgentMode:      "single",
-		Features:       []string{"多 Agent 并行机制", "日志链路"},
-	})
-	if err != nil {
-		t.Fatalf("create run: %v", err)
+		t.Fatalf("create analysis: %v", err)
 	}
 	line := int64(42)
 	if err := st.ReplaceRepoKnowledge(ctx, store.ReplaceRepoKnowledgeParams{
-		RepoSourceID:   source.ID,
-		RepoSnapshotID: snapshot.ID,
-		AnalysisRunID:  run.ID,
+		RepoSourceID: source.ID,
+		AnalysisID:   analysis.ID,
 		Cards: []store.RepoKnowledgeCardInput{
 			{
 				Title:        "多 Agent 并行机制",
@@ -75,7 +67,7 @@ func TestCollapseSearchHitsToCardsMergesSourcesAndNormalizesDisplayScore(t *test
 	}); err != nil {
 		t.Fatalf("replace repo knowledge: %v", err)
 	}
-	cards, err := st.ListRepoCards(ctx, store.ListRepoCardsParams{RepoSourceID: source.ID, RepoSnapshotID: snapshot.ID, AnalysisRunID: run.ID, Limit: 10})
+	cards, err := st.ListRepoCards(ctx, store.ListRepoCardsParams{RepoSourceID: source.ID, AnalysisID: analysis.ID, Limit: 10})
 	if err != nil {
 		t.Fatalf("list cards: %v", err)
 	}
@@ -91,40 +83,36 @@ func TestCollapseSearchHitsToCardsMergesSourcesAndNormalizesDisplayScore(t *test
 	svc := &Service{store: st}
 	results := svc.collapseSearchHitsToCards(ctx, []searchdb.Hit{
 		{
-			ChunkID:        "report:" + snapshot.ID + ":a",
-			SourceKind:     "report_section",
-			SourceRefID:    cardA.ID,
-			RepoSourceID:   source.ID,
-			RepoSnapshotID: snapshot.ID,
-			AnalysisRunID:  run.ID,
-			Score:          1.32,
+			ChunkID:      "report:" + analysis.ID + ":a",
+			SourceKind:   "report_section",
+			SourceRefID:  cardA.ID,
+			RepoSourceID: source.ID,
+			AnalysisID:   analysis.ID,
+			Score:        1.32,
 		},
 		{
-			ChunkID:        "card:" + cardA.ID,
-			SourceKind:     "card",
-			SourceRefID:    cardA.ID,
-			RepoSourceID:   source.ID,
-			RepoSnapshotID: snapshot.ID,
-			AnalysisRunID:  run.ID,
-			Score:          1.18,
+			ChunkID:      "card:" + cardA.ID,
+			SourceKind:   "card",
+			SourceRefID:  cardA.ID,
+			RepoSourceID: source.ID,
+			AnalysisID:   analysis.ID,
+			Score:        1.18,
 		},
 		{
-			ChunkID:        "evidence:re_demo",
-			SourceKind:     "evidence",
-			SourceRefID:    cardA.ID,
-			RepoSourceID:   source.ID,
-			RepoSnapshotID: snapshot.ID,
-			AnalysisRunID:  run.ID,
-			Score:          0.74,
+			ChunkID:      "evidence:re_demo",
+			SourceKind:   "evidence",
+			SourceRefID:  cardA.ID,
+			RepoSourceID: source.ID,
+			AnalysisID:   analysis.ID,
+			Score:        0.74,
 		},
 		{
-			ChunkID:        "card:" + cardB.ID,
-			SourceKind:     "card",
-			SourceRefID:    cardB.ID,
-			RepoSourceID:   source.ID,
-			RepoSnapshotID: snapshot.ID,
-			AnalysisRunID:  run.ID,
-			Score:          0.88,
+			ChunkID:      "card:" + cardB.ID,
+			SourceKind:   "card",
+			SourceRefID:  cardB.ID,
+			RepoSourceID: source.ID,
+			AnalysisID:   analysis.ID,
+			Score:        0.88,
 		},
 	}, 5)
 	if len(results) != 2 {

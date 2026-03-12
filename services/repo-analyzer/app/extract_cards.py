@@ -1052,25 +1052,8 @@ def build_cards_payload(
                 evidence_items=evidence_items,
             )
 
-        for index, risk in enumerate(normalized.get("risks", []) or [], start=1):
-            risk_text = str(risk).strip()
-            if not risk_text:
-                continue
-            _append_card(
-                cards=cards,
-                evidence=evidence,
-                snapshot_id=snapshot_id,
-                repo_key=resolved_repo_key,
-                run_id=run_id,
-                card_type="risk_note",
-                title=f"Risk {index}",
-                summary=risk_text,
-                content=risk_text,
-                confidence="medium",
-                tags=["risk"],
-                source="report.md",
-                evidence_items=[],
-            )
+        # Risks are already covered in the "项目用途与核心特点" report section shown as integration notes.
+        # Avoid generating one-line, evidence-less cards that pollute the card list.
 
     else:
 
@@ -1161,22 +1144,8 @@ def build_cards_payload(
                 evidence_items=evidence_items,
             )
 
-        for index, risk in enumerate(normalized["risks"], start=1):
-            _append_card(
-                cards=cards,
-                evidence=evidence,
-                snapshot_id=snapshot_id,
-                repo_key=resolved_repo_key,
-                run_id=run_id,
-                card_type="risk_note",
-                title=f"Risk {index}",
-                summary=risk,
-                content=risk,
-                confidence="medium",
-                tags=["risk"],
-                source="report.md",
-                evidence_items=[],
-            )
+        # Risks are already covered in the "项目用途与核心特点" report section shown as integration notes.
+        # Avoid generating one-line, evidence-less cards that pollute the card list.
 
     if subagent_results_path:
         payload = read_json(subagent_results_path)

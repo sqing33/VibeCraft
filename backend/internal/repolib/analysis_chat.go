@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"vibe-tree/backend/internal/chat"
 	"vibe-tree/backend/internal/expert"
@@ -15,38 +16,40 @@ import (
 	"vibe-tree/backend/internal/store"
 )
 
-func (s *Service) runAIChatAnalysis(ctx context.Context, source store.RepoSource, snapshot store.RepoSnapshot, run store.RepoAnalysisRun, layout pipelineLayout, params CreateAnalysisParams) {
+func (s *Service) runAIChatAnalysis(ctx context.Context, source store.RepoSource, initial store.RepoAnalysisResult, layout analysisLayout, params CreateAnalysisParams) {
 	ctx = firstContext(ctx)
-	startedSummary := pointer("正在准备仓库快照与代码索引…")
-	run, err := s.store.MarkRepoAnalysisRunStarted(ctx, store.MarkRepoAnalysisRunStartedParams{RunID: run.ID, Summary: startedSummary})
+	startedSummary := pointer("正在准备仓库与代码索引…")
+	analysis := initial
+	analysis, err := s.store.MarkRepoAnalysisStarted(ctx, store.MarkRepoAnalysisStartedParams{AnalysisID: analysis.ID, Summary: startedSummary})
 	if err != nil {
-		logx.Warn("repo-library", "analysis", "标记 Repo analysis run 为 running 失败", "run_id", run.ID, "err", err)
+		logx.Warn("repo-library", "analysis", "标记 Repo analysis 为 running 失败", "analysis_id", analysis.ID, "err", err)
 		return
 	}
-	prepared, err := s.prepareRepositoryForAI(ctx, source, snapshot, run, layout)
+	s.broadcastAnalysisStatus(source.ID, analysis)
+	prepared, err := s.prepareRepositoryForAI(ctx, source, analysis, layout)
 	if err != nil {
-		s.failRun(ctx, run.ID, err)
+		s.failAnalysis(ctx, analysis.ID, err)
 		return
 	}
-	snapshot, err = s.store.UpdateRepoSnapshot(ctx, store.UpdateRepoSnapshotParams{
-		SnapshotID:          snapshot.ID,
-		StoragePath:         &layout.SnapshotDir,
+	analysis, err = s.store.UpdateRepoAnalysisResult(ctx, store.UpdateRepoAnalysisResultParams{
+		AnalysisID:          analysis.ID,
+		StoragePath:         &layout.AnalysisDir,
 		ResolvedRef:         stringPtrIfNotEmpty(prepared.ResolvedRef),
 		CommitSHA:           stringPtrIfNotEmpty(prepared.CommitSHA),
 		ReportPath:          stringPtrIfNotEmpty(prepared.ReportPath),
 		SubagentResultsPath: nil,
 	})
 	if err != nil {
-		s.failRun(ctx, run.ID, err)
+		s.failAnalysis(ctx, analysis.ID, err)
 		return
 	}
 	session, resolved, err := s.createAnalysisChatSession(ctx, source, prepared, params)
 	if err != nil {
-		s.failRun(ctx, run.ID, err)
+		s.failAnalysis(ctx, analysis.ID, err)
 		return
 	}
 	_, _ = s.store.UpdateRepoAnalysisChatBinding(ctx, store.UpdateRepoAnalysisChatBindingParams{
-		RunID:         run.ID,
+		AnalysisID:    analysis.ID,
 		ChatSessionID: &session.ID,
 		RuntimeKind:   pointer("ai_chat"),
 		CLIToolID:     stringPtrIfNotEmpty(firstNonEmptyTrimmed(resolved.ToolID, params.CLIToolID)),
@@ -54,32 +57,32 @@ func (s *Service) runAIChatAnalysis(ctx context.Context, source store.RepoSource
 		Summary:       pointer("仓库准备完成，AI 正在产出最终报告…"),
 	})
 
-	finalPrompt := buildFinalReportTurnPrompt(source, snapshot, run, prepared)
+	finalPrompt := buildFinalReportTurnPrompt(source, analysis, prepared)
 	finalTurn, err := s.runAutomatedAnalysisTurn(ctx, session, resolved, finalPrompt)
 	if err != nil {
-		s.failRun(ctx, run.ID, err)
+		s.failAnalysis(ctx, analysis.ID, err)
 		return
 	}
-	validated, err := s.validateAndFinalizeFormalReport(ctx, source, snapshot, run, prepared, layout, session, resolved, reportCandidate{
+	validated, err := s.validateAndFinalizeFormalReport(ctx, source, analysis, prepared, layout, session, resolved, reportCandidate{
 		UserMessageID:      &finalTurn.UserMessage.ID,
 		AssistantMessageID: finalTurn.AssistantMessage.ID,
 		Markdown:           finalTurn.AssistantMessage.ContentText,
 	})
 	if err != nil {
-		s.failRun(ctx, run.ID, err)
+		s.failAnalysis(ctx, analysis.ID, err)
 		return
 	}
 	_, _ = s.store.UpdateRepoAnalysisChatBinding(ctx, store.UpdateRepoAnalysisChatBindingParams{
-		RunID:                  run.ID,
+		AnalysisID:             analysis.ID,
 		ChatSessionID:          &session.ID,
 		ChatUserMessageID:      validated.Candidate.UserMessageID,
 		ChatAssistantMessageID: stringPtrIfNotEmpty(validated.Candidate.AssistantMessageID),
 		Summary:                pointer("正式报告已通过校验，正在抽取知识卡片并刷新检索索引…"),
 	})
 
-	cardsCount, evidenceCount, searchRefresh, err := s.postProcessAIReport(ctx, source, snapshot, run, layout)
+	cardsCount, evidenceCount, searchRefresh, err := s.postProcessAIReport(ctx, source, analysis, layout)
 	if err != nil {
-		s.failRun(ctx, run.ID, err)
+		s.failAnalysis(ctx, analysis.ID, err)
 		return
 	}
 	resultPayload := map[string]any{
@@ -97,19 +100,32 @@ func (s *Service) runAIChatAnalysis(ctx context.Context, source store.RepoSource
 	}
 	resultJSON, _ := json.Marshal(resultPayload)
 	summary := fmt.Sprintf("AI Chat 分析完成：正式报告已通过校验，抽取 %d 张卡片、%d 条证据。", cardsCount, evidenceCount)
-	_, err = s.store.FinalizeRepoAnalysisRun(ctx, store.FinalizeRepoAnalysisRunParams{
-		RunID:      run.ID,
+	finalizeParams := store.FinalizeRepoAnalysisResultParams{
+		AnalysisID: analysis.ID,
 		Status:     string(store.RepoAnalysisStatusSucceeded),
 		Summary:    &summary,
 		ResultJSON: pointer(string(resultJSON)),
 		ReportPath: &layout.ReportPath,
-	})
-	if err != nil {
-		logx.Warn("repo-library", "analysis", "收敛 AI Chat Repo analysis 失败", "run_id", run.ID, "err", err)
+	}
+	var finalizeErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		_, finalizeErr = s.store.FinalizeRepoAnalysisResult(ctx, finalizeParams)
+		if finalizeErr == nil {
+			break
+		}
+		time.Sleep(time.Duration(attempt+1) * 300 * time.Millisecond)
+	}
+	if finalizeErr != nil {
+		// Avoid leaving the analysis stuck in `running`.
+		s.failAnalysis(ctx, analysis.ID, finalizeErr)
 		return
 	}
+	// best-effort: reload latest record for status/updated_at and broadcast
+	if updated, updateErr := s.store.GetRepoAnalysisResult(ctx, analysis.ID); updateErr == nil {
+		s.broadcastAnalysisStatus(source.ID, updated)
+	}
 	_, _ = s.store.UpdateRepoAnalysisChatBinding(ctx, store.UpdateRepoAnalysisChatBindingParams{
-		RunID:                  run.ID,
+		AnalysisID:             analysis.ID,
 		ChatSessionID:          &session.ID,
 		ChatUserMessageID:      validated.Candidate.UserMessageID,
 		ChatAssistantMessageID: stringPtrIfNotEmpty(validated.Candidate.AssistantMessageID),
@@ -117,7 +133,7 @@ func (s *Service) runAIChatAnalysis(ctx context.Context, source store.RepoSource
 	})
 }
 
-func (s *Service) prepareRepositoryForAI(ctx context.Context, source store.RepoSource, snapshot store.RepoSnapshot, run store.RepoAnalysisRun, layout pipelineLayout) (analysisPrepareResult, error) {
+func (s *Service) prepareRepositoryForAI(ctx context.Context, source store.RepoSource, analysis store.RepoAnalysisResult, layout analysisLayout) (analysisPrepareResult, error) {
 	repoLibraryDir, err := paths.RepoLibraryDir()
 	if err != nil {
 		return analysisPrepareResult{}, err
@@ -126,10 +142,10 @@ func (s *Service) prepareRepositoryForAI(ctx context.Context, source store.RepoS
 		filepath.Join(s.projectRoot, "services", "repo-analyzer", "app", "cli.py"),
 		"prepare",
 		"--repo-url", source.RepoURL,
-		"--ref", snapshot.RequestedRef,
+		"--ref", analysis.RequestedRef,
 		"--storage-root", repoLibraryDir,
-		"--run-id", run.ID,
-		"--snapshot-dir", layout.SnapshotDir,
+		"--run-id", analysis.ID,
+		"--snapshot-dir", layout.AnalysisDir,
 		"--output", layout.ResultPath,
 	}
 	if _, err := runBlockingCommand(ctx, s.projectRoot, s.pythonBin, args); err != nil {
@@ -147,12 +163,12 @@ func (s *Service) prepareRepositoryForAI(ctx context.Context, source store.RepoS
 		ResolvedRef:   extractString(result, "resolved_ref", "snapshot.resolved_ref"),
 		CommitSHA:     extractString(result, "commit_sha", "snapshot.commit_sha"),
 		CodeIndexPath: extractString(result, "snapshot.code_index_path", "ingest.code_index.output"),
-		SnapshotDir:   extractString(result, "snapshot.path", "snapshot_path"),
+		AnalysisDir:   extractString(result, "snapshot.path", "snapshot_path"),
 		SourceDir:     extractString(result, "snapshot.source_dir"),
 		ReportPath:    extractString(result, "snapshot.report_path", "report_path"),
 	}
-	if prepared.SnapshotDir == "" {
-		prepared.SnapshotDir = layout.SnapshotDir
+	if prepared.AnalysisDir == "" {
+		prepared.AnalysisDir = layout.AnalysisDir
 	}
 	if prepared.SourceDir == "" {
 		prepared.SourceDir = layout.SourceDir
@@ -199,16 +215,16 @@ func (s *Service) runAutomatedAnalysisTurn(ctx context.Context, session store.Ch
 	})
 }
 
-func (s *Service) postProcessAIReport(ctx context.Context, source store.RepoSource, snapshot store.RepoSnapshot, run store.RepoAnalysisRun, layout pipelineLayout) (int, int, map[string]any, error) {
+func (s *Service) postProcessAIReport(ctx context.Context, source store.RepoSource, analysis store.RepoAnalysisResult, layout analysisLayout) (int, int, map[string]any, error) {
 	cardsArgs := []string{
 		filepath.Join(s.projectRoot, "services", "repo-analyzer", "app", "cli.py"),
 		"extract-cards",
 		"--report-path", layout.ReportPath,
 		"--repo-url", source.RepoURL,
 		"--repo-key", source.RepoKey,
-		"--snapshot-id", snapshot.ID,
-		"--snapshot-dir", layout.SnapshotDir,
-		"--run-id", run.ID,
+		"--snapshot-id", analysis.ID,
+		"--snapshot-dir", layout.AnalysisDir,
+		"--run-id", analysis.ID,
 		"--output", layout.CardsPath,
 	}
 	if _, err := runBlockingCommand(ctx, s.projectRoot, s.pythonBin, cardsArgs); err != nil {
@@ -218,29 +234,20 @@ func (s *Service) postProcessAIReport(ctx context.Context, source store.RepoSour
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	if err := s.store.ReplaceRepoKnowledge(ctx, store.ReplaceRepoKnowledgeParams{RepoSourceID: source.ID, RepoSnapshotID: snapshot.ID, AnalysisRunID: run.ID, Cards: cards}); err != nil {
+	if err := s.store.ReplaceRepoKnowledge(ctx, store.ReplaceRepoKnowledgeParams{RepoSourceID: source.ID, AnalysisID: analysis.ID, Cards: cards}); err != nil {
 		return 0, 0, nil, err
 	}
-	searchArgs := []string{
-		filepath.Join(s.projectRoot, "services", "repo-analyzer", "app", "cli.py"),
-		"search",
-		"--storage-root", mustRepoLibraryDir(),
-		"--refresh", "auto",
-		"--repo-url", source.RepoURL,
-		"--repo-key", source.RepoKey,
-		"--snapshot-id", snapshot.ID,
-		"--snapshot-dir", layout.SnapshotDir,
-		"--run-id", run.ID,
-		"--report-path", layout.ReportPath,
-		"--cards-path", layout.CardsPath,
-		"--output", layout.SearchOutputPath,
-	}
-	if _, err := runBlockingCommand(ctx, s.projectRoot, s.pythonBin, searchArgs); err != nil {
-		return len(cards), countEvidence(cards), nil, err
-	}
-	refreshPayload := map[string]any{}
-	if payload, err := os.ReadFile(layout.SearchOutputPath); err == nil {
-		_ = json.Unmarshal(payload, &refreshPayload)
+
+	// Refresh local search index (go-searchdb). This is best-effort: search index
+	// failure should not invalidate a successful report/cards extraction.
+	refreshPayload, err := s.refreshSearchIndexForAnalysis(ctx, source, analysis)
+	if err != nil {
+		logx.Warn("repo-library", "search-index", "刷新 go-searchdb 检索索引失败", "analysis_id", analysis.ID, "err", err)
+		refreshPayload = map[string]any{
+			"status": "error",
+			"engine": "go-searchdb",
+			"error":  err.Error(),
+		}
 	}
 	return len(cards), countEvidence(cards), refreshPayload, nil
 }
@@ -253,11 +260,14 @@ func countEvidence(cards []store.RepoKnowledgeCardInput) int {
 	return total
 }
 
-func (s *Service) failRun(ctx context.Context, runID string, err error) {
+func (s *Service) failAnalysis(ctx context.Context, analysisID string, err error) {
 	message := err.Error()
-	_, finalizeErr := s.store.FinalizeRepoAnalysisRun(ctx, store.FinalizeRepoAnalysisRunParams{RunID: runID, Status: string(store.RepoAnalysisStatusFailed), ErrorMessage: &message})
+	_, finalizeErr := s.store.FinalizeRepoAnalysisResult(ctx, store.FinalizeRepoAnalysisResultParams{AnalysisID: analysisID, Status: string(store.RepoAnalysisStatusFailed), ErrorMessage: &message})
 	if finalizeErr != nil {
-		logx.Warn("repo-library", "analysis", "标记 Repo analysis run 失败时二次失败", "run_id", runID, "err", finalizeErr)
+		logx.Warn("repo-library", "analysis", "标记 Repo analysis 失败时二次失败", "analysis_id", analysisID, "err", finalizeErr)
+	}
+	if updated, updateErr := s.store.GetRepoAnalysisResult(ctx, analysisID); updateErr == nil {
+		s.broadcastAnalysisStatus(updated.RepoSourceID, updated)
 	}
 }
 

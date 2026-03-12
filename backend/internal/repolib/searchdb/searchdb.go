@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	schemaVersion        = 1
+	schemaVersion        = 3
 	chunkStrategyVersion = "v1"
 	scoringVersion       = "v1"
 )
@@ -34,8 +34,7 @@ type Meta struct {
 type Chunk struct {
 	ChunkID        string
 	RepoSourceID   string
-	RepoSnapshotID string
-	AnalysisRunID  string
+	AnalysisID     string
 	SourceKind     string
 	SourceRefID    string
 	Title          string
@@ -50,16 +49,15 @@ type Chunk struct {
 }
 
 type Hit struct {
-	ChunkID        string   `json:"chunk_id"`
-	Score          float64  `json:"score"`
-	SourceKind     string   `json:"source_kind"`
-	Title          string   `json:"title"`
-	TextExcerpt    string   `json:"text_excerpt"`
-	RepoSourceID   string   `json:"repository_id"`
-	RepoSnapshotID string   `json:"snapshot_id"`
-	AnalysisRunID  string   `json:"analysis_run_id"`
-	SourceRefID    string   `json:"source_ref_id,omitempty"`
-	EvidenceRefs   []string `json:"evidence_refs,omitempty"`
+	ChunkID      string   `json:"chunk_id"`
+	Score        float64  `json:"score"`
+	SourceKind   string   `json:"source_kind"`
+	Title        string   `json:"title"`
+	TextExcerpt  string   `json:"text_excerpt"`
+	RepoSourceID string   `json:"repository_id"`
+	AnalysisID   string   `json:"analysis_id"`
+	SourceRefID  string   `json:"source_ref_id,omitempty"`
+	EvidenceRefs []string `json:"evidence_refs,omitempty"`
 }
 
 type Embedder interface {
@@ -154,7 +152,7 @@ func (s *Service) UpsertChunks(ctx context.Context, chunks []Chunk) error {
 	defer tx.Rollback()
 
 	for _, chunk := range chunks {
-		if strings.TrimSpace(chunk.ChunkID) == "" || strings.TrimSpace(chunk.RepoSnapshotID) == "" {
+		if strings.TrimSpace(chunk.ChunkID) == "" || strings.TrimSpace(chunk.AnalysisID) == "" {
 			continue
 		}
 		if chunk.UpdatedAt == 0 {
@@ -175,7 +173,7 @@ func (s *Service) UpsertChunks(ctx context.Context, chunks []Chunk) error {
 			if err != nil {
 				continue
 			}
-			if err := upsertVecRow(ctx, tx, rowid, chunk.RepoSnapshotID, chunk.SourceKind, embedding); err != nil {
+			if err := upsertVecRow(ctx, tx, rowid, chunk.AnalysisID, chunk.SourceKind, embedding); err != nil {
 				continue
 			}
 		}
@@ -184,19 +182,19 @@ func (s *Service) UpsertChunks(ctx context.Context, chunks []Chunk) error {
 	return tx.Commit()
 }
 
-func (s *Service) DeleteSnapshot(ctx context.Context, snapshotID string) error {
+func (s *Service) DeleteAnalysis(ctx context.Context, analysisID string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("searchdb: not initialized")
 	}
-	snapshotID = strings.TrimSpace(snapshotID)
-	if snapshotID == "" {
-		return fmt.Errorf("searchdb: snapshot_id required")
+	analysisID = strings.TrimSpace(analysisID)
+	if analysisID == "" {
+		return fmt.Errorf("searchdb: analysis_id required")
 	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM kb_chunks WHERE repo_snapshot_id = ?;`, snapshotID)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM kb_chunks WHERE analysis_id = ?;`, analysisID)
 	return err
 }
 
-func (s *Service) SearchKeyword(ctx context.Context, query string, topK int, repoSnapshotFilters []string, sourceKinds []string) ([]Hit, error) {
+func (s *Service) SearchKeyword(ctx context.Context, query string, topK int, analysisFilters []string, sourceKinds []string) ([]Hit, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("searchdb: not initialized")
 	}
@@ -205,13 +203,13 @@ func (s *Service) SearchKeyword(ctx context.Context, query string, topK int, rep
 		return nil, fmt.Errorf("searchdb: query required")
 	}
 	if !s.ftsEnabled {
-		return s.searchKeywordFallback(ctx, query, topK, repoSnapshotFilters, sourceKinds)
+		return s.searchKeywordFallback(ctx, query, topK, analysisFilters, sourceKinds)
 	}
 	if topK <= 0 {
 		topK = 10
 	}
 	limit := stableRecallLimit(topK)
-	where, args := buildFilterWhere(repoSnapshotFilters, sourceKinds)
+	where, args := buildFilterWhere(analysisFilters, sourceKinds)
 
 	sqlText := fmt.Sprintf(`
 SELECT
@@ -220,8 +218,7 @@ SELECT
   c.title,
   c.text_excerpt,
   c.repo_source_id,
-  c.repo_snapshot_id,
-  c.analysis_run_id,
+  c.analysis_id,
   c.source_ref_id,
   c.evidence_refs_flat,
   (1.0 / (1.0 + bm25(kb_chunks_fts))) AS score
@@ -243,7 +240,7 @@ LIMIT ?;`, where)
 		var h Hit
 		var refs sql.NullString
 		var sourceRef sql.NullString
-		if err := rows.Scan(&h.ChunkID, &h.SourceKind, &h.Title, &h.TextExcerpt, &h.RepoSourceID, &h.RepoSnapshotID, &h.AnalysisRunID, &sourceRef, &refs, &h.Score); err != nil {
+		if err := rows.Scan(&h.ChunkID, &h.SourceKind, &h.Title, &h.TextExcerpt, &h.RepoSourceID, &h.AnalysisID, &sourceRef, &refs, &h.Score); err != nil {
 			return nil, err
 		}
 		h.SourceRefID = strings.TrimSpace(sourceRef.String)
@@ -256,7 +253,7 @@ LIMIT ?;`, where)
 	return hits, nil
 }
 
-func (s *Service) searchKeywordFallback(ctx context.Context, query string, topK int, repoSnapshotFilters []string, sourceKinds []string) ([]Hit, error) {
+func (s *Service) searchKeywordFallback(ctx context.Context, query string, topK int, analysisFilters []string, sourceKinds []string) ([]Hit, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("searchdb: not initialized")
 	}
@@ -279,7 +276,7 @@ func (s *Service) searchKeywordFallback(ctx context.Context, query string, topK 
 		topK = 10
 	}
 	limit := stableRecallLimit(topK)
-	where, args := buildFilterWhere(repoSnapshotFilters, sourceKinds)
+	where, args := buildFilterWhere(analysisFilters, sourceKinds)
 
 	sqlText := fmt.Sprintf(`
 SELECT
@@ -288,8 +285,7 @@ SELECT
   c.title,
   c.text_excerpt,
   c.repo_source_id,
-  c.repo_snapshot_id,
-  c.analysis_run_id,
+  c.analysis_id,
   c.source_ref_id,
   c.evidence_refs_flat,
   CASE
@@ -325,7 +321,7 @@ LIMIT ?;`, where)
 		var h Hit
 		var refs sql.NullString
 		var sourceRef sql.NullString
-		if err := rows.Scan(&h.ChunkID, &h.SourceKind, &h.Title, &h.TextExcerpt, &h.RepoSourceID, &h.RepoSnapshotID, &h.AnalysisRunID, &sourceRef, &refs, &h.Score); err != nil {
+		if err := rows.Scan(&h.ChunkID, &h.SourceKind, &h.Title, &h.TextExcerpt, &h.RepoSourceID, &h.AnalysisID, &sourceRef, &refs, &h.Score); err != nil {
 			return nil, err
 		}
 		h.SourceRefID = strings.TrimSpace(sourceRef.String)
@@ -338,7 +334,7 @@ LIMIT ?;`, where)
 	return hits, nil
 }
 
-func (s *Service) SearchTitleMatches(ctx context.Context, query string, topK int, repoSnapshotFilters []string, sourceKinds []string) ([]Hit, error) {
+func (s *Service) SearchTitleMatches(ctx context.Context, query string, topK int, analysisFilters []string, sourceKinds []string) ([]Hit, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("searchdb: not initialized")
 	}
@@ -347,7 +343,7 @@ func (s *Service) SearchTitleMatches(ctx context.Context, query string, topK int
 		return nil, fmt.Errorf("searchdb: query required")
 	}
 	limit := stableRecallLimit(topK)
-	where, args := buildFilterWhere(repoSnapshotFilters, sourceKinds)
+	where, args := buildFilterWhere(analysisFilters, sourceKinds)
 
 	sqlText := fmt.Sprintf(`
 SELECT
@@ -356,8 +352,7 @@ SELECT
   c.title,
   c.text_excerpt,
   c.repo_source_id,
-  c.repo_snapshot_id,
-  c.analysis_run_id,
+  c.analysis_id,
   c.source_ref_id,
   c.evidence_refs_flat,
   CASE
@@ -388,7 +383,7 @@ LIMIT ?;`, where)
 		var h Hit
 		var refs sql.NullString
 		var sourceRef sql.NullString
-		if err := rows.Scan(&h.ChunkID, &h.SourceKind, &h.Title, &h.TextExcerpt, &h.RepoSourceID, &h.RepoSnapshotID, &h.AnalysisRunID, &sourceRef, &refs, &h.Score); err != nil {
+		if err := rows.Scan(&h.ChunkID, &h.SourceKind, &h.Title, &h.TextExcerpt, &h.RepoSourceID, &h.AnalysisID, &sourceRef, &refs, &h.Score); err != nil {
 			return nil, err
 		}
 		h.SourceRefID = strings.TrimSpace(sourceRef.String)
@@ -398,7 +393,7 @@ LIMIT ?;`, where)
 	return hits, nil
 }
 
-func (s *Service) SearchVector(ctx context.Context, query string, topK int, repoSnapshotFilters []string, sourceKinds []string) ([]Hit, error) {
+func (s *Service) SearchVector(ctx context.Context, query string, topK int, analysisFilters []string, sourceKinds []string) ([]Hit, error) {
 	if !s.VecEnabled() {
 		return nil, errors.New("vector search disabled")
 	}
@@ -418,7 +413,7 @@ func (s *Service) SearchVector(ctx context.Context, query string, topK int, repo
 	if err != nil {
 		return nil, err
 	}
-	where, args := buildVecFilterWhere(repoSnapshotFilters, sourceKinds)
+	where, args := buildVecFilterWhere(analysisFilters, sourceKinds)
 
 	sqlText := fmt.Sprintf(`
 SELECT
@@ -427,8 +422,7 @@ SELECT
   c.title,
   c.text_excerpt,
   c.repo_source_id,
-  c.repo_snapshot_id,
-  c.analysis_run_id,
+  c.analysis_id,
   c.source_ref_id,
   c.evidence_refs_flat,
   (1.0 / (1.0 + v.distance)) AS score
@@ -453,7 +447,7 @@ LIMIT ?;`, where)
 		var h Hit
 		var refs sql.NullString
 		var sourceRef sql.NullString
-		if err := rows.Scan(&h.ChunkID, &h.SourceKind, &h.Title, &h.TextExcerpt, &h.RepoSourceID, &h.RepoSnapshotID, &h.AnalysisRunID, &sourceRef, &refs, &h.Score); err != nil {
+		if err := rows.Scan(&h.ChunkID, &h.SourceKind, &h.Title, &h.TextExcerpt, &h.RepoSourceID, &h.AnalysisID, &sourceRef, &refs, &h.Score); err != nil {
 			return nil, err
 		}
 		h.SourceRefID = strings.TrimSpace(sourceRef.String)

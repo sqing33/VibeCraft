@@ -54,19 +54,40 @@ func (s *Service) tryLoadVecExtension(ctx context.Context) error {
 
 type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
 func ensureVecTable(ctx context.Context, exec execer, dim int) error {
 	if dim <= 0 {
 		return fmt.Errorf("invalid embedding dim")
 	}
+	if cols, err := tableColumns(ctx, exec, "kb_chunk_vec"); err == nil && shouldRebuildVecTable(cols) {
+		_, _ = exec.ExecContext(ctx, `DROP TABLE IF EXISTS kb_chunk_vec;`)
+	}
 	// vec0 virtual table is provided by sqlite-vec extension.
 	_, err := exec.ExecContext(ctx, fmt.Sprintf(`
 CREATE VIRTUAL TABLE IF NOT EXISTS kb_chunk_vec USING vec0(
   embedding float[%d],
-  repo_snapshot_id TEXT,
+  analysis_id TEXT,
   source_kind TEXT
 );
 `, dim))
 	return err
+}
+
+func shouldRebuildVecTable(cols []string) bool {
+	if len(cols) == 0 {
+		return false
+	}
+	set := map[string]struct{}{}
+	for _, c := range cols {
+		set[strings.TrimSpace(c)] = struct{}{}
+	}
+	if _, ok := set["analysis_id"]; !ok {
+		return true
+	}
+	if _, ok := set["repo_snapshot_id"]; ok {
+		return true
+	}
+	return false
 }

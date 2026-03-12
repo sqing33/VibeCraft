@@ -51,8 +51,7 @@ func TestVectorSearchBasic(t *testing.T) {
 		{
 			ChunkID:        "card:alpha",
 			RepoSourceID:   "rs_demo",
-			RepoSnapshotID: "rp_demo",
-			AnalysisRunID:  "rr_demo",
+			AnalysisID:     "ra_demo",
 			SourceKind:     "card",
 			SourceRefID:    "card:alpha",
 			Title:          "Alpha",
@@ -63,8 +62,7 @@ func TestVectorSearchBasic(t *testing.T) {
 		{
 			ChunkID:        "card:bravo",
 			RepoSourceID:   "rs_demo",
-			RepoSnapshotID: "rp_demo",
-			AnalysisRunID:  "rr_demo",
+			AnalysisID:     "ra_demo",
 			SourceKind:     "card",
 			SourceRefID:    "card:bravo",
 			Title:          "Bravo",
@@ -78,7 +76,7 @@ func TestVectorSearchBasic(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	hits, err := sdb.SearchVector(context.Background(), "alpha", 5, []string{"rp_demo"}, []string{"card"})
+	hits, err := sdb.SearchVector(context.Background(), "alpha", 5, []string{"ra_demo"}, []string{"card"})
 	if err != nil {
 		t.Fatalf("search vector: %v", err)
 	}

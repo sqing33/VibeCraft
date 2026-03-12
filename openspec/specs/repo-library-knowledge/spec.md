@@ -11,9 +11,9 @@ Knowledge cards MUST support at least `project_characteristic`, `feature_pattern
 The extractor MUST tolerate minor heading-label drift in AI-generated markdown reports as long as the report still follows the overall structured analysis format.
 
 #### Scenario: Successful card extraction
-- **WHEN** an analysis run finishes with a generated report
+- **WHEN** an analysis result finishes with a generated report
 - **THEN** the system extracts one or more knowledge cards from the report
-- **AND** persists the cards linked to the snapshot and analysis run
+- **AND** persists the cards linked to the analysis result
 
 #### Scenario: AI report headings drift slightly
 - **WHEN** an AI-generated report uses semantically equivalent headings or labels with minor wording variation
@@ -31,10 +31,10 @@ Each evidence item MUST include at least source path, source line, and a dimensi
 - **AND** the UI can query these evidence entries independently
 
 ### Requirement: Repo Library MUST expose repository and card detail data
-The system MUST provide APIs to retrieve repository detail, snapshots, cards, and card evidence for UI presentation.
+The system MUST provide APIs to retrieve repository detail, analyses, cards, and card evidence for UI presentation.
 
 #### Scenario: User opens repository detail
 - **WHEN** the UI requests repository detail for an analyzed repository
-- **THEN** the backend returns repository metadata, recent snapshots, and linked cards
+- **THEN** the backend returns repository metadata, recent analyses, and linked cards
 - **AND** the UI can later request evidence for an individual card
 

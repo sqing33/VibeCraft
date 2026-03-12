@@ -92,22 +92,21 @@ func (s *Service) ensureSearchIndex(ctx context.Context) (*searchIndex, error) {
 	return idx, nil
 }
 
-func (s *Service) refreshSearchIndexForSnapshot(ctx context.Context, source store.RepoSource, snapshot store.RepoSnapshot, run store.RepoAnalysisRun) (map[string]any, error) {
+func (s *Service) refreshSearchIndexForAnalysis(ctx context.Context, source store.RepoSource, analysis store.RepoAnalysisResult) (map[string]any, error) {
 	idx, err := s.ensureSearchIndex(ctx)
 	if err != nil {
 		return nil, err
 	}
-	reportPath := strings.TrimSpace(pointerValue(snapshot.ReportPath))
+	reportPath := strings.TrimSpace(pointerValue(analysis.ReportPath))
 	if reportPath == "" {
-		reportPath = filepath.Join(snapshot.StoragePath, "report.md")
+		reportPath = filepath.Join(analysis.StoragePath, "report.md")
 	}
 	reportText, _ := os.ReadFile(reportPath)
 
 	cards, err := s.store.ListRepoCards(ctx, store.ListRepoCardsParams{
-		RepoSourceID:   source.ID,
-		RepoSnapshotID: snapshot.ID,
-		AnalysisRunID:  run.ID,
-		Limit:          1000,
+		RepoSourceID: source.ID,
+		AnalysisID:   analysis.ID,
+		Limit:        1000,
 	})
 	if err != nil {
 		return nil, err
@@ -121,8 +120,8 @@ func (s *Service) refreshSearchIndexForSnapshot(ctx context.Context, source stor
 		evidenceByCard[card.ID] = ev
 	}
 
-	chunks := buildSearchChunks(source, snapshot, run, string(reportText), cards, evidenceByCard)
-	if err := idx.sdb.DeleteSnapshot(ctx, snapshot.ID); err != nil {
+	chunks := buildSearchChunks(source, analysis, string(reportText), cards, evidenceByCard)
+	if err := idx.sdb.DeleteAnalysis(ctx, analysis.ID); err != nil {
 		return nil, err
 	}
 	if err := idx.sdb.UpsertChunks(ctx, chunks); err != nil {
@@ -134,15 +133,14 @@ func (s *Service) refreshSearchIndexForSnapshot(ctx context.Context, source stor
 		"generated_at":  time.Now().UTC().Format(time.RFC3339),
 		"vec_enabled":   idx.sdb.VecEnabled(),
 		"chunk_count":   len(chunks),
-		"snapshot_id":   snapshot.ID,
+		"analysis_id":   analysis.ID,
 		"repository_id": source.ID,
 	}, nil
 }
 
 func buildSearchChunks(
 	source store.RepoSource,
-	snapshot store.RepoSnapshot,
-	run store.RepoAnalysisRun,
+	analysis store.RepoAnalysisResult,
 	reportText string,
 	cards []store.RepoKnowledgeCard,
 	evidenceByCard map[string][]store.RepoKnowledgeEvidence,
@@ -187,14 +185,13 @@ func buildSearchChunks(
 			// enough for user-facing retrieval.
 			continue
 		}
-		chunkID := fmt.Sprintf("report:%s:%s", snapshot.ID, sha256Short(titlePath))
+		chunkID := fmt.Sprintf("report:%s:%s", analysis.ID, sha256Short(titlePath))
 		display := strings.TrimSpace(titlePath + "\n\n" + text)
 		search := strings.TrimSpace(titlePath + "\n\n" + text)
 		chunks = append(chunks, searchdb.Chunk{
 			ChunkID:        chunkID,
 			RepoSourceID:   source.ID,
-			RepoSnapshotID: snapshot.ID,
-			AnalysisRunID:  run.ID,
+			AnalysisID:     analysis.ID,
 			SourceKind:     "report_section",
 			SourceRefID:    card.ID,
 			Title:          titlePath,
@@ -225,8 +222,7 @@ func buildSearchChunks(
 		chunks = append(chunks, searchdb.Chunk{
 			ChunkID:        "card:" + card.ID,
 			RepoSourceID:   source.ID,
-			RepoSnapshotID: snapshot.ID,
-			AnalysisRunID:  run.ID,
+			AnalysisID:     analysis.ID,
 			SourceKind:     "card",
 			SourceRefID:    card.ID,
 			Title:          card.Title,
@@ -256,8 +252,7 @@ func buildSearchChunks(
 			chunks = append(chunks, searchdb.Chunk{
 				ChunkID:        "evidence:" + item.ID,
 				RepoSourceID:   source.ID,
-				RepoSnapshotID: snapshot.ID,
-				AnalysisRunID:  run.ID,
+				AnalysisID:     analysis.ID,
 				SourceKind:     "evidence",
 				SourceRefID:    card.ID,
 				Title:          evTitle,

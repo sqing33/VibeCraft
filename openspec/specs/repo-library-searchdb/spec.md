@@ -6,11 +6,11 @@ TBD - created by archiving change github-kb-searchdb. Update Purpose after archi
 ### Requirement: Repo Library MUST treat search.db as a rebuildable derived index
 The system MUST store search-derived artifacts (chunks, FTS index, vectors, row maps, metadata) in a dedicated SQLite database `search.db`.
 
-The system MUST NOT store any business-unique truth only in `search.db`; all `search.db` contents MUST be rebuildable from `state.db` plus snapshot artifacts (`report.md`, cards/evidence).
+The system MUST NOT store any business-unique truth only in `search.db`; all `search.db` contents MUST be rebuildable from `state.db` plus analysis artifacts (`report.md`, cards/evidence).
 
 #### Scenario: search.db corruption does not break analysis truth
 - **WHEN** `search.db` is missing or corrupted
-- **THEN** the system still serves repository detail, snapshots, reports, cards, and evidence from `state.db`
+- **THEN** the system still serves repository detail, analyses, reports, cards, and evidence from `state.db`
 - **AND** the system can rebuild `search.db` without re-running the repository analysis
 
 ### Requirement: Repo Library MUST version and validate search.db metadata
@@ -27,12 +27,12 @@ The system MUST detect incompatible versions at runtime and require an index reb
 The system MUST generate stable `chunk_id` values for indexed chunks:
 - `card:{card_id}`
 - `evidence:{evidence_id}`
-- `report:{snapshot_id}:{heading_path_hash}`
+- `report:{analysis_result_id}:{heading_path_hash}`
 
 The system MUST compute `content_hash = sha256(search_text)` for each chunk to support incremental refresh.
 
 #### Scenario: Rebuild produces identical chunk ids
-- **WHEN** the same snapshot is indexed twice with identical inputs
+- **WHEN** the same analysis result is indexed twice with identical inputs
 - **THEN** the generated `chunk_id` values remain identical
 - **AND** unchanged chunks are not duplicated in the index
 
@@ -49,11 +49,10 @@ The system MUST allow `search_text` to include flattened tags, symbol refs, and 
 ### Requirement: Repo Library MUST provide rebuild operations for search.db
 The system MUST support rebuild operations:
 - rebuild all repositories
-- rebuild a specific snapshot
-- rebuild a specific analysis run (mapped to its snapshot)
+- rebuild a specific analysis result
 
-#### Scenario: Rebuild snapshot after embedding resources are added
+#### Scenario: Rebuild analysis result after embedding resources are added
 - **WHEN** embedding resources become available after a previous indexing attempt
-- **THEN** the system can rebuild the affected snapshot index
+- **THEN** the system can rebuild the affected analysis result index
 - **AND** vector search becomes available without re-running analysis
 

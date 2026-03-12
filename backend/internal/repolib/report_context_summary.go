@@ -47,29 +47,37 @@ func extractReportContextSummary(reportText string) (*store.RepoReportContextSum
 	return summary, true
 }
 
-// loadReportContextSummaryFromSnapshot 功能：从快照的 report_path 读取并派生仓库级摘要。
-// 参数/返回：snapshot 提供 report_path；返回摘要与是否成功。
+// loadReportContextSummaryFromAnalysis 功能：从分析结果的 report_path 读取并派生仓库级摘要。
+// 参数/返回：analysis 提供 report_path；返回摘要与是否成功。
 // 失败场景：报告路径缺失、文件不存在或解析失败时返回 false。
 // 副作用：读取磁盘文件。
-func loadReportContextSummaryFromSnapshot(snapshot store.RepoSnapshot) (*store.RepoReportContextSummary, bool) {
-	if snapshot.ReportPath == nil || strings.TrimSpace(*snapshot.ReportPath) == "" {
+func loadReportContextSummaryFromAnalysis(analysis store.RepoAnalysisResult) (*store.RepoReportContextSummary, bool) {
+	reportPath := strings.TrimSpace(pointerValue(analysis.ReportPath))
+	if reportPath == "" {
+		// Older/partial rows may not persist report_path; fall back to the
+		// default location under storage_path.
+		if strings.TrimSpace(analysis.StoragePath) != "" {
+			reportPath = strings.TrimSpace(analysis.StoragePath) + "/report.md"
+		}
+	}
+	if reportPath == "" {
 		return nil, false
 	}
-	body, err := os.ReadFile(strings.TrimSpace(*snapshot.ReportPath))
+	body, err := os.ReadFile(reportPath)
 	if err != nil {
 		return nil, false
 	}
 	return extractReportContextSummary(string(body))
 }
 
-func enrichSnapshotsWithReportContext(snapshots []store.RepoSnapshot) []store.RepoSnapshot {
-	if len(snapshots) == 0 {
-		return snapshots
+func enrichAnalysesWithReportContext(analyses []store.RepoAnalysisResult) []store.RepoAnalysisResult {
+	if len(analyses) == 0 {
+		return analyses
 	}
-	enriched := make([]store.RepoSnapshot, len(snapshots))
-	for i, snapshot := range snapshots {
-		enriched[i] = snapshot
-		if summary, ok := loadReportContextSummaryFromSnapshot(snapshot); ok {
+	enriched := make([]store.RepoAnalysisResult, len(analyses))
+	for i, analysis := range analyses {
+		enriched[i] = analysis
+		if summary, ok := loadReportContextSummaryFromAnalysis(analysis); ok {
 			enriched[i].ReportContext = summary
 		}
 	}

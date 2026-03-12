@@ -16,16 +16,15 @@ func upsertChunkRow(ctx context.Context, tx *sql.Tx, chunk Chunk) (int64, error)
 		ctx,
 		`
 INSERT INTO kb_chunks (
-  chunk_id, repo_source_id, repo_snapshot_id, analysis_run_id,
+  chunk_id, repo_source_id, analysis_id,
   source_kind, source_ref_id, title,
   display_text, search_text,
   tags_flat, symbols_flat, evidence_refs_flat,
   text_excerpt, content_hash, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(chunk_id) DO UPDATE SET
   repo_source_id = excluded.repo_source_id,
-  repo_snapshot_id = excluded.repo_snapshot_id,
-  analysis_run_id = excluded.analysis_run_id,
+  analysis_id = excluded.analysis_id,
   source_kind = excluded.source_kind,
   source_ref_id = excluded.source_ref_id,
   title = excluded.title,
@@ -40,8 +39,7 @@ ON CONFLICT(chunk_id) DO UPDATE SET
 RETURNING rowid;`,
 		strings.TrimSpace(chunk.ChunkID),
 		strings.TrimSpace(chunk.RepoSourceID),
-		strings.TrimSpace(chunk.RepoSnapshotID),
-		strings.TrimSpace(chunk.AnalysisRunID),
+		strings.TrimSpace(chunk.AnalysisID),
 		strings.TrimSpace(chunk.SourceKind),
 		trimOrNil(chunk.SourceRefID),
 		trimOrNil(chunk.Title),
@@ -70,12 +68,12 @@ func upsertFTSRow(ctx context.Context, tx *sql.Tx, rowid int64, chunk Chunk) err
 	return nil
 }
 
-func upsertVecRow(ctx context.Context, tx *sql.Tx, rowid int64, snapshotID, sourceKind string, embedding []float32) error {
+func upsertVecRow(ctx context.Context, tx *sql.Tx, rowid int64, analysisID, sourceKind string, embedding []float32) error {
 	blob, err := packFloat32LE(embedding)
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO kb_chunk_vec(rowid, embedding, repo_snapshot_id, source_kind) VALUES (?, ?, ?, ?);`, rowid, blob, strings.TrimSpace(snapshotID), strings.TrimSpace(sourceKind)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO kb_chunk_vec(rowid, embedding, analysis_id, source_kind) VALUES (?, ?, ?, ?);`, rowid, blob, strings.TrimSpace(analysisID), strings.TrimSpace(sourceKind)); err != nil {
 		return fmt.Errorf("upsert vec row: %w", err)
 	}
 	return nil

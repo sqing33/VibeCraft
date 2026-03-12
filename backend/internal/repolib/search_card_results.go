@@ -17,8 +17,7 @@ type cardSearchResult struct {
 	DisplayScore  float64
 	MatchSources  []string
 	RepositoryID  string
-	SnapshotID    string
-	AnalysisRunID string
+	AnalysisID    string
 }
 
 type cardSearchAggregate struct {
@@ -29,8 +28,7 @@ type cardSearchAggregate struct {
 	topByKind     map[string]float64
 	matchSources  map[string]struct{}
 	repositoryID  string
-	snapshotID    string
-	analysisRunID string
+	analysisID    string
 }
 
 func (s *Service) collapseSearchHitsToCards(ctx context.Context, hits []searchdb.Hit, topK int) []cardSearchResult {
@@ -52,8 +50,7 @@ func (s *Service) collapseSearchHitsToCards(ctx context.Context, hits []searchdb
 				topByKind:     map[string]float64{},
 				matchSources:  map[string]struct{}{},
 				repositoryID:  hit.RepoSourceID,
-				snapshotID:    hit.RepoSnapshotID,
-				analysisRunID: hit.AnalysisRunID,
+				analysisID:    hit.AnalysisID,
 			}
 			aggByCard[cardID] = agg
 		}
@@ -61,8 +58,7 @@ func (s *Service) collapseSearchHitsToCards(ctx context.Context, hits []searchdb
 		if hit.Score > agg.maxScore {
 			agg.maxScore = hit.Score
 			agg.repositoryID = hit.RepoSourceID
-			agg.snapshotID = hit.RepoSnapshotID
-			agg.analysisRunID = hit.AnalysisRunID
+			agg.analysisID = hit.AnalysisID
 		}
 		if kind := strings.TrimSpace(hit.SourceKind); kind != "" {
 			agg.matchSources[kind] = struct{}{}
@@ -102,8 +98,7 @@ func (s *Service) collapseSearchHitsToCards(ctx context.Context, hits []searchdb
 			RawScore:      agg.rawScore,
 			MatchSources:  sortedMatchSources(agg.matchSources),
 			RepositoryID:  agg.repositoryID,
-			SnapshotID:    agg.snapshotID,
-			AnalysisRunID: agg.analysisRunID,
+			AnalysisID:    agg.analysisID,
 		})
 		if len(results) >= topK {
 			break

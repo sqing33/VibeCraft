@@ -20,8 +20,7 @@ func TestSearchTitleMatchesPrefersExactTitleSubstring(t *testing.T) {
 		{
 			ChunkID:        "card:characteristic",
 			RepoSourceID:   "rs_demo",
-			RepoSnapshotID: "rp_demo",
-			AnalysisRunID:  "rr_demo",
+			AnalysisID:     "ra_demo",
 			SourceKind:     "card",
 			Title:          "会话隔离的多 Agent 委派与实例池",
 			DisplayText:    "x",
@@ -31,8 +30,7 @@ func TestSearchTitleMatchesPrefersExactTitleSubstring(t *testing.T) {
 		{
 			ChunkID:        "card:question",
 			RepoSourceID:   "rs_demo",
-			RepoSnapshotID: "rp_demo",
-			AnalysisRunID:  "rr_demo",
+			AnalysisID:     "ra_demo",
 			SourceKind:     "card",
 			Title:          "多 Agent 并行机制：任务拆分、调度、路由/接力、结果合并/冲突处理",
 			DisplayText:    "x",
@@ -44,7 +42,7 @@ func TestSearchTitleMatchesPrefersExactTitleSubstring(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	hits, err := sdb.SearchTitleMatches(context.Background(), "多 Agent 并行机制", 8, []string{"rp_demo"}, []string{"card"})
+	hits, err := sdb.SearchTitleMatches(context.Background(), "多 Agent 并行机制", 8, []string{"ra_demo"}, []string{"card"})
 	if err != nil {
 		t.Fatalf("search title matches: %v", err)
 	}
