@@ -13,13 +13,13 @@ Each attachment record MUST reference its owning chat session and message.
 ## MODIFIED Requirements
 
 ### Requirement: File Storage Layout
-The system MUST use data directory `~/.local/share/vibe-tree/`. The database file MUST be at `~/.local/share/vibe-tree/state.db`. Log files MUST be stored under `~/.local/share/vibe-tree/logs/`. Each execution MUST have its own log file: `{execution_id}.log`.
+The system MUST use data directory `~/.local/share/vibecraft/`. The database file MUST be at `~/.local/share/vibecraft/state.db`. Log files MUST be stored under `~/.local/share/vibecraft/logs/`. Each execution MUST have its own log file: `{execution_id}.log`.
 
 Chat attachments MUST be stored under a dedicated subdirectory of the data directory, organized by session and message so that persisted attachment files can be re-read for future chat reconstruction.
 
 #### Scenario: Execution log file creation
 - **WHEN** a new execution starts
-- **THEN** a log file is created at `~/.local/share/vibe-tree/logs/{execution_id}.log`
+- **THEN** a log file is created at `~/.local/share/vibecraft/logs/{execution_id}.log`
 
 #### Scenario: Chat attachment file creation
 - **WHEN** a user sends a chat turn with attachments

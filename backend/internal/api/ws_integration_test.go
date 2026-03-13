@@ -12,11 +12,11 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"vibe-tree/backend/internal/api"
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/execution"
-	"vibe-tree/backend/internal/server"
-	"vibe-tree/backend/internal/ws"
+	"vibecraft/backend/internal/api"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/execution"
+	"vibecraft/backend/internal/server"
+	"vibecraft/backend/internal/ws"
 )
 
 func TestWebSocketBroadcastExecutionLifecycle(t *testing.T) {

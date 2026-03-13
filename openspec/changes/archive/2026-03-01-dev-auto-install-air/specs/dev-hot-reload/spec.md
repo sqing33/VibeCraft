@@ -15,4 +15,4 @@ The default local development script SHALL start the backend using Air when `air
 #### Scenario: Air is not installed and auto-install fails
 - **WHEN** `scripts/dev.sh` is executed and `air` is not available in `PATH`
 - **AND** Air auto-install fails (missing `go` or install error)
-- **THEN** the backend is started via `go run ./cmd/vibe-tree-daemon`
+- **THEN** the backend is started via `go run ./cmd/vibecraft-daemon`

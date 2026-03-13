@@ -23,7 +23,7 @@ The system MUST support execution states: `queued`, `running`, `succeeded`, `fai
 
 ### Log Management
 
-The system MUST create one log file per execution at `~/.local/share/vibe-tree/logs/{execution_id}.log`. The system MUST append log data in real-time using buffered I/O with periodic flush. The system MUST provide a log tail API at `GET /api/v1/executions/{id}/log?tail=2000` (bytes).
+The system MUST create one log file per execution at `~/.local/share/vibecraft/logs/{execution_id}.log`. The system MUST append log data in real-time using buffered I/O with periodic flush. The system MUST provide a log tail API at `GET /api/v1/executions/{id}/log?tail=2000` (bytes).
 
 #### Scenario: Real-time log writing
 

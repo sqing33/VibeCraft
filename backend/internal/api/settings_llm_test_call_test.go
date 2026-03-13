@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
+	"vibecraft/backend/internal/config"
 )
 
 func TestLLMTestAPI_DoesNotLeakAPIKey(t *testing.T) {
@@ -16,11 +16,11 @@ func TestLLMTestAPI_DoesNotLeakAPIKey(t *testing.T) {
 
 	apiKey := "sk_secret_abcdef"
 	body, _ := json.Marshal(map[string]any{
-		"provider":  "openai",
-		"model":     "gpt-5-codex",
-		"api_key":   apiKey,
-		"base_url":  "http://127.0.0.1:1", // force quick failure
-		"prompt":    "ok",
+		"provider": "openai",
+		"model":    "gpt-5-codex",
+		"api_key":  apiKey,
+		"base_url": "http://127.0.0.1:1", // force quick failure
+		"prompt":   "ok",
 	})
 
 	res, err := http.Post(env.httpSrv.URL+"/api/v1/settings/llm/test", "application/json", bytes.NewReader(body))
@@ -34,4 +34,3 @@ func TestLLMTestAPI_DoesNotLeakAPIKey(t *testing.T) {
 		t.Fatalf("api key leaked in response: %s", string(b))
 	}
 }
-

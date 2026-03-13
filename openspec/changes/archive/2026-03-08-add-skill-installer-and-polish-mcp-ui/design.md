@@ -31,9 +31,9 @@
    - 这是 Codex 默认技能目录，后续 CLI / app-server 可以自然发现。
    - 与项目级 `.codex/skills/` 并存，不影响项目内已有 Skill。
 
-2. **Skill 启停仅持久化到 vibe-tree 自身配置 `skill_bindings`**
+2. **Skill 启停仅持久化到 vibecraft 自身配置 `skill_bindings`**
    - 不使用 Codex `skills/config/write` 去修改用户全局 Skill 配置，避免越界改动用户环境。
-   - 运行时由 vibe-tree 根据 `skill_bindings` 过滤 discovered skills，再把有效技能清单注入 Codex 指令层。
+   - 运行时由 vibecraft 根据 `skill_bindings` 过滤 discovered skills，再把有效技能清单注入 Codex 指令层。
 
 3. **安装接口统一为 multipart 上传**
    - zip 上传：前端上传单个压缩包，后端解压到临时目录并定位 `SKILL.md`。
@@ -52,6 +52,6 @@
 - [Risk] Skill 安装 zip 可能包含路径穿越条目。
   - Mitigation：解压时严格校验目标路径必须落在临时目录内。
 - [Risk] 用户关闭某个默认目录内的 Skill 后，Codex 底层仍可能从默认目录看到它。
-  - Mitigation：当前产品层仅向 Codex 注入“有效技能列表”，把 enable/disable 明确作用于 vibe-tree 的运行时 allowlist；不直接篡改用户全局 Codex 配置。
+  - Mitigation：当前产品层仅向 Codex 注入“有效技能列表”，把 enable/disable 明确作用于 vibecraft 的运行时 allowlist；不直接篡改用户全局 Codex 配置。
 - [Risk] 替换式安装可能覆盖用户旧版本 Skill。
   - Mitigation：只覆盖同名目标目录，且来源是用户主动操作“添加 Skill”。

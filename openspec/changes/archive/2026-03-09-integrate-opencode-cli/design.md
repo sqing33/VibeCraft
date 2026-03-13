@@ -50,7 +50,7 @@
 - **不选原因**：官方公开 help 没有承诺这些 env 就是稳定配置面，直接写临时 config 更可控。
 
 ### 4. OpenCode 选模在 wrapper 层统一规范成 `provider/model`
-- **方案**：后端为 CLI spec 额外透出解析后的 provider family；wrapper 若收到的 `VIBE_TREE_MODEL` 不含 `/`，则按 `provider/model` 规范拼接后传给 `opencode run --model`。
+- **方案**：后端为 CLI spec 额外透出解析后的 provider family；wrapper 若收到的 `VIBECRAFT_MODEL` 不含 `/`，则按 `provider/model` 规范拼接后传给 `opencode run --model`。
 - **原因**：可兼容 builtin expert 的显式 `provider/model` 与 UI 通过 `model_id` 选择出的普通 `model` 字符串两种来源。
 - **备选**：要求所有 LLM model 配置都改成 `provider/model`。
 - **不选原因**：会破坏现有 LLM 设置与 SDK helper 路径。

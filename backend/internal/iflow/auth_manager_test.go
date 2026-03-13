@@ -64,7 +64,7 @@ func TestEnsureHome_WritesBootstrapSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureHome() error = %v", err)
 	}
-	if !strings.Contains(homeDir, filepath.Join(xdgData, "vibe-tree")) {
+	if !strings.Contains(homeDir, filepath.Join(xdgData, "vibecraft")) {
 		t.Fatalf("homeDir = %q, want under %q", homeDir, xdgData)
 	}
 	settingsPath, err := SettingsPath()

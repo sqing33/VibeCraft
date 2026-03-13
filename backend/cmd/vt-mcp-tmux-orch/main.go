@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"vibe-tree/backend/internal/mcpstdio"
-	"vibe-tree/backend/internal/tmuxorch"
+	"vibecraft/backend/internal/mcpstdio"
+	"vibecraft/backend/internal/tmuxorch"
 )
 
 func main() {

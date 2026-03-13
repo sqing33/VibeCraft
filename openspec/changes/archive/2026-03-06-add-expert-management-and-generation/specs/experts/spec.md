@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Configuration Loading
-The system MUST load expert configurations from `~/.config/vibe-tree/config.json` under the `experts` array. Each expert MUST have a unique `id`. The system MUST support provider types: `process` (local command), `openai` (OpenAI SDK), `anthropic` (Anthropic SDK), `demo` (testing).
+The system MUST load expert configurations from `~/.config/vibecraft/config.json` under the `experts` array. Each expert MUST have a unique `id`. The system MUST support provider types: `process` (local command), `openai` (OpenAI SDK), `anthropic` (Anthropic SDK), `demo` (testing).
 
 In addition to runtime fields, an expert MAY include metadata fields used by the settings UI, including `description`, `category`, `avatar`, `managed_source`, `primary_model_id`, `secondary_model_id`, `enabled_skills`, and `fallback_on`.
 

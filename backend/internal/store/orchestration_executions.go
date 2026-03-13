@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"vibe-tree/backend/internal/id"
+	"vibecraft/backend/internal/id"
 )
 
 type AgentRunExecution struct {
@@ -27,17 +27,17 @@ type AgentRunExecution struct {
 }
 
 type StartAgentRunExecutionParams struct {
-	ExecutionID      string
-	OrchestrationID  string
-	RoundID          string
-	AgentRunID       string
-	Attempt          int
-	PID              int
-	LogPath          string
-	StartedAt        int64
-	Command          string
-	Args             []string
-	Cwd              string
+	ExecutionID     string
+	OrchestrationID string
+	RoundID         string
+	AgentRunID      string
+	Attempt         int
+	PID             int
+	LogPath         string
+	StartedAt       int64
+	Command         string
+	Args            []string
+	Cwd             string
 }
 
 // StartAgentRunExecution 功能：为 agent run 创建一条 running execution 记录，并更新 agent run 的 last_execution_id/status。
@@ -264,8 +264,8 @@ func finalizeRoundSynthesisTx(ctx context.Context, tx *sql.Tx, orch Orchestratio
 	parts := make([]string, 0, len(runs)+1)
 	parts = append(parts, fmt.Sprintf("Round %d 汇总：", round.RoundIndex))
 	for _, run := range runs {
-			fallback := pointerString(run.Goal)
-			piece := fmt.Sprintf("- [%s] %s：%s", run.Status, run.Title, firstNonEmpty(run.ResultSummary, run.ErrorMessage, fallback))
+		fallback := pointerString(run.Goal)
+		piece := fmt.Sprintf("- [%s] %s：%s", run.Status, run.Title, firstNonEmpty(run.ResultSummary, run.ErrorMessage, fallback))
 		parts = append(parts, piece)
 		switch run.Status {
 		case string(AgentRunStatusFailed), string(AgentRunStatusCanceled), string(AgentRunStatusTimeout):
@@ -410,8 +410,8 @@ func (s *Store) RetryAgentRun(ctx context.Context, agentRunID string) (Orchestra
 }
 
 type CancelOrchestrationResult struct {
-	Orchestration        Orchestration
-	RunningExecutionIDs  []string
+	Orchestration       Orchestration
+	RunningExecutionIDs []string
 }
 
 // CancelOrchestration 功能：取消 orchestration，并返回需要取消的运行中 execution_id 列表。

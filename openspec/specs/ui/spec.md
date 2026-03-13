@@ -10,7 +10,7 @@ The system MUST use React + TypeScript + Vite for the frontend build. The system
 
 #### Scenario: Frontend builds successfully
 
-- **WHEN** running `npm run build` in the ui/ directory
+- **WHEN** running `pnpm build` in the ui/ directory
 - **THEN** the build completes without errors
 - **AND** produces static assets in ui/dist/
 
@@ -673,3 +673,10 @@ If the WebSocket connection is disconnected, or if chat live-update events stop 
 - **AND** the backend snapshot shows the latest turn is no longer running
 - **THEN** the UI stops catch-up polling
 - **AND** the chat page converges to a completed assistant message bubble with attached process details
+
+### Requirement: UI MUST present VibeCraft as the host product name
+The UI MUST use `VibeCraft` as the host product name in top-level branding, settings, and product-level descriptive text.
+
+#### Scenario: User opens the app shell
+- **WHEN** the user opens the application shell or settings surfaces
+- **THEN** product-level labels identify the host application as `VibeCraft`

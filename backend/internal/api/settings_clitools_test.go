@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
-	iflowcli "vibe-tree/backend/internal/iflow"
+	"vibecraft/backend/internal/config"
+	iflowcli "vibecraft/backend/internal/iflow"
 )
 
 func TestCLIToolSettings_GetAndPut(t *testing.T) {

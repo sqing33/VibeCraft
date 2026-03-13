@@ -11,10 +11,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"vibe-tree/backend/internal/api"
-	"vibe-tree/backend/internal/codexhistory"
-	"vibe-tree/backend/internal/server"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/api"
+	"vibecraft/backend/internal/codexhistory"
+	"vibecraft/backend/internal/server"
+	"vibecraft/backend/internal/store"
 
 	_ "modernc.org/sqlite"
 )

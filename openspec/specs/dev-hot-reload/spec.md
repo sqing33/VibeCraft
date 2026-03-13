@@ -26,12 +26,12 @@ The default local development script SHALL start the backend using Air when `air
 #### Scenario: Air is not installed and auto-install fails
 - **WHEN** `scripts/dev.sh` is executed and `air` is not available in `PATH`
 - **AND** Air auto-install fails (missing `go` or install error)
-- **THEN** the backend is started via `go run ./cmd/vibe-tree-daemon`
+- **THEN** the backend is started via `go run ./cmd/vibecraft-daemon`
 
 ### Requirement: Developers can disable Air explicitly
 Local development tooling SHALL provide a way to disable Air usage explicitly to simplify debugging and reduce dependencies.
 
 #### Scenario: Air disabled via environment variable
-- **WHEN** `scripts/dev.sh` is executed with `VIBE_TREE_NO_AIR=1`
-- **THEN** the backend is started via `go run ./cmd/vibe-tree-daemon` even if Air is installed
+- **WHEN** `scripts/dev.sh` is executed with `VIBECRAFT_NO_AIR=1`
+- **THEN** the backend is started via `go run ./cmd/vibecraft-daemon` even if Air is installed
 

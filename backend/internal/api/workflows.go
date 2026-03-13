@@ -11,8 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"vibe-tree/backend/internal/store"
-	"vibe-tree/backend/internal/ws"
+	"vibecraft/backend/internal/store"
+	"vibecraft/backend/internal/ws"
 )
 
 type createWorkflowRequest struct {

@@ -28,8 +28,8 @@ func TestLoad_Disabled(t *testing.T) {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	t.Setenv("VIBE_TREE_DOTENV", "0")
-	t.Setenv("VIBE_TREE_DOTENV_PATH", "")
+	t.Setenv("VIBECRAFT_DOTENV", "0")
+	t.Setenv("VIBECRAFT_DOTENV_PATH", "")
 	t.Setenv("ANTHROPIC_API_KEY", "old")
 
 	res, err := Load()
@@ -51,8 +51,8 @@ func TestLoad_ExplicitPath_Overrides(t *testing.T) {
 		t.Fatalf("write env: %v", err)
 	}
 
-	t.Setenv("VIBE_TREE_DOTENV", "")
-	t.Setenv("VIBE_TREE_DOTENV_PATH", envPath)
+	t.Setenv("VIBECRAFT_DOTENV", "")
+	t.Setenv("VIBECRAFT_DOTENV_PATH", envPath)
 	t.Setenv("ANTHROPIC_API_KEY", "old")
 
 	res, err := Load()
@@ -95,8 +95,8 @@ func TestLoad_RepoRootDiscovery(t *testing.T) {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	t.Setenv("VIBE_TREE_DOTENV", "")
-	t.Setenv("VIBE_TREE_DOTENV_PATH", "")
+	t.Setenv("VIBECRAFT_DOTENV", "")
+	t.Setenv("VIBECRAFT_DOTENV_PATH", "")
 	t.Setenv("ANTHROPIC_API_KEY", "old")
 
 	res, err := Load()
@@ -123,7 +123,7 @@ func TestLoad_RepoRootDiscovery(t *testing.T) {
 func TestLoad_RepoRootDiscovery_WorktreeGitFile(t *testing.T) {
 	repo := t.TempDir()
 	gitFile := filepath.Join(repo, ".git")
-	if err := os.WriteFile(gitFile, []byte("gitdir: /tmp/vibe-tree-test\n"), 0o644); err != nil {
+	if err := os.WriteFile(gitFile, []byte("gitdir: /tmp/vibecraft-test\n"), 0o644); err != nil {
 		t.Fatalf("write .git file: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, ".env"), []byte("ANTHROPIC_API_KEY=new\n"), 0o644); err != nil {
@@ -143,8 +143,8 @@ func TestLoad_RepoRootDiscovery_WorktreeGitFile(t *testing.T) {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	t.Setenv("VIBE_TREE_DOTENV", "")
-	t.Setenv("VIBE_TREE_DOTENV_PATH", "")
+	t.Setenv("VIBECRAFT_DOTENV", "")
+	t.Setenv("VIBECRAFT_DOTENV_PATH", "")
 	t.Setenv("ANTHROPIC_API_KEY", "old")
 
 	res, err := Load()
@@ -184,8 +184,8 @@ func TestLoad_NoRepoRoot_Skips(t *testing.T) {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	t.Setenv("VIBE_TREE_DOTENV", "")
-	t.Setenv("VIBE_TREE_DOTENV_PATH", "")
+	t.Setenv("VIBECRAFT_DOTENV", "")
+	t.Setenv("VIBECRAFT_DOTENV_PATH", "")
 
 	res, err := Load()
 	if err != nil {

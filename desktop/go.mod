@@ -1,4 +1,4 @@
-module vibe-tree-desktop
+module vibecraft-desktop
 
 go 1.23
 

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/runner"
+	"vibecraft/backend/internal/paths"
+	"vibecraft/backend/internal/runner"
 )
 
 func TestManager_StartOneshotWithOptions_ContextDeadlineMarksTimeout(t *testing.T) {

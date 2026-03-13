@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"vibe-tree/backend/internal/id"
+	"vibecraft/backend/internal/id"
 )
 
 type ChatTurn struct {

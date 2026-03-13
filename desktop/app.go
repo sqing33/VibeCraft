@@ -13,6 +13,11 @@ import (
 	"time"
 )
 
+const (
+	runtimeDirName       = "vibecraft"
+	legacyRuntimeDirName = "vibe-tree"
+)
+
 // App struct
 type App struct {
 	ctx context.Context
@@ -90,7 +95,7 @@ func (a *App) WaitForDaemon(timeoutMs int) bool {
 	return healthOK(url, 800*time.Millisecond)
 }
 
-// OpenDataDir 功能：在系统文件管理器中打开 vibe-tree 数据目录。
+// OpenDataDir 功能：在系统文件管理器中打开 vibecraft 数据目录。
 // 参数/返回：无入参；成功返回数据目录路径；失败返回 error。
 // 失败场景：无法解析 home 目录、或系统打开命令执行失败时返回 error。
 // 副作用：启动系统命令（xdg-open/open/explorer）。
@@ -111,7 +116,20 @@ func resolveDataDir() (string, error) {
 		}
 		xdgDataHome = filepath.Join(home, ".local", "share")
 	}
-	return filepath.Join(xdgDataHome, "vibe-tree"), nil
+	current := filepath.Join(xdgDataHome, runtimeDirName)
+	legacy := filepath.Join(xdgDataHome, legacyRuntimeDirName)
+	if _, err := os.Stat(current); err == nil {
+		return current, nil
+	}
+	if _, err := os.Stat(legacy); err == nil {
+		if mkErr := os.MkdirAll(filepath.Dir(current), 0o755); mkErr == nil {
+			if renameErr := os.Rename(legacy, current); renameErr == nil {
+				return current, nil
+			}
+		}
+		return legacy, nil
+	}
+	return current, nil
 }
 
 func openInFileManager(path string) error {
@@ -126,13 +144,13 @@ func openInFileManager(path string) error {
 }
 
 func resolveDaemonHostPort() (host string, port int) {
-	host = strings.TrimSpace(os.Getenv("VIBE_TREE_HOST"))
+	host = firstEnv("VIBECRAFT_HOST", "VIBE_TREE_HOST")
 	if host == "" {
 		host = "127.0.0.1"
 	}
 
 	port = 7777
-	if raw := strings.TrimSpace(os.Getenv("VIBE_TREE_PORT")); raw != "" {
+	if raw := firstEnv("VIBECRAFT_PORT", "VIBE_TREE_PORT"); raw != "" {
 		if v, err := strconv.Atoi(raw); err == nil && v > 0 && v <= 65535 {
 			port = v
 		}
@@ -147,16 +165,16 @@ func (a *App) ensureDaemonRunning(host string, port int) error {
 		return nil
 	}
 
-	daemonPath := strings.TrimSpace(os.Getenv("VIBE_TREE_DAEMON_PATH"))
+	daemonPath := firstEnv("VIBECRAFT_DAEMON_PATH", "VIBE_TREE_DAEMON_PATH")
 	if daemonPath == "" {
-		daemonPath = "vibe-tree-daemon"
+		daemonPath = "vibecraft-daemon"
 	}
 
 	daemonCtx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(daemonCtx, daemonPath)
 	cmd.Env = append(os.Environ(),
-		"VIBE_TREE_HOST="+host,
-		fmt.Sprintf("VIBE_TREE_PORT=%d", port),
+		"VIBECRAFT_HOST="+host,
+		fmt.Sprintf("VIBECRAFT_PORT=%d", port),
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -173,6 +191,15 @@ func (a *App) ensureDaemonRunning(host string, port int) error {
 	}()
 
 	return nil
+}
+
+func firstEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (a *App) stopDaemon() {

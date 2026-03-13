@@ -83,4 +83,3 @@ func (b *SSEBroker) Broadcast(event string, payload any) {
 		}
 	}
 }
-

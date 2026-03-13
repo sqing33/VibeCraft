@@ -2,8 +2,8 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  cmd = "go build -o ./tmp/vibe-tree-daemon ./cmd/vibe-tree-daemon"
-  entrypoint = ["./tmp/vibe-tree-daemon"]
+  cmd = "go build -o ./tmp/vibecraft-daemon ./cmd/vibecraft-daemon"
+  entrypoint = ["./tmp/vibecraft-daemon"]
   include_ext = ["go", "mod", "sum"]
   exclude_dir = ["tmp", "vendor"]
   stop_on_error = true

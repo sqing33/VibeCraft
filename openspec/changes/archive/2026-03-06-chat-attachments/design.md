@@ -1,6 +1,6 @@
 ## Context
 
-`vibe-tree` 当前聊天链路是 SDK-first：前端通过 `POST /api/v1/chat/sessions/:id/turns` 提交 JSON 文本，后端先把 user/assistant message 写入 SQLite，再分别调用 OpenAI Responses 和 Anthropic Messages SDK 进行流式生成。现有实现依赖 provider anchor（OpenAI `previous_response_id` / Anthropic `container`）与本地 summary + recent 的重建路径，但整个链路默认“输入一定是纯文本”，消息模型与 store 也没有附件关系。
+`vibecraft` 当前聊天链路是 SDK-first：前端通过 `POST /api/v1/chat/sessions/:id/turns` 提交 JSON 文本，后端先把 user/assistant message 写入 SQLite，再分别调用 OpenAI Responses 和 Anthropic Messages SDK 进行流式生成。现有实现依赖 provider anchor（OpenAI `previous_response_id` / Anthropic `container`）与本地 summary + recent 的重建路径，但整个链路默认“输入一定是纯文本”，消息模型与 store 也没有附件关系。
 
 本次变更是跨 UI、HTTP API、chat manager、store schema 与磁盘存储的交叉改动，同时要求保持现有纯文本会话兼容、WebSocket 事件兼容，以及对 OpenAI / Anthropic 两条 SDK 路径都提供 provider-native 的多模态输入。
 

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
+	"vibecraft/backend/internal/config"
 )
 
 func TestHydrateRuntimeSettings_DerivesRuntimeModelsFromLegacyConfig(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	openai_responses "github.com/openai/openai-go/responses"
 
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/store"
 )
 
 func joinProviderInstructions(base string, summary *string) string {

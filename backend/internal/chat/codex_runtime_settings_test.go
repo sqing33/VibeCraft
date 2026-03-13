@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/store"
 )
 
 func TestResolveCodexRuntimeSettings_InjectsSelectedMCPsAndSkills(t *testing.T) {
@@ -47,7 +47,7 @@ func TestResolveCodexRuntimeSettings_InjectsSelectedMCPsAndSkills(t *testing.T) 
 	}
 
 	sess := store.ChatSession{WorkspacePath: ".", MCPServerIDs: []string{"filesystem"}}
-	spec := runner.RunSpec{Cwd: ".", Env: map[string]string{"VIBE_TREE_SYSTEM_PROMPT": "You are Codex.", "VIBE_TREE_CLI_TOOL_ID": "codex"}}
+	spec := runner.RunSpec{Cwd: ".", Env: map[string]string{"VIBECRAFT_SYSTEM_PROMPT": "You are Codex.", "VIBECRAFT_CLI_TOOL_ID": "codex"}}
 	runtime, err := resolveCodexRuntimeSettings(sess, spec, "ui-expert", "codex")
 	if err != nil {
 		t.Fatalf("resolve runtime settings: %v", err)
@@ -95,7 +95,7 @@ func TestResolveCodexRuntimeSettings_ExcludesDisabledSkills(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	runtime, err := resolveCodexRuntimeSettings(store.ChatSession{WorkspacePath: "."}, runner.RunSpec{Cwd: ".", Env: map[string]string{"VIBE_TREE_SYSTEM_PROMPT": "You are Codex."}}, "ui-expert", "codex")
+	runtime, err := resolveCodexRuntimeSettings(store.ChatSession{WorkspacePath: "."}, runner.RunSpec{Cwd: ".", Env: map[string]string{"VIBECRAFT_SYSTEM_PROMPT": "You are Codex."}}, "ui-expert", "codex")
 	if err != nil {
 		t.Fatalf("resolve runtime settings: %v", err)
 	}

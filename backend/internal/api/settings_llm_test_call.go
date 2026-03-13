@@ -11,9 +11,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/openaicompat"
-	"vibe-tree/backend/internal/runner"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/openaicompat"
+	"vibecraft/backend/internal/runner"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	anthropic_option "github.com/anthropics/anthropic-sdk-go/option"

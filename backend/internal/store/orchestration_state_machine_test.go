@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"vibe-tree/backend/internal/id"
+	"vibecraft/backend/internal/id"
 )
 
 func TestCreateOrchestration_MaterializesFirstRound(t *testing.T) {

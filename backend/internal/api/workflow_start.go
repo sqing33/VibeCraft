@@ -14,13 +14,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"vibe-tree/backend/internal/cliruntime"
-	"vibe-tree/backend/internal/dag"
-	"vibe-tree/backend/internal/execution"
-	"vibe-tree/backend/internal/executionflow"
-	"vibe-tree/backend/internal/logx"
-	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/cliruntime"
+	"vibecraft/backend/internal/dag"
+	"vibecraft/backend/internal/execution"
+	"vibecraft/backend/internal/executionflow"
+	"vibecraft/backend/internal/logx"
+	"vibecraft/backend/internal/paths"
+	"vibecraft/backend/internal/store"
 )
 
 type startWorkflowRequest struct {
@@ -284,7 +284,7 @@ func defaultMasterPromptTemplate(workflowID string, knownExperts map[string]stru
 	sort.Strings(expertIDs)
 	known := strings.Join(expertIDs, ", ")
 
-	return fmt.Sprintf(`You are the workflow master planner for vibe-tree.
+	return fmt.Sprintf(`You are the workflow master planner for vibecraft.
 
 Output MUST be a single JSON object (no markdown, no extra text) that follows this shape:
 {

@@ -8,7 +8,7 @@
 2. 如果有，CLI 是如何被启动的（直接进程 / PTY / SDK / SSE / WebSocket / app server 等）；
 3. 实际消费的输出粒度是什么（逐 token / 逐字符 / 逐段 delta / item 完成态 / 文件日志 tail / 轮询）；
 4. 为什么用户感知会更流畅；
-5. 与当前仓库 vibe-tree 的 Codex CLI 聊天实现相比，关键差异是什么；
+5. 与当前仓库 vibecraft 的 Codex CLI 聊天实现相比，关键差异是什么；
 6. 如果项目与该问题无关，也要明确说明“无相关实现或证据不足”。
 
 要求：
@@ -28,7 +28,7 @@
 | stream-all-20260308-034813 | split-task | w02 | 如果有，CLI 是如何被启动的（直接进程 / PTY / SDK / SSE / WebSocket / app server 等）； | 如果有，CLI 是如何被启动的（直接进程 / PTY / SDK / SSE / WebSocket / app server 等）； | - | main | - | . | - | planned | last | .codex/skills/tmux-codex-orchestrator/.results/stream-all-20260308-034813/w02.md | subtasks=1 |
 | stream-all-20260308-034813 | split-task | w03 | 实际消费的输出粒度是什么（逐 token / 逐字符 / 逐段 delta / item 完成态 / 文件日志 tail / 轮询）； | 实际消费的输出粒度是什么（逐 token / 逐字符 / 逐段 delta / item 完成态 / 文件日志 tail / 轮询）； | - | main | - | . | - | planned | last | .codex/skills/tmux-codex-orchestrator/.results/stream-all-20260308-034813/w03.md | subtasks=1 |
 | stream-all-20260308-034813 | split-task | w04 | 为什么用户感知会更流畅； | 为什么用户感知会更流畅； | - | main | - | . | - | planned | last | .codex/skills/tmux-codex-orchestrator/.results/stream-all-20260308-034813/w04.md | subtasks=1 |
-| stream-all-20260308-034813 | split-task | w05 | 与当前仓库 vibe-tree 的 Codex CLI 聊天实现相比，关键差异是什么； | 与当前仓库 vibe-tree 的 Codex CLI 聊天实现相比，关键差异是什么； | - | main | - | . | - | planned | last | .codex/skills/tmux-codex-orchestrator/.results/stream-all-20260308-034813/w05.md | subtasks=1 |
+| stream-all-20260308-034813 | split-task | w05 | 与当前仓库 vibecraft 的 Codex CLI 聊天实现相比，关键差异是什么； | 与当前仓库 vibecraft 的 Codex CLI 聊天实现相比，关键差异是什么； | - | main | - | . | - | planned | last | .codex/skills/tmux-codex-orchestrator/.results/stream-all-20260308-034813/w05.md | subtasks=1 |
 | stream-all-20260308-034813 | split-task | w06 | 如果项目与该问题无关，也要明确说明“无相关实现或证据不足”。 | 如果项目与该问题无关，也要明确说明“无相关实现或证据不足”。 | - | main | - | . | - | planned | last | .codex/skills/tmux-codex-orchestrator/.results/stream-all-20260308-034813/w06.md | subtasks=1 |
 | stream-all-20260308-034813 | split-task | w07 | 每个 worker 负责一个项目； | 每个 worker 负责一个项目； | - | main | - | . | - | planned | last | .codex/skills/tmux-codex-orchestrator/.results/stream-all-20260308-034813/w07.md | subtasks=1 |
 | stream-all-20260308-034813 | split-task | w08 | 只读分析，不修改任何文件； | 只读分析，不修改任何文件； | - | main | - | . | - | planned | last | .codex/skills/tmux-codex-orchestrator/.results/stream-all-20260308-034813/w08.md | subtasks=1 |

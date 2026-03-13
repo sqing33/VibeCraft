@@ -113,7 +113,7 @@ func resolveGitHubRef(ctx context.Context, owner, repo, ref string) (string, str
 	if err != nil {
 		return "", ""
 	}
-	req.Header.Set("User-Agent", "vibe-tree")
+	req.Header.Set("User-Agent", "vibecraft")
 	if token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -149,7 +149,7 @@ func fetchGitHubZip(ctx context.Context, owner, repo, ref, destDir string) error
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "vibe-tree")
+	req.Header.Set("User-Agent", "vibecraft")
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {

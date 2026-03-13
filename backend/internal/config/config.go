@@ -9,6 +9,11 @@ import (
 	"strconv"
 )
 
+const (
+	runtimeName       = "vibecraft"
+	legacyRuntimeName = "vibe-tree"
+)
+
 type Config struct {
 	Server        ServerConfig          `json:"server"`
 	Execution     ExecutionConfig       `json:"execution"`
@@ -186,9 +191,9 @@ func Default() Config {
 			MaxConcurrency: 6,
 			KillGraceMs:    1500,
 		},
-		CLITools:   defaultCLITools(),
-		MCPGateway: &MCPGatewaySettings{Enabled: false, IdleTTLSeconds: 600},
-		APISources: nil,
+		CLITools:      defaultCLITools(),
+		MCPGateway:    &MCPGatewaySettings{Enabled: false, IdleTTLSeconds: 600},
+		APISources:    nil,
 		RuntimeModels: nil,
 		Experts: []ExpertConfig{
 			{
@@ -199,7 +204,7 @@ func Default() Config {
 				RuntimeKind:   "cli",
 				CLIFamily:     "codex",
 				Model:         "gpt-5-codex",
-				SystemPrompt:  "You are the workflow master planner for vibe-tree. Output MUST be a single JSON object (no markdown, no extra text).",
+				SystemPrompt:  "You are the workflow master planner for vibecraft. Output MUST be a single JSON object (no markdown, no extra text).",
 				Env:           map[string]string{},
 				OutputSchema:  "dag_v1",
 				// 30min：AI 节点默认超时（可按节点覆盖）。
@@ -288,7 +293,7 @@ func (c Config) Addr() string {
 }
 
 // Path 功能：解析配置文件路径（XDG 优先）。
-// 参数/返回：返回 `~/.config/vibe-tree/config.json`（或 $XDG_CONFIG_HOME）下的路径。
+// 参数/返回：返回 `~/.config/vibecraft/config.json`（或 $XDG_CONFIG_HOME）下的路径。
 // 失败场景：无法解析用户 home 目录时返回 error。
 // 副作用：读取环境变量与 home 目录信息。
 func Path() (string, error) {
@@ -300,7 +305,7 @@ func Path() (string, error) {
 		}
 		xdgConfigHome = filepath.Join(home, ".config")
 	}
-	return filepath.Join(xdgConfigHome, "vibe-tree", "config.json"), nil
+	return filepath.Join(xdgConfigHome, runtimeName, "config.json"), nil
 }
 
 // Load 功能：读取 config.json 并合并环境变量覆盖，产出最终运行配置。
@@ -315,7 +320,8 @@ func Load() (Config, string, error) {
 
 	cfg := Default()
 
-	if b, err := os.ReadFile(path); err != nil {
+	readPath := resolveExistingConfigPath(path)
+	if b, err := os.ReadFile(readPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			applyEnvOverrides(&cfg)
 			if err := HydrateRuntimeSettings(&cfg); err != nil {
@@ -336,10 +342,10 @@ func Load() (Config, string, error) {
 			}
 			return cfg, path, nil
 		}
-		return Config{}, "", fmt.Errorf("read config %s: %w", path, err)
+		return Config{}, "", fmt.Errorf("read config %s: %w", readPath, err)
 	} else if len(b) > 0 {
 		if err := json.Unmarshal(b, &cfg); err != nil {
-			return Config{}, "", fmt.Errorf("parse config %s: %w", path, err)
+			return Config{}, "", fmt.Errorf("parse config %s: %w", readPath, err)
 		}
 	}
 
@@ -382,7 +388,8 @@ func LoadPersisted() (Config, string, error) {
 
 	cfg := Default()
 
-	if b, err := os.ReadFile(path); err != nil {
+	readPath := resolveExistingConfigPath(path)
+	if b, err := os.ReadFile(readPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if err := HydrateRuntimeSettings(&cfg); err != nil {
 				return Config{}, "", err
@@ -402,10 +409,10 @@ func LoadPersisted() (Config, string, error) {
 			}
 			return cfg, path, nil
 		}
-		return Config{}, "", fmt.Errorf("read config %s: %w", path, err)
+		return Config{}, "", fmt.Errorf("read config %s: %w", readPath, err)
 	} else if len(b) > 0 {
 		if err := json.Unmarshal(b, &cfg); err != nil {
-			return Config{}, "", fmt.Errorf("parse config %s: %w", path, err)
+			return Config{}, "", fmt.Errorf("parse config %s: %w", readPath, err)
 		}
 	}
 
@@ -430,22 +437,42 @@ func LoadPersisted() (Config, string, error) {
 }
 
 func applyEnvOverrides(cfg *Config) {
-	if host := os.Getenv("VIBE_TREE_HOST"); host != "" {
+	if host := firstEnv("VIBECRAFT_HOST", "VIBE_TREE_HOST"); host != "" {
 		cfg.Server.Host = host
 	}
-	if portStr := os.Getenv("VIBE_TREE_PORT"); portStr != "" {
+	if portStr := firstEnv("VIBECRAFT_PORT", "VIBE_TREE_PORT"); portStr != "" {
 		if port, err := strconv.Atoi(portStr); err == nil && port > 0 && port <= 65535 {
 			cfg.Server.Port = port
 		}
 	}
-	if raw := os.Getenv("VIBE_TREE_MAX_CONCURRENCY"); raw != "" {
+	if raw := firstEnv("VIBECRAFT_MAX_CONCURRENCY", "VIBE_TREE_MAX_CONCURRENCY"); raw != "" {
 		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
 			cfg.Execution.MaxConcurrency = v
 		}
 	}
-	if raw := os.Getenv("VIBE_TREE_KILL_GRACE_MS"); raw != "" {
+	if raw := firstEnv("VIBECRAFT_KILL_GRACE_MS", "VIBE_TREE_KILL_GRACE_MS"); raw != "" {
 		if v, err := strconv.Atoi(raw); err == nil && v >= 0 {
 			cfg.Execution.KillGraceMs = v
 		}
 	}
+}
+
+func resolveExistingConfigPath(currentPath string) string {
+	if _, err := os.Stat(currentPath); err == nil {
+		return currentPath
+	}
+	legacyPath := filepath.Join(filepath.Dir(filepath.Dir(currentPath)), legacyRuntimeName, "config.json")
+	if _, err := os.Stat(legacyPath); err == nil {
+		return legacyPath
+	}
+	return currentPath
+}
+
+func firstEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := os.Getenv(key); value != "" {
+			return value
+		}
+	}
+	return ""
 }

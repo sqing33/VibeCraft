@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/store"
 )
 
 type fakeCodexClient struct {
@@ -227,7 +227,7 @@ func TestManagerRunTurnReusesWarmCodexClient(t *testing.T) {
 	mgr := NewManager(st, nil, Options{})
 	defer func() { _ = mgr.Close() }()
 
-	runSpec := runner.RunSpec{Command: "codex", Cwd: sess.WorkspacePath, Env: map[string]string{"VIBE_TREE_CLI_FAMILY": "codex", "VIBE_TREE_MODEL": "gpt-5"}}
+	runSpec := runner.RunSpec{Command: "codex", Cwd: sess.WorkspacePath, Env: map[string]string{"VIBECRAFT_CLI_FAMILY": "codex", "VIBECRAFT_MODEL": "gpt-5"}}
 	if _, err := mgr.RunTurn(context.Background(), TurnParams{Session: sess, ExpertID: "codex", UserInput: "first", ModelInput: "first", Spec: runSpec, Provider: "cli", Model: "gpt-5"}); err != nil {
 		t.Fatalf("run first turn: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestManagerReleaseSessionRuntimeClosesWarmClient(t *testing.T) {
 	mgr := NewManager(st, nil, Options{})
 	defer func() { _ = mgr.Close() }()
 
-	runSpec := runner.RunSpec{Command: "codex", Cwd: sess.WorkspacePath, Env: map[string]string{"VIBE_TREE_CLI_FAMILY": "codex", "VIBE_TREE_MODEL": "gpt-5"}}
+	runSpec := runner.RunSpec{Command: "codex", Cwd: sess.WorkspacePath, Env: map[string]string{"VIBECRAFT_CLI_FAMILY": "codex", "VIBECRAFT_MODEL": "gpt-5"}}
 	if _, err := mgr.RunTurn(context.Background(), TurnParams{Session: sess, ExpertID: "codex", UserInput: "first", ModelInput: "first", Spec: runSpec, Provider: "cli", Model: "gpt-5"}); err != nil {
 		t.Fatalf("run turn: %v", err)
 	}

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/store"
 )
 
 func TestMigrateV3_ChatTablesAvailable(t *testing.T) {

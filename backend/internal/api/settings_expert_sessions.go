@@ -11,11 +11,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/expert"
-	"vibe-tree/backend/internal/expertbuilder"
-	"vibe-tree/backend/internal/skillcatalog"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/expert"
+	"vibecraft/backend/internal/expertbuilder"
+	"vibecraft/backend/internal/skillcatalog"
+	"vibecraft/backend/internal/store"
 )
 
 type expertBuilderSessionItem struct {

@@ -12,31 +12,31 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
-	"vibe-tree/backend/internal/chat"
-	"vibe-tree/backend/internal/codexhistory"
-	"vibe-tree/backend/internal/execution"
-	"vibe-tree/backend/internal/expert"
-	iflowcli "vibe-tree/backend/internal/iflow"
-	"vibe-tree/backend/internal/mcpgateway"
-	"vibe-tree/backend/internal/orchestration"
-	"vibe-tree/backend/internal/repolib"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/store"
-	"vibe-tree/backend/internal/ws"
+	"vibecraft/backend/internal/chat"
+	"vibecraft/backend/internal/codexhistory"
+	"vibecraft/backend/internal/execution"
+	"vibecraft/backend/internal/expert"
+	iflowcli "vibecraft/backend/internal/iflow"
+	"vibecraft/backend/internal/mcpgateway"
+	"vibecraft/backend/internal/orchestration"
+	"vibecraft/backend/internal/repolib"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/store"
+	"vibecraft/backend/internal/ws"
 )
 
 type Deps struct {
-	Executions    *execution.Manager
-	Hub           *ws.Hub
-	Store         *store.Store
-	Experts       *expert.Registry
-	Chat          *chat.Manager
-	CodexHistory  *codexhistory.Service
-	MCPGateway    *mcpgateway.Manager
-	Orchestration *orchestration.Manager
-	RepoLibrary   *repolib.Service
+	Executions        *execution.Manager
+	Hub               *ws.Hub
+	Store             *store.Store
+	Experts           *expert.Registry
+	Chat              *chat.Manager
+	CodexHistory      *codexhistory.Service
+	MCPGateway        *mcpgateway.Manager
+	Orchestration     *orchestration.Manager
+	RepoLibrary       *repolib.Service
 	RepoLibraryStream *repolib.SSEBroker
-	IFLOWAuth     *iflowcli.BrowserAuthManager
+	IFLOWAuth         *iflowcli.BrowserAuthManager
 }
 
 // Register 功能：注册 HTTP/WS 路由到 `/api/v1` 路由组。
@@ -184,7 +184,7 @@ func demoSpec() runner.RunSpec {
 		Command: "bash",
 		Args: []string{
 			"-lc",
-			`printf '\033[36mvibe-tree demo execution\033[0m\n'; for i in {1..200}; do printf '\033[32m[%03d]\033[0m hello\n' "$i"; sleep 0.05; done`,
+			`printf '\033[36mvibecraft demo execution\033[0m\n'; for i in {1..200}; do printf '\033[32m[%03d]\033[0m hello\n' "$i"; sleep 0.05; done`,
 		},
 	}
 }

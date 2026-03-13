@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"vibe-tree/backend/internal/skillcatalog"
+	"vibecraft/backend/internal/skillcatalog"
 )
 
 const defaultMCPGatewayIdleTTLSeconds = 600

@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"vibe-tree/backend/internal/repolib/searchdb"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/repolib/searchdb"
+	"vibecraft/backend/internal/store"
 )
 
 func TestCollapseSearchHitsToCardsMergesSourcesAndNormalizesDisplayScore(t *testing.T) {

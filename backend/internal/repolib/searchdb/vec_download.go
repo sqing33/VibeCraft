@@ -39,8 +39,8 @@ func (s *Service) ensureVecExtension(ctx context.Context) (string, error) {
 		return destPath, nil
 	}
 
-	if !envBool("VIBE_TREE_SQLITE_VEC_ALLOW_DOWNLOAD", true) {
-		return "", fmt.Errorf("sqlite-vec missing at %s (set VIBE_TREE_SQLITE_VEC_PATH or VIBE_TREE_SQLITE_VEC_ALLOW_DOWNLOAD=1)", destPath)
+	if !envBool("VIBECRAFT_SQLITE_VEC_ALLOW_DOWNLOAD", true) {
+		return "", fmt.Errorf("sqlite-vec missing at %s (set VIBECRAFT_SQLITE_VEC_PATH or VIBECRAFT_SQLITE_VEC_ALLOW_DOWNLOAD=1)", destPath)
 	}
 
 	url := fmt.Sprintf("https://github.com/asg017/sqlite-vec/releases/download/v%s/%s", sqliteVecVersion, assetName)
@@ -77,7 +77,7 @@ func downloadAndExtractSingleFileTarGz(ctx context.Context, url string, expected
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "vibe-tree-searchdb")
+	req.Header.Set("User-Agent", "vibecraft-searchdb")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err

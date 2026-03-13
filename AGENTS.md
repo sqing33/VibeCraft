@@ -1,4 +1,4 @@
-# vibe-tree AGENTS 使用说明
+# vibecraft AGENTS 使用说明
 
 本文件只负责定义「该用哪个 skill」与「如何协作」，具体规范细节以各 skill 的 `SKILL.md` 为准。
 
@@ -22,7 +22,7 @@
 | `opsx:apply`          | 按 OpenSpec change 中的 tasks 实施开发                   | `.claude/skills/openspec-apply-change/SKILL.md`              |
 | `opsx:archive`        | 完成变更后归档，将 delta specs 合并到基线                | `.claude/skills/openspec-archive-change/SKILL.md`            |
 | `opsx:explore`        | 探索想法、调查问题、厘清需求（编码前思考）               | `.claude/skills/openspec-explore/SKILL.md`                   |
-| `vibe-tree-standards` | 需要统一日志、注释、提交命名；或做功能定位时             | `.codex/skills/vibe-tree-standards/SKILL.md`                 |
+| `vibecraft-standards` | 需要统一日志、注释、提交命名；或做功能定位时             | `.codex/skills/vibecraft-standards/SKILL.md`                 |
 | `tmux-codex-orchestrator` | 需要并行拆分任务、同题多解，或并发启动多个完整 Codex worker 时 | `.codex/skills/tmux-codex-orchestrator/SKILL.md`         |
 | `worktree-lite`       | 当前位于主分支/共享主工作区且需要写入时，先创建新 worktree 再改；若当前已在 `vibe-kanban` 相关 worktree/分支中，则不使用 | `.codex/skills/worktree-lite/SKILL.md`                       |
 | `expert-creator`      | 需要把自然语言需求转成专家配置草稿，或设计新的专家模板 | `.codex/skills/expert-creator/SKILL.md`                      |
@@ -32,7 +32,7 @@
 
 ## 3. 选择与执行规则
 
-1. 用户点名某个 skill（如 `$vibe-tree-standards`）时，必须使用该 skill。
+1. 用户点名某个 skill（如 `$vibecraft-standards`）时，必须使用该 skill。
 2. 任务明显匹配 skill 描述时，必须自动启用对应 skill。
 3. 多个 skill 同时匹配时，使用「最小覆盖集合」，并声明执行顺序。
 4. 若 skill 文件缺失或不可读，需说明问题并采用最接近的回退方案继续执行。

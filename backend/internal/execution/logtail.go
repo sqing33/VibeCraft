@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"vibe-tree/backend/internal/paths"
+	"vibecraft/backend/internal/paths"
 )
 
 const maxTailBytes int64 = 5 * 1024 * 1024

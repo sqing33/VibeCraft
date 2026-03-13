@@ -12,7 +12,7 @@ export type Route =
 
 export function parseRouteFromHash(hash: string): Route {
   const raw = hash ?? ''
-  if (raw === '' || raw === '#' || raw === '#/') return { name: 'orchestrations' }
+  if (raw === '' || raw === '#' || raw === '#/') return { name: 'chat' }
   const chatMatch = raw.match(/^#\/chat(?:\/([^/]+))?$/)
   if (chatMatch) {
     return {
@@ -48,7 +48,7 @@ export function parseRouteFromHash(hash: string): Route {
   if (/^#\/orchestrations$/.test(raw)) return { name: 'orchestrations' }
   if (/^#\/(legacy-workflows|workflows)$/.test(raw)) return { name: 'workflows' }
   const m = raw.match(/^#\/workflows\/([^/]+)$/)
-  if (!m) return { name: 'orchestrations' }
+  if (!m) return { name: 'chat' }
   return { name: 'workflow_detail', workflowId: decodeURIComponent(m[1]) }
 }
 
@@ -70,12 +70,16 @@ export function goToOrchestration(orchestrationId: string) {
   window.location.hash = `#/orchestrations/${encodeURIComponent(orchestrationId)}`
 }
 
+export function goToOrchestrations() {
+  window.location.hash = '#/orchestrations'
+}
+
 export function goToWorkflow(workflowId: string) {
   window.location.hash = `#/workflows/${encodeURIComponent(workflowId)}`
 }
 
 export function goHome() {
-  window.location.hash = '#/orchestrations'
+  window.location.hash = '#/chat'
 }
 
 export function goToLegacyWorkflows() {

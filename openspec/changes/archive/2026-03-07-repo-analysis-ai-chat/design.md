@@ -1,6 +1,6 @@
 ## Context
 
-当前 `vibe-tree` 已经把 Chat 主路径切换到 CLI runtime，并且 Chat 页面支持 CLI tool/model 选择；与此同时，Repo Library 仍然沿用“Python 脚本生成报告 + 抽卡片/建索引”的链路。问题不在于后处理，而在于“分析正文”没有复用真实 AI Chat，从而导致报告模板化、内容空泛、不可继续对话。
+当前 `vibecraft` 已经把 Chat 主路径切换到 CLI runtime，并且 Chat 页面支持 CLI tool/model 选择；与此同时，Repo Library 仍然沿用“Python 脚本生成报告 + 抽卡片/建索引”的链路。问题不在于后处理，而在于“分析正文”没有复用真实 AI Chat，从而导致报告模板化、内容空泛、不可继续对话。
 
 目标是让 Repo Library 的“真实分析”通过 AI Chat 完成，同时保留：
 - 自动化：用户只需点击一次创建分析任务

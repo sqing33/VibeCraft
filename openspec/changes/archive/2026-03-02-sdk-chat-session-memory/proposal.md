@@ -1,6 +1,6 @@
 ## Why
 
-Current SDK-driven calls in vibe-tree are one-shot and stateless. Users cannot continue long conversations like Codex CLI / Claude Code CLI, and context length can eventually overflow without automatic compaction.
+Current SDK-driven calls in vibecraft are one-shot and stateless. Users cannot continue long conversations like Codex CLI / Claude Code CLI, and context length can eventually overflow without automatic compaction.
 
 ## What Changes
 

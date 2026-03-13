@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
+	"vibecraft/backend/internal/config"
 )
 
 func TestExpertSettings_SaveCustomExpert(t *testing.T) {

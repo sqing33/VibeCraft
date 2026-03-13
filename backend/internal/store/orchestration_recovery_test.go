@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"vibe-tree/backend/internal/id"
+	"vibecraft/backend/internal/id"
 )
 
 func TestRecoverOrchestrationsAfterRestart_MarksRunningAgentRunsFailed(t *testing.T) {
@@ -15,7 +15,7 @@ func TestRecoverOrchestrationsAfterRestart_MarksRunningAgentRunsFailed(t *testin
 		Goal:          "analyze and change",
 		WorkspacePath: ".",
 		Round: PlannedRound{
-			Goal: "round-1",
+			Goal:      "round-1",
 			AgentRuns: []PlannedAgentRun{{Role: "implementer", Title: "change", Goal: "change", ExpertID: "demo", Intent: "modify", WorkspaceMode: "shared_workspace", WorkspacePath: "."}},
 		},
 	})

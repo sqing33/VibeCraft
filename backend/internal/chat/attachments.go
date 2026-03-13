@@ -16,9 +16,9 @@ import (
 	openai "github.com/openai/openai-go"
 	openai_responses "github.com/openai/openai-go/responses"
 
-	"vibe-tree/backend/internal/id"
-	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/id"
+	"vibecraft/backend/internal/paths"
+	"vibecraft/backend/internal/store"
 )
 
 const (

@@ -7,14 +7,14 @@ import (
 	"sync"
 	"time"
 
-	"vibe-tree/backend/internal/cliruntime"
-	"vibe-tree/backend/internal/execution"
-	"vibe-tree/backend/internal/executionflow"
-	"vibe-tree/backend/internal/expert"
-	"vibe-tree/backend/internal/logx"
-	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/store"
-	"vibe-tree/backend/internal/ws"
+	"vibecraft/backend/internal/cliruntime"
+	"vibecraft/backend/internal/execution"
+	"vibecraft/backend/internal/executionflow"
+	"vibecraft/backend/internal/expert"
+	"vibecraft/backend/internal/logx"
+	"vibecraft/backend/internal/paths"
+	"vibecraft/backend/internal/store"
+	"vibecraft/backend/internal/ws"
 )
 
 type Scheduler struct {

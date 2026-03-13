@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/store"
 )
 
 // SyncAnalysisFromChat 功能：将关联分析 Chat 的最新 assistant 回复同步回 Repo Library report/cards/search。
@@ -145,4 +145,3 @@ func firstNonEmptyStringPtr(value *string, fallback string) string {
 	}
 	return fallback
 }
-

@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
-	"vibe-tree/backend/internal/cliruntime"
-	"vibe-tree/backend/internal/execution"
-	"vibe-tree/backend/internal/executionflow"
-	"vibe-tree/backend/internal/expert"
-	"vibe-tree/backend/internal/logx"
-	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/store"
-	"vibe-tree/backend/internal/workspace"
-	"vibe-tree/backend/internal/ws"
+	"vibecraft/backend/internal/cliruntime"
+	"vibecraft/backend/internal/execution"
+	"vibecraft/backend/internal/executionflow"
+	"vibecraft/backend/internal/expert"
+	"vibecraft/backend/internal/logx"
+	"vibecraft/backend/internal/paths"
+	"vibecraft/backend/internal/store"
+	"vibecraft/backend/internal/workspace"
+	"vibecraft/backend/internal/ws"
 )
 
 type Manager struct {
@@ -422,7 +422,7 @@ func chooseAgentExpert(reg *expert.Registry, workspace, prompt string) string {
 }
 
 func buildAgentPrompt(run store.AgentRun) string {
-	return fmt.Sprintf("你是 vibe-tree 的 %s agent。\n目标：%s\n工作目录：%s\n请输出简洁的执行摘要、关键发现以及下一步建议。", run.Role, run.Goal, run.WorkspacePath)
+	return fmt.Sprintf("你是 vibecraft 的 %s agent。\n目标：%s\n工作目录：%s\n请输出简洁的执行摘要、关键发现以及下一步建议。", run.Role, run.Goal, run.WorkspacePath)
 }
 
 func mustExecutionLogPath(executionID string) string {

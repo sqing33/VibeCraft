@@ -1,7 +1,7 @@
 ## 1. Dotenv Core
 
-- [x] 1.1 Add `backend/internal/dotenv` module with repo-root `.env` discovery, `VIBE_TREE_DOTENV_PATH`, and `VIBE_TREE_DOTENV=0`
-- [x] 1.2 Integrate dotenv loading into `backend/cmd/vibe-tree-daemon/main.go` before `config.Load()` with safe logging (no values)
+- [x] 1.1 Add `backend/internal/dotenv` module with repo-root `.env` discovery, `VIBECRAFT_DOTENV_PATH`, and `VIBECRAFT_DOTENV=0`
+- [x] 1.2 Integrate dotenv loading into `backend/cmd/vibecraft-daemon/main.go` before `config.Load()` with safe logging (no values)
 - [x] 1.3 Add Go dependency for dotenv parsing (`github.com/joho/godotenv`)
 
 ## 2. Tests

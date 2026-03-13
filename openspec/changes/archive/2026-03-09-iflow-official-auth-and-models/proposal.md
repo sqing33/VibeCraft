@@ -14,7 +14,7 @@ The current iFlow integration incorrectly reuses the generic OpenAI-compatible m
   - auto-select the first auth option
   - capture the real OAuth URL printed by the terminal
   - accept pasted authorization codes and finish login
-- Persist browser auth inside a daemon-managed iFlow home so vibe-tree can reuse it without depending on the user’s global `~/.iflow`.
+- Persist browser auth inside a daemon-managed iFlow home so vibecraft can reuse it without depending on the user’s global `~/.iflow`.
 - Inject iFlow runtime data per turn:
   - official auth env
   - selected iFlow model

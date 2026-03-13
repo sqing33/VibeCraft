@@ -96,3 +96,9 @@ When workflow planning or AI worker execution resolves to a primary CLI tool exp
 - **WHEN** workflow planning runs through the codex tool expert
 - **THEN** the execution uses the default model configured for the `codex` CLI tool
 
+### Requirement: Workflow-facing path defaults MUST use the current runtime prefix
+Workflow-facing documentation, diagnostics, and default execution path references MUST use the current runtime prefix instead of legacy project naming.
+
+#### Scenario: User checks workflow-related runtime paths
+- **WHEN** the user inspects workflow diagnostics, logs, or documentation after the rename
+- **THEN** the referenced default workflow log and data paths use the current runtime prefix

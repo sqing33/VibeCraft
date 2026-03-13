@@ -16,12 +16,12 @@ import (
 	openai_responses "github.com/openai/openai-go/responses"
 	openai_shared "github.com/openai/openai-go/shared"
 
-	"vibe-tree/backend/internal/cliruntime"
-	"vibe-tree/backend/internal/mcpgateway"
-	"vibe-tree/backend/internal/openaicompat"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/store"
-	"vibe-tree/backend/internal/ws"
+	"vibecraft/backend/internal/cliruntime"
+	"vibecraft/backend/internal/mcpgateway"
+	"vibecraft/backend/internal/openaicompat"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/store"
+	"vibecraft/backend/internal/ws"
 )
 
 const (
@@ -446,11 +446,11 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 		if runSpec.Env == nil {
 			runSpec.Env = map[string]string{}
 		}
-		runSpec.Env["VIBE_TREE_PROMPT"] = prompt
+		runSpec.Env["VIBECRAFT_PROMPT"] = prompt
 		if resumeSessionID != "" {
-			runSpec.Env["VIBE_TREE_RESUME_SESSION_ID"] = resumeSessionID
+			runSpec.Env["VIBECRAFT_RESUME_SESSION_ID"] = resumeSessionID
 		} else {
-			delete(runSpec.Env, "VIBE_TREE_RESUME_SESSION_ID")
+			delete(runSpec.Env, "VIBECRAFT_RESUME_SESSION_ID")
 		}
 		preparedRunSpec, prepErr := m.prepareCLIRuntimeRunSpec(sess, runSpec, expertID)
 		if prepErr != nil {
@@ -468,7 +468,7 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 			return "", "", "", err
 		}
 		output := handle.Output()
-		toolID := strings.TrimSpace(runSpec.Env["VIBE_TREE_CLI_FAMILY"])
+		toolID := strings.TrimSpace(runSpec.Env["VIBECRAFT_CLI_FAMILY"])
 		parser := newCLIStreamParser(toolID)
 		assistantBuf := strings.Builder{}
 		thinkingBuf := strings.Builder{}
@@ -645,8 +645,8 @@ func (m *Manager) runLegacyCLITurn(ctx context.Context, sess store.ChatSession, 
 	_, _ = m.store.UpdateChatSessionDefaults(ctx, store.UpdateChatSessionDefaultsParams{
 		SessionID:       sess.ID,
 		ExpertID:        expertID,
-		CLIToolID:       resolvedTurnOptionPointer(cliToolID, spec.Env["VIBE_TREE_CLI_TOOL_ID"], sess.CLIToolID),
-		ModelID:         resolvedTurnOptionPointer(modelID, spec.Env["VIBE_TREE_MODEL_ID"], sess.ModelID),
+		CLIToolID:       resolvedTurnOptionPointer(cliToolID, spec.Env["VIBECRAFT_CLI_TOOL_ID"], sess.CLIToolID),
+		ModelID:         resolvedTurnOptionPointer(modelID, spec.Env["VIBECRAFT_MODEL_ID"], sess.ModelID),
 		ReasoningEffort: reasoningEffort,
 		CLISessionID:    pointerOrNilString(cliSessionID),
 		Provider:        provider,

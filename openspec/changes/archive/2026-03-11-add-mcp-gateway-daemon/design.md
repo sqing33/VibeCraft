@@ -1,6 +1,6 @@
 ## Context
 
-`vibe-tree` 当前已具备 MCP 注册表、默认启用集合和 chat session 级 MCP 选择，但运行时形态仍是“把 MCP 配置直接塞给某些 CLI”。这导致几个问题：一是不同 CLI 的注入方式不一致；二是对话启动时经常找不到已经运行的 MCP；三是 session 在对话中修改 MCP 选择后，暖运行时和已建立线程不一定能立即使用最新集合。仓库现有 daemon 已是常驻进程、具备 chat runtime 池化和 settings API，因此最合适的落点是在 daemon 内提供统一的 MCP Gateway。
+`vibecraft` 当前已具备 MCP 注册表、默认启用集合和 chat session 级 MCP 选择，但运行时形态仍是“把 MCP 配置直接塞给某些 CLI”。这导致几个问题：一是不同 CLI 的注入方式不一致；二是对话启动时经常找不到已经运行的 MCP；三是 session 在对话中修改 MCP 选择后，暖运行时和已建立线程不一定能立即使用最新集合。仓库现有 daemon 已是常驻进程、具备 chat runtime 池化和 settings API，因此最合适的落点是在 daemon 内提供统一的 MCP Gateway。
 
 ## Goals / Non-Goals
 
@@ -18,7 +18,7 @@
 ## Decisions
 
 ### 1. 在 Go daemon 内实现原生 MCP Gateway
-- 选择在 `vibe-tree-daemon` 内新增 gateway 模块，而不是额外引入 Node sidecar。
+- 选择在 `vibecraft-daemon` 内新增 gateway 模块，而不是额外引入 Node sidecar。
 - 原因：现有 settings、chat、workspace 与生命周期都在 Go daemon 内，原生实现更容易复用配置、session 上下文和关闭流程。
 - 备选方案：
   - 外置 sidecar：实现快，但会引入额外守护、端口和状态同步复杂度。

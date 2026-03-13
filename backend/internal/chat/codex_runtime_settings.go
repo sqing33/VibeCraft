@@ -6,10 +6,10 @@ import (
 	"sort"
 	"strings"
 
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/skillcatalog"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/skillcatalog"
+	"vibecraft/backend/internal/store"
 )
 
 type codexRuntimeSettings struct {
@@ -22,13 +22,13 @@ func resolveCodexRuntimeSettings(sess store.ChatSession, spec runner.RunSpec, ex
 }
 
 func (m *Manager) buildCodexThreadRequest(sess store.ChatSession, spec runner.RunSpec, expertID string, cliToolID *string, resumeThreadID string) (codexAppServerThreadRequest, error) {
-	runtime, err := m.resolveCodexRuntimeSettings(sess, spec, expertID, firstNonEmptyTrimmed(pointerStringValue(cliToolID), spec.Env["VIBE_TREE_CLI_TOOL_ID"], pointerStringValue(sess.CLIToolID)))
+	runtime, err := m.resolveCodexRuntimeSettings(sess, spec, expertID, firstNonEmptyTrimmed(pointerStringValue(cliToolID), spec.Env["VIBECRAFT_CLI_TOOL_ID"], pointerStringValue(sess.CLIToolID)))
 	if err != nil {
 		return codexAppServerThreadRequest{}, err
 	}
 	return codexAppServerThreadRequest{
 		ThreadID:         resumeThreadID,
-		Model:            strings.TrimSpace(spec.Env["VIBE_TREE_MODEL"]),
+		Model:            strings.TrimSpace(spec.Env["VIBECRAFT_MODEL"]),
 		Cwd:              firstNonEmptyTrimmed(strings.TrimSpace(spec.Cwd), strings.TrimSpace(sess.WorkspacePath), "."),
 		BaseInstructions: runtime.BaseInstructions,
 		Config:           runtime.Config,
@@ -36,7 +36,7 @@ func (m *Manager) buildCodexThreadRequest(sess store.ChatSession, spec runner.Ru
 }
 
 func (m *Manager) resolveCodexRuntimeSettings(sess store.ChatSession, spec runner.RunSpec, expertID, cliToolID string) (codexRuntimeSettings, error) {
-	baseInstructions := strings.TrimSpace(spec.Env["VIBE_TREE_SYSTEM_PROMPT"])
+	baseInstructions := strings.TrimSpace(spec.Env["VIBECRAFT_SYSTEM_PROMPT"])
 	cliToolID = strings.TrimSpace(cliToolID)
 	if cliToolID == "" {
 		return codexRuntimeSettings{BaseInstructions: baseInstructions}, nil

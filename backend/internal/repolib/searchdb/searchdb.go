@@ -32,20 +32,20 @@ type Meta struct {
 }
 
 type Chunk struct {
-	ChunkID        string
-	RepoSourceID   string
-	AnalysisID     string
-	SourceKind     string
-	SourceRefID    string
-	Title          string
-	DisplayText    string
-	SearchText     string
-	TagsFlat       string
-	SymbolsFlat    string
-	EvidenceRefs   string
-	TextExcerpt    string
-	ContentHash    string
-	UpdatedAt      int64
+	ChunkID      string
+	RepoSourceID string
+	AnalysisID   string
+	SourceKind   string
+	SourceRefID  string
+	Title        string
+	DisplayText  string
+	SearchText   string
+	TagsFlat     string
+	SymbolsFlat  string
+	EvidenceRefs string
+	TextExcerpt  string
+	ContentHash  string
+	UpdatedAt    int64
 }
 
 type Hit struct {

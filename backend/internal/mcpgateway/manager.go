@@ -17,16 +17,16 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"vibe-tree/backend/internal/config"
+	"vibecraft/backend/internal/config"
 )
 
-const managedGatewayServerID = "vibe_tree_gateway"
+const managedGatewayServerID = "vibecraft_gateway"
 
 type ConnectionInfo struct {
-	ServerID string
-	URL      string
-	Token    string
-	Headers  map[string]string
+	ServerID  string
+	URL       string
+	Token     string
+	Headers   map[string]string
 	Signature string
 }
 
@@ -49,15 +49,15 @@ type DownstreamState struct {
 type Manager struct {
 	baseURL string
 
-	mu            sync.RWMutex
-	enabled       bool
-	idleTTL       time.Duration
-	handler       http.Handler
-	sessionByID   map[string]*sessionAccess
+	mu             sync.RWMutex
+	enabled        bool
+	idleTTL        time.Duration
+	handler        http.Handler
+	sessionByID    map[string]*sessionAccess
 	sessionByToken map[string]*sessionAccess
-	downstreams   map[string]*downstreamRuntime
-	stopCh        chan struct{}
-	doneCh        chan struct{}
+	downstreams    map[string]*downstreamRuntime
+	stopCh         chan struct{}
+	doneCh         chan struct{}
 }
 
 type sessionAccess struct {
@@ -92,12 +92,12 @@ type downstreamRuntime struct {
 
 func New(baseURL string, cfg config.Config) *Manager {
 	manager := &Manager{
-		baseURL:         strings.TrimRight(strings.TrimSpace(baseURL), "/"),
-		sessionByID:     make(map[string]*sessionAccess),
-		sessionByToken:  make(map[string]*sessionAccess),
-		downstreams:     make(map[string]*downstreamRuntime),
-		stopCh:          make(chan struct{}),
-		doneCh:          make(chan struct{}),
+		baseURL:        strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		sessionByID:    make(map[string]*sessionAccess),
+		sessionByToken: make(map[string]*sessionAccess),
+		downstreams:    make(map[string]*downstreamRuntime),
+		stopCh:         make(chan struct{}),
+		doneCh:         make(chan struct{}),
 	}
 	inner := mcp.NewStreamableHTTPHandler(func(req *http.Request) *mcp.Server {
 		token := bearerToken(req.Header.Get("Authorization"))
@@ -268,12 +268,12 @@ func (c *ConnectionInfo) CodexServerConfig() map[string]any {
 	// Codex 的 streamable HTTP MCP 配置支持通过环境变量注入 bearer token
 	// （参见 `codex mcp add --url ... --bearer-token-env-var ...`）。
 	//
-	// vibe-tree 在启动每个会话的 Codex app-server 时，会把 token 写入该 env var，
+	// vibecraft 在启动每个会话的 Codex app-server 时，会把 token 写入该 env var，
 	// 从而避免在 config payload 中直接下发 header/token。
 	return map[string]any{
-		"type":    "http",
-		"url":     c.URL,
-		"bearer_token_env_var": "VIBE_TREE_MCP_GATEWAY_TOKEN",
+		"type":                 "http",
+		"url":                  c.URL,
+		"bearer_token_env_var": "VIBECRAFT_MCP_GATEWAY_TOKEN",
 	}
 }
 
@@ -611,9 +611,9 @@ func bearerToken(header string) string {
 func randomToken() string {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
-		return fmt.Sprintf("vibe-tree-%d", time.Now().UnixNano())
+		return fmt.Sprintf("vibecraft-%d", time.Now().UnixNano())
 	}
-	return "vibe-tree-" + hex.EncodeToString(buf)
+	return "vibecraft-" + hex.EncodeToString(buf)
 }
 
 func cloneJSONMap(in map[string]any) map[string]any {
@@ -645,7 +645,7 @@ func (rt *downstreamRuntime) ensureConnected(ctx context.Context, cfgMap map[str
 		rt.lastErr = err.Error()
 		return err
 	}
-	rt.client = mcp.NewClient(&mcp.Implementation{Name: "vibe-tree-gateway", Version: "v1"}, nil)
+	rt.client = mcp.NewClient(&mcp.Implementation{Name: "vibecraft-gateway", Version: "v1"}, nil)
 	rt.session = session
 	rt.config = cfgMap
 	rt.lastErr = ""
@@ -660,7 +660,7 @@ func connectClientSession(ctx context.Context, cfgMap map[string]any) (*mcp.Clie
 		cmd := exec.Command(command, args...)
 		cmd.Env = mergeEnv(os.Environ(), stringMap(cfgMap["env"]))
 		transport := &mcp.CommandTransport{Command: cmd}
-		client := mcp.NewClient(&mcp.Implementation{Name: "vibe-tree-gateway", Version: "v1"}, nil)
+		client := mcp.NewClient(&mcp.Implementation{Name: "vibecraft-gateway", Version: "v1"}, nil)
 		return client.Connect(ctx, transport, nil)
 	}
 	url := strings.TrimSpace(firstNonEmpty(stringValue(cfgMap["url"]), stringValue(cfgMap["httpUrl"])))
@@ -672,7 +672,7 @@ func connectClientSession(ctx context.Context, cfgMap map[string]any) (*mcp.Clie
 		Endpoint:   url,
 		HTTPClient: httpClient,
 	}
-	client := mcp.NewClient(&mcp.Implementation{Name: "vibe-tree-gateway", Version: "v1"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "vibecraft-gateway", Version: "v1"}, nil)
 	return client.Connect(ctx, transport, nil)
 }
 

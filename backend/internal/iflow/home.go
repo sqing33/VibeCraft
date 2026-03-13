@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"vibe-tree/backend/internal/paths"
+	"vibecraft/backend/internal/paths"
 )
 
 const (
@@ -43,8 +43,8 @@ type BrowserAuthStatus struct {
 	HasAPIKey        bool   `json:"has_api_key"`
 }
 
-// HomeDir 功能：返回 vibe-tree 管理的 iFlow HOME 根目录。
-// 参数/返回：无入参；返回 `$XDG_DATA_HOME/vibe-tree/iflow-home`。
+// HomeDir 功能：返回 vibecraft 管理的 iFlow HOME 根目录。
+// 参数/返回：无入参；返回 `$XDG_DATA_HOME/vibecraft/iflow-home`。
 // 失败场景：数据目录解析失败时返回 error。
 // 副作用：读取 XDG/用户目录环境。
 func HomeDir() (string, error) {
@@ -170,7 +170,7 @@ func DetectBrowserAuthStatus() (BrowserAuthStatus, error) {
 
 func bootstrapSettingsPayload() bootstrapSettings {
 	payload := bootstrapSettings{
-		CNA:                    "vibe-tree",
+		CNA:                    "vibecraft",
 		BootAnimationShown:     true,
 		HasViewedOfflineOutput: true,
 	}

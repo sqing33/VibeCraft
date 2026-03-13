@@ -3,8 +3,8 @@ package config_test
 import (
 	"testing"
 
-	"vibe-tree/backend/internal/config"
-	iflowcli "vibe-tree/backend/internal/iflow"
+	"vibecraft/backend/internal/config"
+	iflowcli "vibecraft/backend/internal/iflow"
 )
 
 func TestNormalizeCLITools_PreservesDefaultModelWithoutLegacyLLMValidation(t *testing.T) {

@@ -12,8 +12,8 @@ import (
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	anthropic_option "github.com/anthropics/anthropic-sdk-go/option"
 
-	"vibe-tree/backend/internal/openaicompat"
-	"vibe-tree/backend/internal/runner"
+	"vibecraft/backend/internal/openaicompat"
+	"vibecraft/backend/internal/runner"
 )
 
 const (

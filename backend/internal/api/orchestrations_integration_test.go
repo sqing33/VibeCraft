@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/store"
 )
 
 func waitForOrchestrationStatus(t *testing.T, baseURL, orchestrationID, want string, timeout time.Duration) store.OrchestrationDetail {

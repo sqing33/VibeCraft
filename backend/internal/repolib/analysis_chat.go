@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"vibe-tree/backend/internal/chat"
-	"vibe-tree/backend/internal/expert"
-	"vibe-tree/backend/internal/logx"
-	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/chat"
+	"vibecraft/backend/internal/expert"
+	"vibecraft/backend/internal/logx"
+	"vibecraft/backend/internal/paths"
+	"vibecraft/backend/internal/store"
 )
 
 func (s *Service) runAIChatAnalysis(ctx context.Context, source store.RepoSource, initial store.RepoAnalysisResult, layout analysisLayout, params CreateAnalysisParams) {

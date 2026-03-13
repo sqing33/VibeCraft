@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
+	"vibecraft/backend/internal/config"
 )
 
 func TestExpertBuilderSession_EndToEnd(t *testing.T) {

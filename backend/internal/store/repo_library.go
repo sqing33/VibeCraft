@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"vibe-tree/backend/internal/id"
+	"vibecraft/backend/internal/id"
 )
 
 type RepoAnalysisStatus string
@@ -43,50 +43,50 @@ type RepoReportContextSummary struct {
 }
 
 type RepoAnalysisResult struct {
-	ID                    string                   `json:"analysis_id"`
-	RepoSourceID          string                   `json:"repository_id"`
-	RequestedRef          string                   `json:"requested_ref"`
-	ResolvedRef           *string                  `json:"resolved_ref,omitempty"`
-	CommitSHA             *string                  `json:"commit_sha,omitempty"`
-	StoragePath           string                   `json:"storage_path"`
-	ReportPath            *string                  `json:"report_path,omitempty"`
-	SubagentResultsPath   *string                  `json:"subagent_results_path,omitempty"`
-	ExecutionID           *string                  `json:"execution_id,omitempty"`
-	ChatSessionID         *string                  `json:"chat_session_id,omitempty"`
-	ChatUserMessageID     *string                  `json:"chat_user_message_id,omitempty"`
-	ChatAssistantMessageID *string                 `json:"chat_assistant_message_id,omitempty"`
-	RuntimeKind           *string                  `json:"runtime_kind,omitempty"`
-	CLIToolID             *string                  `json:"cli_tool_id,omitempty"`
-	ModelID               *string                  `json:"model_id,omitempty"`
-	Status                string                   `json:"status"`
-	Language              string                   `json:"language"`
-	Depth                 string                   `json:"depth"`
-	AgentMode             string                   `json:"agent_mode"`
-	Features              []string                 `json:"features"`
-	Summary               *string                  `json:"summary,omitempty"`
-	ErrorMessage          *string                  `json:"error_message,omitempty"`
-	ResultJSON            *string                  `json:"result_json,omitempty"`
-	StartedAt             *int64                   `json:"started_at,omitempty"`
-	EndedAt               *int64                   `json:"ended_at,omitempty"`
-	ReportContext         *RepoReportContextSummary `json:"report_context_summary,omitempty"`
-	CreatedAt             int64                    `json:"created_at"`
-	UpdatedAt             int64                    `json:"updated_at"`
+	ID                     string                    `json:"analysis_id"`
+	RepoSourceID           string                    `json:"repository_id"`
+	RequestedRef           string                    `json:"requested_ref"`
+	ResolvedRef            *string                   `json:"resolved_ref,omitempty"`
+	CommitSHA              *string                   `json:"commit_sha,omitempty"`
+	StoragePath            string                    `json:"storage_path"`
+	ReportPath             *string                   `json:"report_path,omitempty"`
+	SubagentResultsPath    *string                   `json:"subagent_results_path,omitempty"`
+	ExecutionID            *string                   `json:"execution_id,omitempty"`
+	ChatSessionID          *string                   `json:"chat_session_id,omitempty"`
+	ChatUserMessageID      *string                   `json:"chat_user_message_id,omitempty"`
+	ChatAssistantMessageID *string                   `json:"chat_assistant_message_id,omitempty"`
+	RuntimeKind            *string                   `json:"runtime_kind,omitempty"`
+	CLIToolID              *string                   `json:"cli_tool_id,omitempty"`
+	ModelID                *string                   `json:"model_id,omitempty"`
+	Status                 string                    `json:"status"`
+	Language               string                    `json:"language"`
+	Depth                  string                    `json:"depth"`
+	AgentMode              string                    `json:"agent_mode"`
+	Features               []string                  `json:"features"`
+	Summary                *string                   `json:"summary,omitempty"`
+	ErrorMessage           *string                   `json:"error_message,omitempty"`
+	ResultJSON             *string                   `json:"result_json,omitempty"`
+	StartedAt              *int64                    `json:"started_at,omitempty"`
+	EndedAt                *int64                    `json:"ended_at,omitempty"`
+	ReportContext          *RepoReportContextSummary `json:"report_context_summary,omitempty"`
+	CreatedAt              int64                     `json:"created_at"`
+	UpdatedAt              int64                     `json:"updated_at"`
 }
 
 type RepoKnowledgeCard struct {
-	ID            string   `json:"card_id"`
-	RepoSourceID  string   `json:"repository_id"`
-	AnalysisID    string   `json:"analysis_id"`
-	Title         string   `json:"title"`
-	CardType      string   `json:"card_type"`
-	Conclusion    *string  `json:"conclusion,omitempty"`
-	Summary       string   `json:"summary"`
-	Mechanism     *string  `json:"mechanism,omitempty"`
-	Confidence    *string  `json:"confidence,omitempty"`
-	Tags          []string `json:"tags"`
-	SectionTitle  *string  `json:"section_title,omitempty"`
-	SortIndex     int      `json:"sort_index"`
-	CreatedAt     int64    `json:"created_at"`
+	ID           string   `json:"card_id"`
+	RepoSourceID string   `json:"repository_id"`
+	AnalysisID   string   `json:"analysis_id"`
+	Title        string   `json:"title"`
+	CardType     string   `json:"card_type"`
+	Conclusion   *string  `json:"conclusion,omitempty"`
+	Summary      string   `json:"summary"`
+	Mechanism    *string  `json:"mechanism,omitempty"`
+	Confidence   *string  `json:"confidence,omitempty"`
+	Tags         []string `json:"tags"`
+	SectionTitle *string  `json:"section_title,omitempty"`
+	SortIndex    int      `json:"sort_index"`
+	CreatedAt    int64    `json:"created_at"`
 }
 
 type RepoKnowledgeEvidence struct {
@@ -159,9 +159,9 @@ type RepoSourceSummary struct {
 }
 
 type RepoLibraryDetail struct {
-	Repository RepoSource          `json:"repository"`
+	Repository RepoSource           `json:"repository"`
 	Analyses   []RepoAnalysisResult `json:"analyses"`
-	Cards      []RepoKnowledgeCard `json:"cards"`
+	Cards      []RepoKnowledgeCard  `json:"cards"`
 }
 
 type RepoSimilarityQuery struct {
@@ -224,7 +224,7 @@ type FinalizeRepoAnalysisResultParams struct {
 type ReplaceRepoKnowledgeParams struct {
 	RepoSourceID string
 	AnalysisID   string
-	Cards          []RepoKnowledgeCardInput
+	Cards        []RepoKnowledgeCardInput
 }
 
 type DeleteRepoAnalysisResultParams struct {
@@ -260,9 +260,9 @@ type RepoKnowledgeEvidenceInput struct {
 }
 
 type ListRepoCardsParams struct {
-	RepoSourceID   string
-	AnalysisID    string
-	Limit          int
+	RepoSourceID string
+	AnalysisID   string
+	Limit        int
 }
 
 type RecordRepoSimilarityQueryParams struct {
@@ -542,18 +542,18 @@ func (s *Store) ReplaceRepoKnowledge(ctx context.Context, params ReplaceRepoKnow
 	now := time.Now().UnixMilli()
 	for idx, input := range params.Cards {
 		card := RepoKnowledgeCard{
-			ID:             id.New("rc_"),
-			RepoSourceID:   params.RepoSourceID,
-			AnalysisID:     strings.TrimSpace(params.AnalysisID),
-			Title:          strings.TrimSpace(input.Title),
-			CardType:       strings.TrimSpace(input.CardType),
-			Summary:        strings.TrimSpace(input.Summary),
-			Mechanism:      trimOrNil(input.Mechanism),
-			Confidence:     trimOrNil(input.Confidence),
-			Tags:           uniqueTrimmedStrings(input.Tags),
-			SectionTitle:   trimOrNil(input.SectionTitle),
-			SortIndex:      input.SortIndex,
-			CreatedAt:      now,
+			ID:           id.New("rc_"),
+			RepoSourceID: params.RepoSourceID,
+			AnalysisID:   strings.TrimSpace(params.AnalysisID),
+			Title:        strings.TrimSpace(input.Title),
+			CardType:     strings.TrimSpace(input.CardType),
+			Summary:      strings.TrimSpace(input.Summary),
+			Mechanism:    trimOrNil(input.Mechanism),
+			Confidence:   trimOrNil(input.Confidence),
+			Tags:         uniqueTrimmedStrings(input.Tags),
+			SectionTitle: trimOrNil(input.SectionTitle),
+			SortIndex:    input.SortIndex,
+			CreatedAt:    now,
 		}
 		if card.Title == "" || card.CardType == "" || card.Summary == "" {
 			continue

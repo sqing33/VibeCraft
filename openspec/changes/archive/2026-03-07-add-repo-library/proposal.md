@@ -1,6 +1,6 @@
 ## Why
 
-`vibe-tree` 已经具备本地 daemon、SQLite、UI 与 execution 观测基础，但当前对外部 GitHub 仓库的知识沉淀仍停留在本地 skill 层，无法作为产品能力被长期保存、搜索和复用。现在引入 Repo Library，可以把外部仓库分析结果变成稳定的知识资产，并为后续 AI 开发提供真实参考样本。
+`vibecraft` 已经具备本地 daemon、SQLite、UI 与 execution 观测基础，但当前对外部 GitHub 仓库的知识沉淀仍停留在本地 skill 层，无法作为产品能力被长期保存、搜索和复用。现在引入 Repo Library，可以把外部仓库分析结果变成稳定的知识资产，并为后续 AI 开发提供真实参考样本。
 
 ## What Changes
 

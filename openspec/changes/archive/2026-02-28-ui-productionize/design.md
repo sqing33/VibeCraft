@@ -40,7 +40,7 @@
    - 生产构建默认隐藏 demo-only 工具（符合 change specs 的新增要求），开发环境允许可见。
 
 5. **构建与托管策略**
-   - `scripts/web.sh` 默认构建 UI；提供 `VIBE_TREE_SKIP_UI_BUILD=1` 以便快速启动。
+   - `scripts/web.sh` 默认构建 UI；提供 `VIBECRAFT_SKIP_UI_BUILD=1` 以便快速启动。
 
 ## Risks / Trade-offs
 

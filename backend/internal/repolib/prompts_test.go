@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/store"
 )
 
 func TestBuildFinalReportTurnPromptEnumeratesQuestions(t *testing.T) {

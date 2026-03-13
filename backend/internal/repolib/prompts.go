@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/store"
 )
 
 type analysisPrepareResult struct {
@@ -20,7 +20,7 @@ type analysisPrepareResult struct {
 
 func buildPlanningTurnPrompt(source store.RepoSource, analysis store.RepoAnalysisResult, prepared analysisPrepareResult) string {
 	features := strings.Join(analysis.Features, "；")
-	return strings.TrimSpace(fmt.Sprintf(`你正在为 vibe-tree 的 Repo Library 执行一次真实仓库分析。你当前工作目录就是目标仓库源码目录。
+	return strings.TrimSpace(fmt.Sprintf(`你正在为 vibecraft 的 Repo Library 执行一次真实仓库分析。你当前工作目录就是目标仓库源码目录。
 
 分析上下文：
 - 仓库：%s

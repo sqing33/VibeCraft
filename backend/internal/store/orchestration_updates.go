@@ -8,17 +8,17 @@ import (
 	"strings"
 	"time"
 
-	"vibe-tree/backend/internal/id"
+	"vibecraft/backend/internal/id"
 )
 
 type UpdateAgentRunWorkspaceParams struct {
-	AgentRunID      string
-	WorkspaceMode   string
-	WorkspacePath   string
-	BranchName      *string
-	BaseRef         *string
-	WorktreePath    *string
-	Artifacts       []AgentRunArtifactInput
+	AgentRunID    string
+	WorkspaceMode string
+	WorkspacePath string
+	BranchName    *string
+	BaseRef       *string
+	WorktreePath  *string
+	Artifacts     []AgentRunArtifactInput
 }
 
 // UpdateAgentRunWorkspace 功能：更新 agent run 的 workspace 元数据，并写入相关 artifact。
@@ -212,4 +212,3 @@ func insertAgentRunArtifactsTx(ctx context.Context, tx *sql.Tx, orchestrationID,
 	}
 	return artifacts, nil
 }
-

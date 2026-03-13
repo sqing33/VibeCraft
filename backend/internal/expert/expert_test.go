@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"vibe-tree/backend/internal/config"
+	"vibecraft/backend/internal/config"
 )
 
 func TestRegistryResolve_ReplacesPromptAndEnvTemplates(t *testing.T) {
@@ -55,7 +55,7 @@ func TestRegistryResolve_MissingEnvTemplateErrors(t *testing.T) {
 	cfg := config.Config{
 		Experts: []config.ExpertConfig{
 			{
-				ID:      "codex",
+				ID:       "codex",
 				Provider: "openai",
 				Model:    "gpt-5-codex",
 				Env:      map[string]string{"OPENAI_API_KEY": "${OPENAI_API_KEY}"},

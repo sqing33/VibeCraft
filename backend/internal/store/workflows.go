@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"vibe-tree/backend/internal/id"
+	"vibecraft/backend/internal/id"
 )
 
 type WorkflowMode string

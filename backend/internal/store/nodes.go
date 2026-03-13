@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"vibe-tree/backend/internal/id"
+	"vibecraft/backend/internal/id"
 )
 
 type Node struct {
@@ -84,7 +84,7 @@ func (s *Store) StartWorkflowMaster(ctx context.Context, workflowID string, para
 		node.Title = "Master"
 	}
 	if node.Prompt == "" {
-		node.Prompt = "vibe-tree master (stub)"
+		node.Prompt = "vibecraft master (stub)"
 	}
 
 	_, err = tx.ExecContext(

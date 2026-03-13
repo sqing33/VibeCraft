@@ -12,7 +12,7 @@
   - **模型档案（Model Profile）**：包含 `model`、选择要使用的 Source、并选择使用 `codex(openai)` 或 `claudecode(anthropic)` SDK。
 - daemon 新增设置读写 API，用于：
   - 读取当前 Sources / Model Profiles（**不回传明文 key**，仅返回 masked/has_key 状态）。
-  - 保存变更到 `~/.config/vibe-tree/config.json`（确保文件权限与原子写入）。
+  - 保存变更到 `~/.config/vibecraft/config.json`（确保文件权限与原子写入）。
   - 将 Model Profiles 映射为可执行的 Experts，并在运行时热更新 expert registry（无需重启）。
 - 兼容性策略：
   - 继续支持旧的 `${ENV_VAR}` 注入方式；但对常规用户，模型配置不再要求 env。

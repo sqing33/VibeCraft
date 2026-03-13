@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"vibe-tree/backend/internal/chat"
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/chat"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/store"
 )
 
 type iflowMockRunner struct {
@@ -28,13 +28,13 @@ func (r *iflowMockRunner) StartOneshot(ctx context.Context, spec runner.RunSpec)
 	callIndex := r.calls
 	r.mu.Unlock()
 
-	artifactDir := strings.TrimSpace(spec.Env["VIBE_TREE_ARTIFACT_DIR"])
+	artifactDir := strings.TrimSpace(spec.Env["VIBECRAFT_ARTIFACT_DIR"])
 	if artifactDir != "" {
 		if err := os.MkdirAll(artifactDir, 0o755); err != nil {
 			return nil, err
 		}
 	}
-	if strings.TrimSpace(spec.Env["VIBE_TREE_RESUME_SESSION_ID"]) != "" {
+	if strings.TrimSpace(spec.Env["VIBECRAFT_RESUME_SESSION_ID"]) != "" {
 		_ = os.WriteFile(filepath.Join(artifactDir, "summary.json"), []byte(`{"status":"error","summary":"resume failed","modified_code":false,"next_action":"retry without resume","key_files":[]}`), 0o644)
 		_ = os.WriteFile(filepath.Join(artifactDir, "final_message.md"), []byte("resume failed\n"), 0o644)
 		return &iflowMockHandle{out: io.NopCloser(strings.NewReader("")), exitCode: 1}, nil
@@ -45,7 +45,7 @@ func (r *iflowMockRunner) StartOneshot(ctx context.Context, spec runner.RunSpec)
 	payload, _ := json.Marshal(map[string]any{
 		"tool_id":    "iflow",
 		"session_id": "iflow-new-session",
-		"model":      spec.Env["VIBE_TREE_MODEL"],
+		"model":      spec.Env["VIBECRAFT_MODEL"],
 		"resumed":    false,
 		"call_index": callIndex,
 	})
@@ -133,10 +133,10 @@ func TestRunTurn_IFLOWResumeFailureFallsBackToReconstructedPrompt(t *testing.T) 
 			Command: "bash",
 			Args:    []string{"scripts/agent-runtimes/iflow_exec.sh"},
 			Env: map[string]string{
-				"VIBE_TREE_CLI_FAMILY":  "iflow",
-				"VIBE_TREE_CLI_TOOL_ID": "iflow",
-				"VIBE_TREE_MODEL":       "qwen3-coder",
-				"VIBE_TREE_MODEL_ID":    "qwen3-coder",
+				"VIBECRAFT_CLI_FAMILY":  "iflow",
+				"VIBECRAFT_CLI_TOOL_ID": "iflow",
+				"VIBECRAFT_MODEL":       "qwen3-coder",
+				"VIBECRAFT_MODEL_ID":    "qwen3-coder",
 			},
 			Cwd: ".",
 		},

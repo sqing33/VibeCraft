@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"vibe-tree/backend/internal/expert"
-	"vibe-tree/backend/internal/logx"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/expert"
+	"vibecraft/backend/internal/logx"
+	"vibecraft/backend/internal/store"
 )
 
 const maxFormalReportValidationRetries = 5

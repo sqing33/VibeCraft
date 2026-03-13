@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"vibe-tree/backend/internal/dag"
-	"vibe-tree/backend/internal/id"
+	"vibecraft/backend/internal/dag"
+	"vibecraft/backend/internal/id"
 )
 
 func openTestStore(t *testing.T) *Store {
@@ -445,4 +445,3 @@ func TestStateMachine_CancelWorkflow_CancelsQueuedNodesAndReturnsRunningExecutio
 		t.Fatalf("expected cancel to mark beta canceled")
 	}
 }
-

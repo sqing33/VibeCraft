@@ -14,7 +14,7 @@ import (
 	openai_responses "github.com/openai/openai-go/responses"
 	openai_shared "github.com/openai/openai-go/shared"
 
-	"vibe-tree/backend/internal/config"
+	"vibecraft/backend/internal/config"
 )
 
 type APIStyle string

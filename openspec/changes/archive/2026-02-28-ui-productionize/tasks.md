@@ -32,7 +32,7 @@
 
 - [x] 5.1 将 oneshot execution（含 demo）迁移到 DevTools，并在生产构建默认隐藏（dev 可见）
 - [x] 5.2 （可选）后端补齐 Kanban 需要的聚合字段（例如 running 节点数），并在 UI 上显示（向后兼容新增字段）
-- [x] 5.3 修复 `scripts/web.sh`：默认构建 UI（避免旧 dist），并提供 `VIBE_TREE_SKIP_UI_BUILD=1` 跳过构建
+- [x] 5.3 修复 `scripts/web.sh`：默认构建 UI（避免旧 dist），并提供 `VIBECRAFT_SKIP_UI_BUILD=1` 跳过构建
 - [x] 5.4 更新 `README.md`：说明 dev/web 两种启动方式、dist 构建策略、以及 DevTools 可见性规则
 
 ## 6. Verification

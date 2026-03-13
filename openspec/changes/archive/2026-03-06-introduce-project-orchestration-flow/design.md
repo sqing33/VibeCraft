@@ -1,6 +1,6 @@
 ## Context
 
-`vibe-tree` 当前已经具备一条相当完整的 workflow runtime：
+`vibecraft` 当前已经具备一条相当完整的 workflow runtime：
 
 - 后端已有 workflow CRUD、start/approve/cancel、node retry、execution start/cancel/log tail、WebSocket 推送、SQLite 状态落库与 daemon 重启恢复。
 - master 节点执行成功后，会从输出中提取第一个 JSON 对象，按 DAG schema 校验，再生成 worker nodes/edges；scheduler 基于依赖关系和全局并发上限推进 `queued` worker。

@@ -50,23 +50,23 @@ ensure_air() {
 }
 
 echo "[dev] starting backend..."
-if [[ "${VIBE_TREE_NO_AIR:-}" == "1" ]]; then
-  echo "[dev] VIBE_TREE_NO_AIR=1, starting backend with go run..."
-  (cd "${ROOT_DIR}/backend" && go run ./cmd/vibe-tree-daemon) &
+if [[ "${VIBECRAFT_NO_AIR:-}" == "1" ]]; then
+  echo "[dev] VIBECRAFT_NO_AIR=1, starting backend with go run..."
+  (cd "${ROOT_DIR}/backend" && go run ./cmd/vibecraft-daemon) &
 elif ensure_air; then
   echo "[dev] detected air, starting backend with hot reload..."
   (cd "${ROOT_DIR}/backend" && air -c .air.toml) &
 else
   echo "[dev] starting backend with go run..."
-  (cd "${ROOT_DIR}/backend" && go run ./cmd/vibe-tree-daemon) &
+  (cd "${ROOT_DIR}/backend" && go run ./cmd/vibecraft-daemon) &
 fi
 BACKEND_PID="$!"
 
 if [[ ! -d "${ROOT_DIR}/ui/node_modules" ]]; then
   echo "[dev] installing UI deps..."
-  (cd "${ROOT_DIR}/ui" && npm install)
+  (cd "${ROOT_DIR}/ui" && pnpm install)
 fi
 
 echo "[dev] starting UI..."
 cd "${ROOT_DIR}/ui"
-npm run dev
+pnpm dev

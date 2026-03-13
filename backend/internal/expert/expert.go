@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/runner"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/runner"
 )
 
 type Resolved struct {
@@ -237,7 +237,7 @@ func (r *Registry) ResolveWithOptions(expertID, prompt, cwd string, opts Resolve
 				if e.Env == nil {
 					e.Env = map[string]string{}
 				}
-				e.Env["VIBE_TREE_CLI_COMMAND_PATH"] = strings.TrimSpace(selectedTool.CommandPath)
+				e.Env["VIBECRAFT_CLI_COMMAND_PATH"] = strings.TrimSpace(selectedTool.CommandPath)
 			}
 			if selectedModelID == "" {
 				runtimeID := runtimeModelRuntimeID(toolID, e.CLIFamily)
@@ -380,26 +380,26 @@ func (r *Registry) ResolveWithOptions(expertID, prompt, cwd string, opts Resolve
 		if strings.TrimSpace(e.OutputSchema) != "" && strings.ToLower(strings.TrimSpace(e.OutputSchema)) != "dag_v1" && strings.ToLower(strings.TrimSpace(e.OutputSchema)) != "expert_builder_v1" {
 			return Resolved{}, fmt.Errorf("expert %q: output_schema %q is not supported", expertID, e.OutputSchema)
 		}
-		env["VIBE_TREE_PROMPT"] = finalPrompt
+		env["VIBECRAFT_PROMPT"] = finalPrompt
 		if strings.TrimSpace(e.SystemPrompt) != "" {
-			env["VIBE_TREE_SYSTEM_PROMPT"] = strings.TrimSpace(e.SystemPrompt)
+			env["VIBECRAFT_SYSTEM_PROMPT"] = strings.TrimSpace(e.SystemPrompt)
 		}
-		env["VIBE_TREE_MODEL"] = model
+		env["VIBECRAFT_MODEL"] = model
 		if strings.TrimSpace(protocolFamily) != "" {
-			env["VIBE_TREE_PROTOCOL_FAMILY"] = strings.TrimSpace(protocolFamily)
+			env["VIBECRAFT_PROTOCOL_FAMILY"] = strings.TrimSpace(protocolFamily)
 		}
 		if strings.TrimSpace(toolID) != "" {
-			env["VIBE_TREE_CLI_TOOL_ID"] = strings.TrimSpace(toolID)
+			env["VIBECRAFT_CLI_TOOL_ID"] = strings.TrimSpace(toolID)
 		}
 		if strings.TrimSpace(e.PrimaryModelID) != "" {
-			env["VIBE_TREE_MODEL_ID"] = strings.TrimSpace(e.PrimaryModelID)
+			env["VIBECRAFT_MODEL_ID"] = strings.TrimSpace(e.PrimaryModelID)
 		}
-		env["VIBE_TREE_CLI_FAMILY"] = family
+		env["VIBECRAFT_CLI_FAMILY"] = family
 		if strings.TrimSpace(e.OutputSchema) != "" {
-			env["VIBE_TREE_OUTPUT_SCHEMA"] = strings.TrimSpace(e.OutputSchema)
+			env["VIBECRAFT_OUTPUT_SCHEMA"] = strings.TrimSpace(e.OutputSchema)
 		}
 		if baseURL != "" {
-			env["VIBE_TREE_BASE_URL"] = baseURL
+			env["VIBECRAFT_BASE_URL"] = baseURL
 		}
 
 		return Resolved{
@@ -638,7 +638,7 @@ func applyCLIRuntimeModelEnv(env map[string]string, resolved config.ResolvedRunt
 		}
 		if strings.TrimSpace(resolved.Source.BaseURL) != "" {
 			env["OPENAI_BASE_URL"] = strings.TrimSpace(resolved.Source.BaseURL)
-			env["VIBE_TREE_BASE_URL"] = strings.TrimSpace(resolved.Source.BaseURL)
+			env["VIBECRAFT_BASE_URL"] = strings.TrimSpace(resolved.Source.BaseURL)
 		}
 	case "anthropic":
 		delete(env, "ANTHROPIC_API_KEY")
@@ -650,15 +650,15 @@ func applyCLIRuntimeModelEnv(env map[string]string, resolved config.ResolvedRunt
 		}
 		if strings.TrimSpace(resolved.Source.BaseURL) != "" {
 			env["ANTHROPIC_BASE_URL"] = strings.TrimSpace(resolved.Source.BaseURL)
-			env["VIBE_TREE_BASE_URL"] = strings.TrimSpace(resolved.Source.BaseURL)
+			env["VIBECRAFT_BASE_URL"] = strings.TrimSpace(resolved.Source.BaseURL)
 		}
 	case "iflow":
-		env["VIBE_TREE_IFLOW_AUTH_MODE"] = firstNonEmptyValue(strings.TrimSpace(resolved.Source.AuthMode), config.IFLOWAuthModeBrowser)
-		env["VIBE_TREE_IFLOW_BASE_URL"] = firstNonEmptyValue(strings.TrimSpace(resolved.Source.BaseURL), iflowDefaultBaseURL())
-		if env["VIBE_TREE_IFLOW_AUTH_MODE"] == config.IFLOWAuthModeAPIKey {
-			env["VIBE_TREE_IFLOW_API_KEY"] = strings.TrimSpace(resolved.Source.APIKey)
+		env["VIBECRAFT_IFLOW_AUTH_MODE"] = firstNonEmptyValue(strings.TrimSpace(resolved.Source.AuthMode), config.IFLOWAuthModeBrowser)
+		env["VIBECRAFT_IFLOW_BASE_URL"] = firstNonEmptyValue(strings.TrimSpace(resolved.Source.BaseURL), iflowDefaultBaseURL())
+		if env["VIBECRAFT_IFLOW_AUTH_MODE"] == config.IFLOWAuthModeAPIKey {
+			env["VIBECRAFT_IFLOW_API_KEY"] = strings.TrimSpace(resolved.Source.APIKey)
 		} else {
-			delete(env, "VIBE_TREE_IFLOW_API_KEY")
+			delete(env, "VIBECRAFT_IFLOW_API_KEY")
 		}
 	}
 }

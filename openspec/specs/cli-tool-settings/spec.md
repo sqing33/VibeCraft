@@ -2,7 +2,7 @@
 
 ## Purpose
 
-CLI tool settings define the primary execution tools for `vibe-tree`, binding protocol families to concrete CLI runtimes, default models, and tool-specific defaults.
+CLI tool settings define the primary execution tools for `vibecraft`, binding protocol families to concrete CLI runtimes, default models, and tool-specific defaults.
 ## Requirements
 ### Requirement: System MUST expose CLI tool settings for primary execution tools
 The system MUST expose configurable primary CLI tools for at least `codex`, `claude`, `iflow`, and `opencode`.

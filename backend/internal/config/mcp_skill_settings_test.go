@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/skillcatalog"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/skillcatalog"
 )
 
 func TestParseMCPServersJSON_SupportsWrappedAndFlatShapes(t *testing.T) {

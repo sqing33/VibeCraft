@@ -1,6 +1,6 @@
 ## Context
 
-当前 `vibe-tree` 已经完成 CLI-first 的主执行路径，但“工具/模型/专家”抽象仍然错位：
+当前 `vibecraft` 已经完成 CLI-first 的主执行路径，但“工具/模型/专家”抽象仍然错位：
 
 - `Codex` / `ClaudeCode` 同时承担“CLI 工具名”和“expert 名”两种语义。
 - `llm.models` 仍会被镜像成 `llm-model` experts，导致模型页的模型看起来像主执行入口。

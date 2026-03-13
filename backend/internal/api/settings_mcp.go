@@ -12,13 +12,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/mcpgateway"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/mcpgateway"
 )
 
 type mcpSettingsResponse struct {
-	Servers []mcpServerPublic       `json:"servers"`
-	Tools   []cliToolPublic         `json:"tools"`
+	Servers []mcpServerPublic        `json:"servers"`
+	Tools   []cliToolPublic          `json:"tools"`
 	Gateway mcpGatewaySettingsPublic `json:"gateway"`
 }
 

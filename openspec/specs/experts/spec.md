@@ -7,7 +7,7 @@ Expert 是可执行的专家配置，定义了 runtime 类型、provider、model
 
 ### Configuration Loading
 
-The system MUST load expert configurations from `~/.config/vibe-tree/config.json` under the `experts` array. Each expert MUST have a unique `id`. The system MUST support provider types: `process` (local command), `cli` (CLI agent runtime), `openai` (helper SDK), `anthropic` (helper SDK), and `demo` (testing).
+The system MUST load expert configurations from `~/.config/vibecraft/config.json` under the `experts` array. Each expert MUST have a unique `id`. The system MUST support provider types: `process` (local command), `cli` (CLI agent runtime), `openai` (helper SDK), `anthropic` (helper SDK), and `demo` (testing).
 
 Experts intended for default chat, workflow, or orchestration execution MUST be representable as CLI-capable experts. SDK-backed experts MAY remain configured for helper-only operations and MUST be markable as `helper_only=true`.
 

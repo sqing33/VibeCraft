@@ -3,7 +3,7 @@ package repolib
 import (
 	"testing"
 
-	"vibe-tree/backend/internal/repolib/searchdb"
+	"vibecraft/backend/internal/repolib/searchdb"
 )
 
 func TestSearchQueryTokensIncludesHanBigramsAndASCII(t *testing.T) {

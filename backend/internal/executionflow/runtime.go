@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"vibe-tree/backend/internal/execution"
-	"vibe-tree/backend/internal/runner"
+	"vibecraft/backend/internal/execution"
+	"vibecraft/backend/internal/runner"
 )
 
 // StartRecordedExecution 功能：统一启动 execution，并在记录启动信息失败时自动取消该 execution。
@@ -84,4 +84,3 @@ func TailSummary(executionID string, tailBytes int64) *string {
 	}
 	return &s
 }
-

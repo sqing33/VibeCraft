@@ -13,15 +13,15 @@ import (
 	"strconv"
 	"strings"
 
-	"vibe-tree/backend/internal/paths"
+	"vibecraft/backend/internal/paths"
 
 	"github.com/gin-gonic/gin"
 
-	"vibe-tree/backend/internal/chat"
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/expert"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/chat"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/expert"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/store"
 )
 
 type createChatSessionRequest struct {

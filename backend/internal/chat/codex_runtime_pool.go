@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"vibe-tree/backend/internal/logx"
-	"vibe-tree/backend/internal/runner"
+	"vibecraft/backend/internal/logx"
+	"vibecraft/backend/internal/runner"
 )
 
 type codexRuntimePool struct {

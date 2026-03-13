@@ -3,9 +3,9 @@ package api
 import (
 	"testing"
 
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/expert"
-	"vibe-tree/backend/internal/runner"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/expert"
+	"vibecraft/backend/internal/runner"
 )
 
 func TestApplyLLMModelRuntime_UsesPersistedSourceConfig(t *testing.T) {

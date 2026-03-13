@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/repolib/searchdb"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/paths"
+	"vibecraft/backend/internal/repolib/searchdb"
+	"vibecraft/backend/internal/store"
 )
 
 func TestBuildSearchChunksKeepsReportChunkIDsStable(t *testing.T) {
@@ -56,18 +56,18 @@ func TestBuildSearchChunksKeepsReportChunkIDsStable(t *testing.T) {
 - src/agent/router.go:10 [control-flow] - route
 	`
 
-		source := store.RepoSource{ID: "rs_demo", RepoURL: "https://github.com/a/b", RepoKey: "a-b"}
-		analysis := store.RepoAnalysisResult{ID: "ra_demo"}
-		line := int64(10)
-		card := store.RepoKnowledgeCard{
-			ID:             "rc_demo",
-			RepoSourceID:   source.ID,
-			AnalysisID:     analysis.ID,
-			Title:          "多 Agent 并行机制",
-			CardType:       "feature_pattern",
-			Summary:        "先拆任务，再调度，再合并。",
-			SectionTitle:   pointer("问题 1: 多 Agent 并行机制"),
-		}
+	source := store.RepoSource{ID: "rs_demo", RepoURL: "https://github.com/a/b", RepoKey: "a-b"}
+	analysis := store.RepoAnalysisResult{ID: "ra_demo"}
+	line := int64(10)
+	card := store.RepoKnowledgeCard{
+		ID:           "rc_demo",
+		RepoSourceID: source.ID,
+		AnalysisID:   analysis.ID,
+		Title:        "多 Agent 并行机制",
+		CardType:     "feature_pattern",
+		Summary:      "先拆任务，再调度，再合并。",
+		SectionTitle: pointer("问题 1: 多 Agent 并行机制"),
+	}
 	evidenceByCard := map[string][]store.RepoKnowledgeEvidence{
 		card.ID: {
 			{
@@ -78,13 +78,13 @@ func TestBuildSearchChunksKeepsReportChunkIDsStable(t *testing.T) {
 				SortIndex: 1,
 			},
 		},
-		}
+	}
 
-		chunks1 := buildSearchChunks(source, analysis, report, []store.RepoKnowledgeCard{card}, evidenceByCard)
-		chunks2 := buildSearchChunks(source, analysis, report, []store.RepoKnowledgeCard{card}, evidenceByCard)
-		if len(chunks1) == 0 || len(chunks2) == 0 {
-			t.Fatalf("expected chunks")
-		}
+	chunks1 := buildSearchChunks(source, analysis, report, []store.RepoKnowledgeCard{card}, evidenceByCard)
+	chunks2 := buildSearchChunks(source, analysis, report, []store.RepoKnowledgeCard{card}, evidenceByCard)
+	if len(chunks1) == 0 || len(chunks2) == 0 {
+		t.Fatalf("expected chunks")
+	}
 	ids1 := map[string]struct{}{}
 	for _, chunk := range chunks1 {
 		ids1[chunk.ChunkID] = struct{}{}
@@ -122,20 +122,20 @@ func TestBuildSearchChunksMapsReportAndEvidenceBackToCard(t *testing.T) {
 - src/agent/router.go:10 [control-flow] - route
 	`
 
-		source := store.RepoSource{ID: "rs_demo", RepoURL: "https://github.com/a/b", RepoKey: "a-b"}
-		analysis := store.RepoAnalysisResult{ID: "ra_demo"}
-		line := int64(10)
-		conclusion := "编排层统一负责拆分与合并。"
-		card := store.RepoKnowledgeCard{
-			ID:             "rc_demo",
-			RepoSourceID:   source.ID,
-			AnalysisID:     analysis.ID,
-			Title:          "多 Agent 并行机制",
-			CardType:       "feature_pattern",
-			Conclusion:     &conclusion,
-			Summary:        "先拆分，再调度。",
-			SectionTitle:   pointer("问题 1: 多 Agent 并行机制"),
-		}
+	source := store.RepoSource{ID: "rs_demo", RepoURL: "https://github.com/a/b", RepoKey: "a-b"}
+	analysis := store.RepoAnalysisResult{ID: "ra_demo"}
+	line := int64(10)
+	conclusion := "编排层统一负责拆分与合并。"
+	card := store.RepoKnowledgeCard{
+		ID:           "rc_demo",
+		RepoSourceID: source.ID,
+		AnalysisID:   analysis.ID,
+		Title:        "多 Agent 并行机制",
+		CardType:     "feature_pattern",
+		Conclusion:   &conclusion,
+		Summary:      "先拆分，再调度。",
+		SectionTitle: pointer("问题 1: 多 Agent 并行机制"),
+	}
 	evidenceByCard := map[string][]store.RepoKnowledgeEvidence{
 		card.ID: {
 			{
@@ -145,13 +145,13 @@ func TestBuildSearchChunksMapsReportAndEvidenceBackToCard(t *testing.T) {
 				Line:      &line,
 				SortIndex: 1,
 			},
-			},
-		}
+		},
+	}
 
-		chunks := buildSearchChunks(source, analysis, report, []store.RepoKnowledgeCard{card}, evidenceByCard)
-		if len(chunks) != 3 {
-			t.Fatalf("expected report/card/evidence chunks, got %d", len(chunks))
-		}
+	chunks := buildSearchChunks(source, analysis, report, []store.RepoKnowledgeCard{card}, evidenceByCard)
+	if len(chunks) != 3 {
+		t.Fatalf("expected report/card/evidence chunks, got %d", len(chunks))
+	}
 	foundReport := false
 	foundEvidence := false
 	for _, chunk := range chunks {
@@ -180,7 +180,7 @@ func TestBuildSearchChunksMapsReportAndEvidenceBackToCard(t *testing.T) {
 }
 
 func TestSearchDBKeywordWorksWithoutVec(t *testing.T) {
-	t.Setenv("VIBE_TREE_SQLITE_TEST_TAGS", "sqlite_fts5")
+	t.Setenv("VIBECRAFT_SQLITE_TEST_TAGS", "sqlite_fts5")
 	root := t.TempDir()
 	_ = os.Setenv("XDG_DATA_HOME", root)
 

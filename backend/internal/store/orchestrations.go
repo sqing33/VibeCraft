@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"vibe-tree/backend/internal/id"
+	"vibecraft/backend/internal/id"
 )
 
 type OrchestrationStatus string
@@ -133,10 +133,10 @@ type AgentRunArtifactInput struct {
 }
 
 type OrchestrationDetail struct {
-	Orchestration  Orchestration          `json:"orchestration"`
-	Rounds         []OrchestrationRound   `json:"rounds"`
-	AgentRuns      []AgentRun             `json:"agent_runs"`
-	SynthesisSteps []SynthesisStep        `json:"synthesis_steps"`
+	Orchestration  Orchestration           `json:"orchestration"`
+	Rounds         []OrchestrationRound    `json:"rounds"`
+	AgentRuns      []AgentRun              `json:"agent_runs"`
+	SynthesisSteps []SynthesisStep         `json:"synthesis_steps"`
 	Artifacts      []OrchestrationArtifact `json:"artifacts"`
 }
 

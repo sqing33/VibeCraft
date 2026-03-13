@@ -1,6 +1,6 @@
 ## Context
 
-当前 `vibe-tree` 只把 chat session、最终 user/assistant message 和附件元数据持久化到 SQLite，Codex 运行中的 thinking、tool、plan、question、system、answer 时间线主要依赖前端运行态与 `sessionStorage` 维护。这样虽然页面在单次挂载期间可以显示完整过程，但刷新、重连或重新进入会话时，前端只能从后端恢复最终消息，无法稳定恢复本轮过程详情，导致时间线丢失、重复或错位。
+当前 `vibecraft` 只把 chat session、最终 user/assistant message 和附件元数据持久化到 SQLite，Codex 运行中的 thinking、tool、plan、question、system、answer 时间线主要依赖前端运行态与 `sessionStorage` 维护。这样虽然页面在单次挂载期间可以显示完整过程，但刷新、重连或重新进入会话时，前端只能从后端恢复最终消息，无法稳定恢复本轮过程详情，导致时间线丢失、重复或错位。
 
 本次变更跨越后端存储、聊天运行时、API 读取与前端恢复链，并且需要调整 SQLite schema，因此必须先统一“谁是事实源”的架构边界。
 

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
+	"vibecraft/backend/internal/config"
 )
 
 func TestAPISourceSettings_PutRebindsMissingRuntimeSourcesToRemainingSource(t *testing.T) {

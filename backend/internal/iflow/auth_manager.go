@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"vibe-tree/backend/internal/id"
-	"vibe-tree/backend/internal/runner"
+	"vibecraft/backend/internal/id"
+	"vibecraft/backend/internal/runner"
 )
 
 const (

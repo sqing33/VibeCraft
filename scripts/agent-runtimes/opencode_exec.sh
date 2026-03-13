@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-artifact_dir="${VIBE_TREE_ARTIFACT_DIR:-}"
-prompt="${VIBE_TREE_PROMPT:-}"
-system_prompt="${VIBE_TREE_SYSTEM_PROMPT:-}"
-model="${VIBE_TREE_MODEL:-}"
-model_id="${VIBE_TREE_MODEL_ID:-}"
-protocol_family="${VIBE_TREE_PROTOCOL_FAMILY:-}"
-workspace="${VIBE_TREE_WORKSPACE:-$PWD}"
-cli_cmd="${VIBE_TREE_CLI_COMMAND_PATH:-opencode}"
-resume_session_id="${VIBE_TREE_RESUME_SESSION_ID:-}"
+artifact_dir="${VIBECRAFT_ARTIFACT_DIR:-}"
+prompt="${VIBECRAFT_PROMPT:-}"
+system_prompt="${VIBECRAFT_SYSTEM_PROMPT:-}"
+model="${VIBECRAFT_MODEL:-}"
+model_id="${VIBECRAFT_MODEL_ID:-}"
+protocol_family="${VIBECRAFT_PROTOCOL_FAMILY:-}"
+workspace="${VIBECRAFT_WORKSPACE:-$PWD}"
+cli_cmd="${VIBECRAFT_CLI_COMMAND_PATH:-opencode}"
+resume_session_id="${VIBECRAFT_RESUME_SESSION_ID:-}"
 openai_api_key="${OPENAI_API_KEY:-}"
-openai_base_url="${VIBE_TREE_BASE_URL:-${OPENAI_BASE_URL:-}}"
+openai_base_url="${VIBECRAFT_BASE_URL:-${OPENAI_BASE_URL:-}}"
 anthropic_api_key="${ANTHROPIC_API_KEY:-}"
-anthropic_base_url="${VIBE_TREE_BASE_URL:-${ANTHROPIC_BASE_URL:-}}"
+anthropic_base_url="${VIBECRAFT_BASE_URL:-${ANTHROPIC_BASE_URL:-}}"
 status="ok"
 summary_text=""
 next_action=""
@@ -90,7 +90,7 @@ elif [[ -n "${HOME:-}" && -f "$HOME/.config/opencode/opencode.json" ]]; then
 fi
 
 state_root=""
-managed_gateway_config="${VIBE_TREE_OPENCODE_CONFIG_PATH:-}"
+managed_gateway_config="${VIBECRAFT_OPENCODE_CONFIG_PATH:-}"
 if [[ -n "$artifact_dir" ]]; then
   session_scope="$artifact_dir"
   artifact_parent="$(dirname "$artifact_dir")"
@@ -112,12 +112,12 @@ export XDG_CONFIG_HOME="$config_root"
 export XDG_DATA_HOME="$data_root"
 export XDG_CACHE_HOME="$cache_root"
 export XDG_STATE_HOME="$state_home_root"
-export VIBE_TREE_OPENCODE_PROVIDER="$resolved_provider"
-export VIBE_TREE_OPENCODE_MODEL_NAME="$resolved_model"
-export VIBE_TREE_OPENCODE_OPENAI_API_KEY="$openai_api_key"
-export VIBE_TREE_OPENCODE_OPENAI_BASE_URL="$openai_base_url"
-export VIBE_TREE_OPENCODE_ANTHROPIC_API_KEY="$anthropic_api_key"
-export VIBE_TREE_OPENCODE_ANTHROPIC_BASE_URL="$anthropic_base_url"
+export VIBECRAFT_OPENCODE_PROVIDER="$resolved_provider"
+export VIBECRAFT_OPENCODE_MODEL_NAME="$resolved_model"
+export VIBECRAFT_OPENCODE_OPENAI_API_KEY="$openai_api_key"
+export VIBECRAFT_OPENCODE_OPENAI_BASE_URL="$openai_base_url"
+export VIBECRAFT_OPENCODE_ANTHROPIC_API_KEY="$anthropic_api_key"
+export VIBECRAFT_OPENCODE_ANTHROPIC_BASE_URL="$anthropic_base_url"
 python3 - "$base_config_file" "$managed_gateway_config" "$config_root/opencode/opencode.json" <<'PY'
 import json
 import os
@@ -145,8 +145,8 @@ if gateway_path and gateway_path.exists():
     except Exception:
         pass
 
-provider_id = (os.environ.get('VIBE_TREE_OPENCODE_PROVIDER') or 'openai').strip().lower() or 'openai'
-model_name = (os.environ.get('VIBE_TREE_OPENCODE_MODEL_NAME') or '').strip()
+provider_id = (os.environ.get('VIBECRAFT_OPENCODE_PROVIDER') or 'openai').strip().lower() or 'openai'
+model_name = (os.environ.get('VIBECRAFT_OPENCODE_MODEL_NAME') or '').strip()
 provider_defaults = {
     'openai': {'npm': '@ai-sdk/openai', 'name': 'OpenAI'},
     'anthropic': {'npm': '@ai-sdk/anthropic', 'name': 'Anthropic'},
@@ -170,11 +170,11 @@ if not isinstance(options, dict):
 api_key = ''
 base_url = ''
 if provider_id == 'openai':
-    api_key = os.environ.get('VIBE_TREE_OPENCODE_OPENAI_API_KEY', '')
-    base_url = os.environ.get('VIBE_TREE_OPENCODE_OPENAI_BASE_URL', '')
+    api_key = os.environ.get('VIBECRAFT_OPENCODE_OPENAI_API_KEY', '')
+    base_url = os.environ.get('VIBECRAFT_OPENCODE_OPENAI_BASE_URL', '')
 elif provider_id == 'anthropic':
-    api_key = os.environ.get('VIBE_TREE_OPENCODE_ANTHROPIC_API_KEY', '')
-    base_url = os.environ.get('VIBE_TREE_OPENCODE_ANTHROPIC_BASE_URL', '')
+    api_key = os.environ.get('VIBECRAFT_OPENCODE_ANTHROPIC_API_KEY', '')
+    base_url = os.environ.get('VIBECRAFT_OPENCODE_ANTHROPIC_BASE_URL', '')
 if api_key.strip():
     options['apiKey'] = api_key.strip()
 if base_url.strip():

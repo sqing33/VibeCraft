@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
-	iflowcli "vibe-tree/backend/internal/iflow"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/config"
+	iflowcli "vibecraft/backend/internal/iflow"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/store"
 )
 
 func TestPrepareIFLOWRunSpec_UsesImportedBrowserModelAndRequiresAuth(t *testing.T) {
@@ -54,19 +54,19 @@ func TestPrepareIFLOWRunSpec_UsesImportedBrowserModelAndRequiresAuth(t *testing.
 		t.Fatalf("save config: %v", err)
 	}
 	prepared, err := prepareIFLOWRunSpec(store.ChatSession{WorkspacePath: ".", ExpertID: "iflow"}, runner.RunSpec{Env: map[string]string{
-		"VIBE_TREE_CLI_FAMILY":  "iflow",
-		"VIBE_TREE_CLI_TOOL_ID": "iflow",
-		"VIBE_TREE_MODEL":       iflowcli.DefaultModel,
-		"VIBE_TREE_MODEL_ID":    iflowcli.DefaultModel,
+		"VIBECRAFT_CLI_FAMILY":  "iflow",
+		"VIBECRAFT_CLI_TOOL_ID": "iflow",
+		"VIBECRAFT_MODEL":       iflowcli.DefaultModel,
+		"VIBECRAFT_MODEL_ID":    iflowcli.DefaultModel,
 	}}, "iflow")
 	if err != nil {
 		t.Fatalf("prepareIFLOWRunSpec: %v", err)
 	}
-	if got := prepared.Env["VIBE_TREE_MODEL"]; got != "minimax-m2.5" {
-		t.Fatalf("VIBE_TREE_MODEL = %q, want minimax-m2.5", got)
+	if got := prepared.Env["VIBECRAFT_MODEL"]; got != "minimax-m2.5" {
+		t.Fatalf("VIBECRAFT_MODEL = %q, want minimax-m2.5", got)
 	}
-	if got := prepared.Env["VIBE_TREE_MODEL_ID"]; got != "minimax-m2.5" {
-		t.Fatalf("VIBE_TREE_MODEL_ID = %q, want minimax-m2.5", got)
+	if got := prepared.Env["VIBECRAFT_MODEL_ID"]; got != "minimax-m2.5" {
+		t.Fatalf("VIBECRAFT_MODEL_ID = %q, want minimax-m2.5", got)
 	}
 }
 
@@ -100,8 +100,8 @@ func TestPrepareIFLOWRunSpec_BrowserModeRequiresAuth(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 	_, err = prepareIFLOWRunSpec(store.ChatSession{WorkspacePath: ".", ExpertID: "iflow"}, runner.RunSpec{Env: map[string]string{
-		"VIBE_TREE_CLI_FAMILY":  "iflow",
-		"VIBE_TREE_CLI_TOOL_ID": "iflow",
+		"VIBECRAFT_CLI_FAMILY":  "iflow",
+		"VIBECRAFT_CLI_TOOL_ID": "iflow",
 	}}, "iflow")
 	if err == nil || !strings.Contains(err.Error(), "网页登录未完成") {
 		t.Fatalf("expected missing auth error, got %v", err)
@@ -164,32 +164,32 @@ func TestPrepareIFLOWRunSpec_InjectsManagedHomeMCPAndSkills(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 	prepared, err := prepareIFLOWRunSpec(store.ChatSession{WorkspacePath: ".", ExpertID: "iflow"}, runner.RunSpec{Env: map[string]string{
-		"VIBE_TREE_CLI_FAMILY":    "iflow",
-		"VIBE_TREE_CLI_TOOL_ID":   "iflow",
-		"VIBE_TREE_SYSTEM_PROMPT": "Base instructions",
+		"VIBECRAFT_CLI_FAMILY":    "iflow",
+		"VIBECRAFT_CLI_TOOL_ID":   "iflow",
+		"VIBECRAFT_SYSTEM_PROMPT": "Base instructions",
 	}}, "iflow")
 	if err != nil {
 		t.Fatalf("prepareIFLOWRunSpec: %v", err)
 	}
-	if got := prepared.Env["VIBE_TREE_IFLOW_AUTH_MODE"]; got != config.IFLOWAuthModeAPIKey {
+	if got := prepared.Env["VIBECRAFT_IFLOW_AUTH_MODE"]; got != config.IFLOWAuthModeAPIKey {
 		t.Fatalf("auth mode = %q, want %q", got, config.IFLOWAuthModeAPIKey)
 	}
-	if got := prepared.Env["VIBE_TREE_IFLOW_API_KEY"]; got != "sk-iflow-123" {
+	if got := prepared.Env["VIBECRAFT_IFLOW_API_KEY"]; got != "sk-iflow-123" {
 		t.Fatalf("api key = %q, want sk-iflow-123", got)
 	}
-	if got := prepared.Env["VIBE_TREE_IFLOW_BASE_URL"]; got != iflowcli.DefaultBaseURL {
+	if got := prepared.Env["VIBECRAFT_IFLOW_BASE_URL"]; got != iflowcli.DefaultBaseURL {
 		t.Fatalf("base url = %q, want %q", got, iflowcli.DefaultBaseURL)
 	}
-	if strings.TrimSpace(prepared.Env["VIBE_TREE_IFLOW_HOME"]) == "" {
+	if strings.TrimSpace(prepared.Env["VIBECRAFT_IFLOW_HOME"]) == "" {
 		t.Fatalf("expected managed iflow home")
 	}
-	if got := prepared.Env["VIBE_TREE_IFLOW_ALLOWED_MCP_SERVERS"]; got != "mcp-router" {
+	if got := prepared.Env["VIBECRAFT_IFLOW_ALLOWED_MCP_SERVERS"]; got != "mcp-router" {
 		t.Fatalf("allowed mcp servers = %q, want mcp-router", got)
 	}
-	if got := prepared.Env["VIBE_TREE_IFLOW_MCP_SERVERS_JSON"]; !strings.Contains(got, "mcp-router") {
+	if got := prepared.Env["VIBECRAFT_IFLOW_MCP_SERVERS_JSON"]; !strings.Contains(got, "mcp-router") {
 		t.Fatalf("mcp json missing server: %q", got)
 	}
-	if got := prepared.Env["VIBE_TREE_SYSTEM_PROMPT"]; !strings.Contains(got, "[Enabled Skills]") || !strings.Contains(got, "ui-ux-pro-max") {
+	if got := prepared.Env["VIBECRAFT_SYSTEM_PROMPT"]; !strings.Contains(got, "[Enabled Skills]") || !strings.Contains(got, "ui-ux-pro-max") {
 		t.Fatalf("system prompt missing skill instructions: %q", got)
 	}
 }

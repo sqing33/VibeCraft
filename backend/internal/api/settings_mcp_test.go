@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"vibe-tree/backend/internal/api"
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/mcpgateway"
+	"vibecraft/backend/internal/api"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/mcpgateway"
 )
 
 func TestMCPSettings_GetAndPut(t *testing.T) {

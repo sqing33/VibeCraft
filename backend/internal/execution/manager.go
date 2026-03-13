@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"vibe-tree/backend/internal/id"
-	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/ws"
+	"vibecraft/backend/internal/id"
+	"vibecraft/backend/internal/paths"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/ws"
 )
 
 type Status string

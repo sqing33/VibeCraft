@@ -8,7 +8,7 @@
 - [x] 2.1 更新 `scripts/dev.sh`：`air` 缺失时尝试 `go install github.com/air-verse/air@latest`
 - [x] 2.2 处理 PATH：确保 `go install` 后当前脚本进程能找到 `air`（`GOBIN`/`GOPATH/bin`）
 - [x] 2.3 安装失败时安全回退：打印提示并降级为 `go run`
-- [x] 2.4 保持 `VIBE_TREE_NO_AIR=1` 禁用语义与现有进程回收语义不变
+- [x] 2.4 保持 `VIBECRAFT_NO_AIR=1` 禁用语义与现有进程回收语义不变
 
 ## 3. 验证
 

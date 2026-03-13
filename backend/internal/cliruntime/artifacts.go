@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/paths"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/store"
 )
 
 type Summary struct {
@@ -45,9 +45,9 @@ func PrepareRunSpec(spec runner.RunSpec, artifactDir string) runner.RunSpec {
 	if spec.Env == nil {
 		spec.Env = map[string]string{}
 	}
-	spec.Env["VIBE_TREE_ARTIFACT_DIR"] = artifactDir
+	spec.Env["VIBECRAFT_ARTIFACT_DIR"] = artifactDir
 	if strings.TrimSpace(spec.Cwd) != "" {
-		spec.Env["VIBE_TREE_WORKSPACE"] = spec.Cwd
+		spec.Env["VIBECRAFT_WORKSPACE"] = spec.Cwd
 	}
 	return spec
 }

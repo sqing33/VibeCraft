@@ -1,6 +1,6 @@
 ## Context
 
-vibe-tree 已有 LLM settings（Sources/Models）与对应的 `GET/PUT /api/v1/settings/llm`，并在保存后将 Models 镜像为 Experts，从而可在 workflow/node 下拉中直接选择。
+vibecraft 已有 LLM settings（Sources/Models）与对应的 `GET/PUT /api/v1/settings/llm`，并在保存后将 Models 镜像为 Experts，从而可在 workflow/node 下拉中直接选择。
 
 但目前缺少“快速验证配置是否可用”的能力。用户希望在 Models 区域每个模型卡片上直接点“测试”，用当前填写的 provider/model/base_url/key 做一次短生成，以便立刻发现 URL/Key/模型名是否正确。
 

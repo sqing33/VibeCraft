@@ -9,9 +9,9 @@ import (
 	"strings"
 	"unicode"
 
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/skillcatalog"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/skillcatalog"
 )
 
 type Message struct {
@@ -122,7 +122,7 @@ func composeInstructions(existing string) string {
 	}
 	return base + `You are using the expert-creator skill.
 
-Your task is to design a reusable expert for vibe-tree settings. Return ONLY a JSON object matching the requested schema.
+Your task is to design a reusable expert for vibecraft settings. Return ONLY a JSON object matching the requested schema.
 
 Rules:
 - The expert must be narrow and professional, not a generic assistant.

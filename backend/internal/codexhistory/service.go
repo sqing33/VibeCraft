@@ -16,8 +16,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"vibe-tree/backend/internal/id"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/id"
+	"vibecraft/backend/internal/store"
 
 	_ "modernc.org/sqlite"
 )

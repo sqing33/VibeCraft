@@ -6,29 +6,29 @@ import (
 	"sort"
 	"strings"
 
-	"vibe-tree/backend/internal/repolib/searchdb"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/repolib/searchdb"
+	"vibecraft/backend/internal/store"
 )
 
 type cardSearchResult struct {
-	Card          store.RepoKnowledgeCard
-	Evidence      []store.RepoKnowledgeEvidence
-	RawScore      float64
-	DisplayScore  float64
-	MatchSources  []string
-	RepositoryID  string
-	AnalysisID    string
+	Card         store.RepoKnowledgeCard
+	Evidence     []store.RepoKnowledgeEvidence
+	RawScore     float64
+	DisplayScore float64
+	MatchSources []string
+	RepositoryID string
+	AnalysisID   string
 }
 
 type cardSearchAggregate struct {
-	cardID        string
-	rawScore      float64
-	maxScore      float64
-	hitCount      int
-	topByKind     map[string]float64
-	matchSources  map[string]struct{}
-	repositoryID  string
-	analysisID    string
+	cardID       string
+	rawScore     float64
+	maxScore     float64
+	hitCount     int
+	topByKind    map[string]float64
+	matchSources map[string]struct{}
+	repositoryID string
+	analysisID   string
 }
 
 func (s *Service) collapseSearchHitsToCards(ctx context.Context, hits []searchdb.Hit, topK int) []cardSearchResult {
@@ -44,13 +44,13 @@ func (s *Service) collapseSearchHitsToCards(ctx context.Context, hits []searchdb
 		agg, ok := aggByCard[cardID]
 		if !ok {
 			agg = &cardSearchAggregate{
-				cardID:        cardID,
-				rawScore:      hit.Score,
-				maxScore:      hit.Score,
-				topByKind:     map[string]float64{},
-				matchSources:  map[string]struct{}{},
-				repositoryID:  hit.RepoSourceID,
-				analysisID:    hit.AnalysisID,
+				cardID:       cardID,
+				rawScore:     hit.Score,
+				maxScore:     hit.Score,
+				topByKind:    map[string]float64{},
+				matchSources: map[string]struct{}{},
+				repositoryID: hit.RepoSourceID,
+				analysisID:   hit.AnalysisID,
 			}
 			aggByCard[cardID] = agg
 		}
@@ -93,12 +93,12 @@ func (s *Service) collapseSearchHitsToCards(ctx context.Context, hits []searchdb
 			evidence = evidence[:3]
 		}
 		results = append(results, cardSearchResult{
-			Card:          card,
-			Evidence:      evidence,
-			RawScore:      agg.rawScore,
-			MatchSources:  sortedMatchSources(agg.matchSources),
-			RepositoryID:  agg.repositoryID,
-			AnalysisID:    agg.analysisID,
+			Card:         card,
+			Evidence:     evidence,
+			RawScore:     agg.rawScore,
+			MatchSources: sortedMatchSources(agg.matchSources),
+			RepositoryID: agg.repositoryID,
+			AnalysisID:   agg.analysisID,
 		})
 		if len(results) >= topK {
 			break

@@ -10,8 +10,8 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
-	"vibe-tree/backend/internal/api"
-	"vibe-tree/backend/internal/logx"
+	"vibecraft/backend/internal/api"
+	"vibecraft/backend/internal/logx"
 )
 
 type Options struct {
@@ -50,11 +50,11 @@ func New(opts Options, deps api.Deps) *gin.Engine {
 }
 
 // DevCORSFromEnv 功能：根据环境变量判断是否启用开发期 CORS。
-// 参数/返回：读取 `VIBE_TREE_ENV`；dev/development/空值返回 true。
+// 参数/返回：读取 `VIBECRAFT_ENV`；dev/development/空值返回 true。
 // 失败场景：无。
 // 副作用：读取环境变量。
 func DevCORSFromEnv() bool {
-	env := strings.ToLower(strings.TrimSpace(os.Getenv("VIBE_TREE_ENV")))
+	env := strings.ToLower(strings.TrimSpace(os.Getenv("VIBECRAFT_ENV")))
 	return env == "" || env == "dev" || env == "development"
 }
 
@@ -82,7 +82,7 @@ func requestLogger() gin.HandlerFunc {
 }
 
 func maybeServeUIBuild(r *gin.Engine) {
-	envDistDir := strings.TrimSpace(os.Getenv("VIBE_TREE_UI_DIST"))
+	envDistDir := strings.TrimSpace(os.Getenv("VIBECRAFT_UI_DIST"))
 	candidates := make([]string, 0, 2)
 	if envDistDir != "" {
 		candidates = append(candidates, envDistDir)

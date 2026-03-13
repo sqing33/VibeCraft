@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/store"
 )
 
 func TestChatSessionLifecycle_DemoExpert(t *testing.T) {

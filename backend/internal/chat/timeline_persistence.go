@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"vibe-tree/backend/internal/logx"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/logx"
+	"vibecraft/backend/internal/store"
 )
 
 // startTurnTimeline 功能：在一轮 chat 正式执行前创建后端 canonical timeline。

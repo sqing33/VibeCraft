@@ -3,9 +3,9 @@ package expert_test
 import (
 	"testing"
 
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/expert"
-	iflowcli "vibe-tree/backend/internal/iflow"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/expert"
+	iflowcli "vibecraft/backend/internal/iflow"
 )
 
 func TestResolveWithOptions_UsesToolDefaultModel(t *testing.T) {
@@ -105,8 +105,8 @@ func TestResolveWithOptions_IFLOWUsesOfficialModelSelection(t *testing.T) {
 	if got := res.Spec.Env["OPENAI_BASE_URL"]; got != "" {
 		t.Fatalf("OPENAI_BASE_URL = %q, want empty", got)
 	}
-	if got := res.Spec.Env["VIBE_TREE_MODEL_ID"]; got != "minimax-m2.5" {
-		t.Fatalf("VIBE_TREE_MODEL_ID = %q, want minimax-m2.5", got)
+	if got := res.Spec.Env["VIBECRAFT_MODEL_ID"]; got != "minimax-m2.5" {
+		t.Fatalf("VIBECRAFT_MODEL_ID = %q, want minimax-m2.5", got)
 	}
 }
 
@@ -135,8 +135,8 @@ func TestResolveWithOptions_OpenCodeSupportsAnthropicModel(t *testing.T) {
 	if got := res.Spec.Env["ANTHROPIC_BASE_URL"]; got != "https://anthropic.example.com" {
 		t.Fatalf("ANTHROPIC_BASE_URL = %q, want https://anthropic.example.com", got)
 	}
-	if got := res.Spec.Env["VIBE_TREE_PROTOCOL_FAMILY"]; got != "anthropic" {
-		t.Fatalf("VIBE_TREE_PROTOCOL_FAMILY = %q, want anthropic", got)
+	if got := res.Spec.Env["VIBECRAFT_PROTOCOL_FAMILY"]; got != "anthropic" {
+		t.Fatalf("VIBECRAFT_PROTOCOL_FAMILY = %q, want anthropic", got)
 	}
 	if got := res.Model; got != "claude-3-7-sonnet" {
 		t.Fatalf("model = %q, want claude-3-7-sonnet", got)

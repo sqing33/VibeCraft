@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-artifact_dir="${VIBE_TREE_ARTIFACT_DIR:-}"
-prompt="${VIBE_TREE_PROMPT:-}"
-system_prompt="${VIBE_TREE_SYSTEM_PROMPT:-}"
-model="${VIBE_TREE_MODEL:-}"
-model_id="${VIBE_TREE_MODEL_ID:-}"
-workspace="${VIBE_TREE_WORKSPACE:-$PWD}"
-cli_cmd="${VIBE_TREE_CLI_COMMAND_PATH:-claude}"
-resume_session_id="${VIBE_TREE_RESUME_SESSION_ID:-}"
-managed_settings_path="${VIBE_TREE_CLAUDE_SETTINGS_PATH:-}"
-managed_mcp_config_path="${VIBE_TREE_CLAUDE_MCP_CONFIG_PATH:-}"
-cli_tool_id="${VIBE_TREE_CLI_TOOL_ID:-claude}"
+artifact_dir="${VIBECRAFT_ARTIFACT_DIR:-}"
+prompt="${VIBECRAFT_PROMPT:-}"
+system_prompt="${VIBECRAFT_SYSTEM_PROMPT:-}"
+model="${VIBECRAFT_MODEL:-}"
+model_id="${VIBECRAFT_MODEL_ID:-}"
+workspace="${VIBECRAFT_WORKSPACE:-$PWD}"
+cli_cmd="${VIBECRAFT_CLI_COMMAND_PATH:-claude}"
+resume_session_id="${VIBECRAFT_RESUME_SESSION_ID:-}"
+managed_settings_path="${VIBECRAFT_CLAUDE_SETTINGS_PATH:-}"
+managed_mcp_config_path="${VIBECRAFT_CLAUDE_MCP_CONFIG_PATH:-}"
+cli_tool_id="${VIBECRAFT_CLI_TOOL_ID:-claude}"
 anthropic_api_key="${ANTHROPIC_API_KEY:-}"
 anthropic_base_url="${ANTHROPIC_BASE_URL:-}"
 status="ok"
@@ -46,7 +46,7 @@ ensure_claude_settings() {
     if [[ -z "$xdg_data_home" ]]; then
       xdg_data_home="$HOME/.local/share"
     fi
-    path="$xdg_data_home/vibe-tree/managed-clis/${tool_id:-claude}/settings.json"
+    path="$xdg_data_home/vibecraft/managed-clis/${tool_id:-claude}/settings.json"
   fi
   mkdir -p "$(dirname "$path")"
   printf '{}\n' > "$path"

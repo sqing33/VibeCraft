@@ -20,17 +20,17 @@ If no explicit dotenv path is configured, the system MUST attempt to locate the 
 - **THEN** the system MUST NOT attempt to load a default `.env` path
 
 ### Requirement: Dotenv path can be explicitly configured
-If `VIBE_TREE_DOTENV_PATH` is set, the system MUST attempt to load dotenv from that path.
+If `VIBECRAFT_DOTENV_PATH` is set, the system MUST attempt to load dotenv from that path.
 
 #### Scenario: Load dotenv from explicit path
-- **WHEN** `VIBE_TREE_DOTENV_PATH` is set to an existing dotenv file path
+- **WHEN** `VIBECRAFT_DOTENV_PATH` is set to an existing dotenv file path
 - **THEN** the system attempts to load dotenv from that path
 
 ### Requirement: Dotenv loading can be disabled
-If `VIBE_TREE_DOTENV` is set to `"0"`, the system MUST skip dotenv loading entirely.
+If `VIBECRAFT_DOTENV` is set to `"0"`, the system MUST skip dotenv loading entirely.
 
 #### Scenario: Disable dotenv loading
-- **WHEN** `VIBE_TREE_DOTENV` is `"0"`
+- **WHEN** `VIBECRAFT_DOTENV` is `"0"`
 - **THEN** the system does not attempt to load dotenv (default or explicit path)
 
 ### Requirement: Dotenv variables override existing process environment

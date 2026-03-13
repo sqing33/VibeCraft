@@ -12,14 +12,14 @@ import (
 	"strings"
 	"time"
 
-	"vibe-tree/backend/internal/chat"
-	"vibe-tree/backend/internal/execution"
-	"vibe-tree/backend/internal/expert"
-	"vibe-tree/backend/internal/id"
-	"vibe-tree/backend/internal/logx"
-	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/repolib/searchdb"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/chat"
+	"vibecraft/backend/internal/execution"
+	"vibecraft/backend/internal/expert"
+	"vibecraft/backend/internal/id"
+	"vibecraft/backend/internal/logx"
+	"vibecraft/backend/internal/paths"
+	"vibecraft/backend/internal/repolib/searchdb"
+	"vibecraft/backend/internal/store"
 )
 
 type CreateAnalysisParams struct {
@@ -34,7 +34,7 @@ type CreateAnalysisParams struct {
 }
 
 type CreateAnalysisResult struct {
-	Repository store.RepoSource        `json:"repository"`
+	Repository store.RepoSource         `json:"repository"`
 	Analysis   store.RepoAnalysisResult `json:"analysis"`
 }
 
@@ -141,13 +141,13 @@ func (s *Service) CreateAnalysis(ctx context.Context, params CreateAnalysisParam
 		RequestedRef: ref,
 		StoragePath:  layout.AnalysisDir,
 		ReportPath:   &layout.ReportPath,
-		Language:       firstNonEmpty(params.Language, "zh"),
-		Depth:          firstNonEmpty(params.Depth, "standard"),
-		AgentMode:      firstNonEmpty(params.AgentMode, "single"),
-		Features:       features,
-		RuntimeKind:    runtimeKind,
-		CLIToolID:      stringPtrIfNotEmpty(params.CLIToolID),
-		ModelID:        stringPtrIfNotEmpty(params.ModelID),
+		Language:     firstNonEmpty(params.Language, "zh"),
+		Depth:        firstNonEmpty(params.Depth, "standard"),
+		AgentMode:    firstNonEmpty(params.AgentMode, "single"),
+		Features:     features,
+		RuntimeKind:  runtimeKind,
+		CLIToolID:    stringPtrIfNotEmpty(params.CLIToolID),
+		ModelID:      stringPtrIfNotEmpty(params.ModelID),
 	})
 	if err != nil {
 		return CreateAnalysisResult{}, err
@@ -334,24 +334,24 @@ const (
 )
 
 type RepositoryViewLitePayload struct {
-	Repositories                       []store.RepoSourceSummary   `json:"repositories"`
-	Detail                             store.RepoLibraryDetail     `json:"detail"`
-	SelectedAnalysisID                 string                      `json:"selected_analysis_id"`
-	Cards                              []store.RepoKnowledgeCard   `json:"cards"`
-	SelectedCardID                     string                      `json:"selected_card_id"`
-	SelectedCard                       *store.RepoKnowledgeCard    `json:"selected_card,omitempty"`
+	Repositories                       []store.RepoSourceSummary     `json:"repositories"`
+	Detail                             store.RepoLibraryDetail       `json:"detail"`
+	SelectedAnalysisID                 string                        `json:"selected_analysis_id"`
+	Cards                              []store.RepoKnowledgeCard     `json:"cards"`
+	SelectedCardID                     string                        `json:"selected_card_id"`
+	SelectedCard                       *store.RepoKnowledgeCard      `json:"selected_card,omitempty"`
 	SelectedEvidence                   []store.RepoKnowledgeEvidence `json:"selected_evidence"`
-	SelectedIntegrationSectionMarkdown string                      `json:"selected_integration_section_markdown,omitempty"`
+	SelectedIntegrationSectionMarkdown string                        `json:"selected_integration_section_markdown,omitempty"`
 }
 
 type RepositoryCardHydration struct {
-	Card     store.RepoKnowledgeCard      `json:"card"`
+	Card     store.RepoKnowledgeCard       `json:"card"`
 	Evidence []store.RepoKnowledgeEvidence `json:"evidence"`
 }
 
 type RepositoryViewFullPayload struct {
-	AnalysisID     string                  `json:"analysis_id"`
-	ReportMarkdown string                  `json:"report_markdown"`
+	AnalysisID     string                    `json:"analysis_id"`
+	ReportMarkdown string                    `json:"report_markdown"`
 	CardsFull      []RepositoryCardHydration `json:"cards_full"`
 }
 
@@ -604,17 +604,17 @@ func (s *Service) Search(ctx context.Context, params SearchParams) (map[string]a
 	}
 
 	response := map[string]any{
-		"status":                "ok",
-		"engine":                "go-searchdb",
-		"generated_at":          time.Now().UTC().Format(time.RFC3339),
-		"query":                 query,
-		"mode":                  mode,
-		"limit":                 topK,
+		"status":                 "ok",
+		"engine":                 "go-searchdb",
+		"generated_at":           time.Now().UTC().Format(time.RFC3339),
+		"query":                  query,
+		"mode":                   mode,
+		"limit":                  topK,
 		"repo_filters_requested": uniqueTrimmed(params.RepoFilters),
-		"analysis_filters":      analysisFilters,
-		"vec_enabled":           idx.sdb.VecEnabled(),
-		"result_count":          len(results),
-		"results":               results,
+		"analysis_filters":       analysisFilters,
+		"vec_enabled":            idx.sdb.VecEnabled(),
+		"result_count":           len(results),
+		"results":                results,
 	}
 
 	resultJSON := ""
@@ -623,11 +623,11 @@ func (s *Service) Search(ctx context.Context, params SearchParams) (map[string]a
 	}
 	if resultJSON != "" {
 		if _, err := s.store.RecordRepoSimilarityQuery(ctx, store.RecordRepoSimilarityQueryParams{
-			QueryText:  query,
+			QueryText:   query,
 			RepoFilters: params.RepoFilters,
-			Mode:       mode,
-			TopK:       topK,
-			ResultJSON: &resultJSON,
+			Mode:        mode,
+			TopK:        topK,
+			ResultJSON:  &resultJSON,
 		}); err != nil {
 			logx.Warn("repo-library", "search", "记录 Repo Library 搜索历史失败", "err", err)
 		}
@@ -995,7 +995,6 @@ func int64FromAny(value any) *int64 {
 		return nil
 	}
 }
-
 
 func firstInt64(values ...*int64) *int64 {
 	for _, value := range values {

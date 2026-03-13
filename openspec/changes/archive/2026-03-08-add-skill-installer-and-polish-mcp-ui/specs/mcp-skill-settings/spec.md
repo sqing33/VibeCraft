@@ -37,7 +37,7 @@ Each skill entry MUST include:
 - description when available
 - resolved `path`
 - source/discovery metadata
-- persisted `enabled` state used by vibe-tree runtime filtering
+- persisted `enabled` state used by vibecraft runtime filtering
 
 The Skill settings UI MUST present a single enable/disable switch per skill.
 The Skill settings UI MUST NOT present per-tool binding switches.
@@ -76,7 +76,7 @@ After successful installation, the new skill MUST be discoverable from the Skill
 
 ### Requirement: Codex runtime MUST inject only enabled discovered skills
 The system MUST continue discovering skills from project and user roots.
-The vibe-tree runtime MUST only inject skills that are both discovered and enabled.
+The vibecraft runtime MUST only inject skills that are both discovered and enabled.
 If an expert specifies `enabled_skills`, the effective injected skill set MUST be the intersection of discovered skills, enabled skills, and `expert.enabled_skills`.
 
 #### Scenario: Runtime excludes disabled skill

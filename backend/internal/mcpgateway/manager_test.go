@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
+	"vibecraft/backend/internal/config"
 )
 
 func TestManager_EnsureSessionAccessTracksSessions(t *testing.T) {

@@ -1,6 +1,6 @@
 ## Context
 
-vibe-tree 的 Codex CLI 对接采用 `codex app-server --listen stdio://` 的 JSON-RPC 协议：daemon 启动子进程并逐行解析 stdout 的 JSON envelope，然后把 `item/*` / `codex/event/*` 通知映射为 `chat.turn.event` 结构化 feed 与兼容的 `chat.turn.delta` 流式增量。
+vibecraft 的 Codex CLI 对接采用 `codex app-server --listen stdio://` 的 JSON-RPC 协议：daemon 启动子进程并逐行解析 stdout 的 JSON envelope，然后把 `item/*` / `codex/event/*` 通知映射为 `chat.turn.event` 结构化 feed 与兼容的 `chat.turn.delta` 流式增量。
 
 当前实现存在几类稳定性问题：
 

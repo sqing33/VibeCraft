@@ -3,7 +3,7 @@
 当前 `main` 已具备：
 - `chat_sessions` 上的 `cli_tool_id/model_id/cli_session_id`
 - `runCLITurn()` 的 resume-first 尝试
-- wrapper 级 `VIBE_TREE_RESUME_SESSION_ID`
+- wrapper 级 `VIBECRAFT_RESUME_SESSION_ID`
 
 但稳定性还不足：
 - UI `Select` 只有 `selectedKeys`，没有显式 render label，工具切换/默认值变化后容易显示空白。

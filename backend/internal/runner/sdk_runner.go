@@ -16,9 +16,9 @@ import (
 	openai_responses "github.com/openai/openai-go/responses"
 	openai_shared "github.com/openai/openai-go/shared"
 
-	"vibe-tree/backend/internal/dag"
-	"vibe-tree/backend/internal/expertschema"
-	"vibe-tree/backend/internal/openaicompat"
+	"vibecraft/backend/internal/dag"
+	"vibecraft/backend/internal/expertschema"
+	"vibecraft/backend/internal/openaicompat"
 )
 
 // SDKRunner 功能：使用 OpenAI/Anthropic 官方 SDK 执行一次性生成任务，并以流式方式输出到 execution 日志。

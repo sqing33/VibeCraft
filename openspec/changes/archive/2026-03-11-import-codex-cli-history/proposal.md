@@ -1,6 +1,6 @@
 ## Why
 
-当前聊天页只能展示由 `vibe-tree` 自己创建的 chat session，用户已经积累在 `~/.codex` 下的 Codex CLI 历史会话无法直接导入，也无法在前端挑选需要迁入的记录。即使读取到了 thread id，很多标题仍然是 `Codex <uuid>` 或长 worker prompt，缺少可读性，用户很难判断应该导入哪一条。
+当前聊天页只能展示由 `vibecraft` 自己创建的 chat session，用户已经积累在 `~/.codex` 下的 Codex CLI 历史会话无法直接导入，也无法在前端挑选需要迁入的记录。即使读取到了 thread id，很多标题仍然是 `Codex <uuid>` 或长 worker prompt，缺少可读性，用户很难判断应该导入哪一条。
 
 ## What Changes
 

@@ -1,11 +1,11 @@
-# vibe-tree 项目结构与功能定位索引
+# VibeCraft 项目结构与功能定位索引
 
 > 更新时间：2026-03-11
 > 说明：本文档用于开发期快速定位功能文件。修改前先读本文件，再做定向检索。
 
 ## 1. 项目概览
 
-`vibe-tree` 当前处于 MVP 早期阶段，已完成 daemon 与 UI 最小联通链路，并在此基础上推进 PTY、工作流与 DAG 编排能力。
+`VibeCraft` 当前处于 MVP 早期阶段，已完成 daemon 与 UI 最小联通链路，并在此基础上推进 PTY、工作流与 DAG 编排能力。
 
 ## 2. 根目录职责表
 
@@ -65,8 +65,8 @@
 | `ui/src/app/components/LoadingVeil.tsx` | 共享轻量刷新遮罩：在保留旧内容时给侧栏/主内容区提供非打断式 loading 反馈 |
 | `ui/src/stores/repoLibraryUIStore.ts` | Repo Library 跨路由 UI 缓存：保留仓库列表、检索结果与仓库详情快照，支撑 stale-while-revalidate 过渡 |
 | `ui/src/stores/orchestrationUIStore.ts` | Orchestrations 跨路由 UI 缓存：保留最近编排列表与详情快照，避免切换时闪空 |
-| `backend/cmd/vibe-tree-daemon/main.go`     | daemon 进程入口，负责加载配置、启动 HTTP Server、处理优雅退出                                                                         |
-| `backend/internal/server/server.go`        | Gin Engine 装配：恢复中间件、请求日志、dev CORS，并挂载 `internal/api` 路由；可选挂载 UI 静态资源（`ui/dist` 或 `VIBE_TREE_UI_DIST`） |
+| `backend/cmd/vibecraft-daemon/main.go`     | daemon 进程入口，负责加载配置、启动 HTTP Server、处理优雅退出                                                                         |
+| `backend/internal/server/server.go`        | Gin Engine 装配：恢复中间件、请求日志、dev CORS，并挂载 `internal/api` 路由；可选挂载 UI 静态资源（`ui/dist` 或 `VIBECRAFT_UI_DIST`） |
 | `backend/internal/api/api.go`              | HTTP/WS handlers：health、workflow CRUD、execution start/log/cancel、WebSocket 升级入口，并集中注册 chat / codex-history 等子路由     |
 | `backend/internal/api/codex_history.go`    | Codex 历史导入 API：列出 `~/.codex` 线程与按 thread 批量导入（`/api/v1/codex-history/*`）                                            |
 | `backend/internal/api/orchestrations.go`   | Orchestration HTTP handlers：create/list/detail/cancel 与 agent-run retry                                                              |
@@ -135,7 +135,7 @@
 | `backend/internal/store/cancel.go`         | Workflow 取消：标记 workflow canceled，并返回需 cancel 的 running executions                                                          |
 | `backend/internal/store/failures.go`       | 失败兜底：启动/落库失败时标记 node/workflow failed                                                                                    |
 | `backend/internal/store/recovery.go`       | 重启恢复：将 DB 中遗留的 running execution 标记为 failed（daemon_restarted）                                                          |
-| `backend/internal/paths/paths.go`          | XDG data/logs/state.db/chat-attachments 路径解析（`~/.local/share/vibe-tree/...`）                                                   |
+| `backend/internal/paths/paths.go`          | XDG data/logs/state.db/chat-attachments 路径解析（`~/.local/share/vibecraft/...`）                                                   |
 | `backend/internal/id/id.go`                | ID 生成：`wf_`/`nd_`/`ex_` 前缀 ID（MVP 先用短随机）                                                                                  |
 | `backend/internal/logx/logx.go`            | 后端统一日志格式封装（`level=... module=... action=... msg="..."`）                                                                   |
 | `backend/internal/version/version.go`      | 版本信息（Commit/BuiltAt，可用 ldflags 注入；用于 `/api/v1/info`）                                                                    |
@@ -174,7 +174,7 @@
 
 | 关键词                             | 优先查看文件                                                                                                                                                                                                                               |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| daemon 启动入口                    | `backend/cmd/vibe-tree-daemon/main.go`                                                                                                                                                                                                     |
+| daemon 启动入口                    | `backend/cmd/vibecraft-daemon/main.go`                                                                                                                                                                                                     |
 | 健康检查 API                       | `backend/internal/api/api.go`                                                                                                                                                                                                              |
 | daemon info API                    | `backend/internal/api/info.go`, `ui/src/lib/daemon.ts`, `ui/src/App.tsx`                                                                                                                                                                   |
 | experts 列表 API                   | `backend/internal/api/experts.go`, `backend/internal/expert/expert.go`, `ui/src/lib/daemon.ts`, `ui/src/App.tsx`                                                                                                                           |
@@ -182,7 +182,7 @@
 | 请求日志格式                       | `backend/internal/server/server.go`                                                                                                                                                                                                        |
 | UI 静态资源挂载（ui/dist）         | `backend/internal/server/server.go`, `scripts/web.sh`                                                                                                                                                                                      |
 | daemon 地址默认值                  | `backend/internal/config/config.go`, `ui/src/lib/daemon.ts`                                                                                                                                                                                |
-| dotenv/.env 自动加载               | `backend/internal/dotenv/dotenv.go`, `backend/cmd/vibe-tree-daemon/main.go`                                                                                                                                                                |
+| dotenv/.env 自动加载               | `backend/internal/dotenv/dotenv.go`, `backend/cmd/vibecraft-daemon/main.go`                                                                                                                                                                |
 | UI 运行时切换 daemon URL           | `ui/src/App.tsx`                                                                                                                                                                                                                           |
 | API 来源设置                       | `backend/internal/api/settings_api_sources.go`, `backend/internal/config/runtime_settings.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/APISourceSettingsTab.tsx`, `ui/src/lib/daemon.ts` |
 | Runtime 模型设置                   | `backend/internal/api/settings_runtime_models.go`, `backend/internal/config/runtime_settings.go`, `backend/internal/api/chat.go`, `backend/internal/expert/expert.go`, `ui/src/app/components/SettingsDialog.tsx`, `ui/src/app/components/RuntimeModelSettingsTab.tsx`, `ui/src/lib/runtimeModels.ts`, `ui/src/lib/daemon.ts` |
@@ -200,7 +200,7 @@
 | XDG 日志路径                       | `backend/internal/paths/paths.go`                                                                                                                                                                                                          |
 | Expert 配置/模板解析               | `backend/internal/config/config.go`, `backend/internal/expert/expert.go`                                                                                                                                                                   |
 | execution timeout 语义             | `backend/internal/execution/manager.go`, `backend/internal/scheduler/scheduler.go`                                                                                                                                                         |
-| SQLite state.db 初始化             | `backend/cmd/vibe-tree-daemon/main.go`, `backend/internal/store/sqlite.go`, `backend/internal/store/migrate.go`                                                                                                                            |
+| SQLite state.db 初始化             | `backend/cmd/vibecraft-daemon/main.go`, `backend/internal/store/sqlite.go`, `backend/internal/store/migrate.go`                                                                                                                            |
 | Chat Session API                   | `backend/internal/api/chat.go`, `backend/internal/api/codex_history.go`, `backend/internal/chat/manager.go`, `backend/internal/chat/attachments.go`, `backend/internal/chat/timeline_persistence.go`, `backend/internal/codexhistory/service.go`, `backend/internal/store/chat.go`, `backend/internal/store/chat_import.go`, `backend/internal/store/chat_turns.go`, `ui/src/lib/daemon.ts`                                                                                |
 | Chat 自动上下文压缩               | `backend/internal/chat/manager.go`, `backend/internal/store/chat.go`                                                                                                                                                                                           |
 | Chat provider anchor 续上下文      | `backend/internal/chat/manager.go`, `backend/internal/store/chat.go`                                                                                                                                                                                           |
@@ -215,7 +215,7 @@
 | Workflow CRUD API                  | `backend/internal/api/workflows.go`, `backend/internal/store/workflows.go`                                                                                                                                                                 |
 | Workflow Start（master 执行）      | `backend/internal/api/workflow_start.go`, `backend/internal/store/nodes.go`, `backend/internal/store/executions.go`                                                                                                                        |
 | Workflow Nodes API                 | `backend/internal/api/workflow_start.go`, `backend/internal/store/nodes.go`                                                                                                                                                                |
-| 重启恢复（running→failed）         | `backend/cmd/vibe-tree-daemon/main.go`, `backend/internal/store/recovery.go`                                                                                                                                                               |
+| 重启恢复（running→failed）         | `backend/cmd/vibecraft-daemon/main.go`, `backend/internal/store/recovery.go`                                                                                                                                                               |
 | execution 启动                     | `backend/internal/api/api.go`, `backend/internal/execution/manager.go`                                                                                                                                                                     |
 | execution 日志落盘                 | `backend/internal/execution/manager.go`                                                                                                                                                                                                    |
 | execution log tail API             | `backend/internal/api/api.go`, `backend/internal/execution/logtail.go`                                                                                                                                                                     |
@@ -224,7 +224,7 @@
 | execution cancel API               | `backend/internal/api/api.go`, `backend/internal/execution/manager.go`                                                                                                                                                                     |
 | DAG JSON 提取/校验                 | `backend/internal/dag/dag.go`, `backend/internal/api/workflow_start.go`                                                                                                                                                                    |
 | DAG 落库（nodes/edges）            | `backend/internal/store/dag.go`, `backend/internal/api/workflow_start.go`                                                                                                                                                                  |
-| 调度器（依赖/并发/fail-fast）      | `backend/internal/scheduler/scheduler.go`, `backend/cmd/vibe-tree-daemon/main.go`, `backend/internal/store/scheduler.go`                                                                                                                   |
+| 调度器（依赖/并发/fail-fast）      | `backend/internal/scheduler/scheduler.go`, `backend/cmd/vibecraft-daemon/main.go`, `backend/internal/store/scheduler.go`                                                                                                                   |
 | manual approve API                 | `backend/internal/api/approve.go`, `backend/internal/store/approval.go`                                                                                                                                                                    |
 | node patch API                     | `backend/internal/api/nodes.go`, `backend/internal/store/node_patch.go`                                                                                                                                                                    |
 | node retry/cancel API              | `backend/internal/api/nodes.go`, `backend/internal/store/nodes.go`, `backend/internal/scheduler/scheduler.go`                                                                                                                              |

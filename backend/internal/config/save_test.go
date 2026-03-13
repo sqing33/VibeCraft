@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
+	"vibecraft/backend/internal/config"
 )
 
 func TestSaveTo_Writes0600(t *testing.T) {
@@ -24,4 +24,3 @@ func TestSaveTo_Writes0600(t *testing.T) {
 		t.Fatalf("unexpected file perm: %v", got)
 	}
 }
-

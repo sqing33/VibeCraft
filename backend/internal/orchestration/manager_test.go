@@ -3,7 +3,7 @@ package orchestration
 import (
 	"testing"
 
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/store"
 )
 
 func TestBuildNextRound_ReplansLatestRoundAgentRuns(t *testing.T) {

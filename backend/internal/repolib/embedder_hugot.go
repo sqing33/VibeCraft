@@ -24,15 +24,15 @@ type hugotEmbedder struct {
 func newHugotEmbedder(ctx context.Context, modelsDir string) (*hugotEmbedder, error) {
 	_ = ctx
 
-	modelID := strings.TrimSpace(os.Getenv("VIBE_TREE_EMBEDDER_MODEL_ID"))
+	modelID := strings.TrimSpace(os.Getenv("VIBECRAFT_EMBEDDER_MODEL_ID"))
 	if modelID == "" {
 		modelID = "KnightsAnalytics/all-MiniLM-L6-v2"
 	}
 
-	allowDownload := envBool("VIBE_TREE_EMBEDDER_ALLOW_DOWNLOAD", true)
-	verbose := envBool("VIBE_TREE_EMBEDDER_VERBOSE", false)
+	allowDownload := envBool("VIBECRAFT_EMBEDDER_ALLOW_DOWNLOAD", true)
+	verbose := envBool("VIBECRAFT_EMBEDDER_VERBOSE", false)
 
-	if override := strings.TrimSpace(os.Getenv("VIBE_TREE_EMBEDDER_MODELS_DIR")); override != "" {
+	if override := strings.TrimSpace(os.Getenv("VIBECRAFT_EMBEDDER_MODELS_DIR")); override != "" {
 		modelsDir = override
 	}
 	if strings.TrimSpace(modelsDir) == "" {
@@ -134,7 +134,7 @@ func ensureHugotModel(modelID string, modelsDir string, allowDownload bool, verb
 		return modelDir, nil
 	}
 	if !allowDownload {
-		return "", fmt.Errorf("embedder model missing at %s (set VIBE_TREE_EMBEDDER_ALLOW_DOWNLOAD=1 to auto-download)", modelDir)
+		return "", fmt.Errorf("embedder model missing at %s (set VIBECRAFT_EMBEDDER_ALLOW_DOWNLOAD=1 to auto-download)", modelDir)
 	}
 	opts := hugot.NewDownloadOptions()
 	opts.Verbose = verbose

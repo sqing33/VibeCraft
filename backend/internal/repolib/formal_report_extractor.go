@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/store"
 )
 
 var evidenceLinePattern = regexp.MustCompile(

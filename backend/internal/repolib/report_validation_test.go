@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/store"
 )
 
 const validationTestFeatureRaw1 = "1. 为什么需要正式报告强校验"

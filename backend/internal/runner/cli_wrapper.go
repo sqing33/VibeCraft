@@ -23,12 +23,12 @@ func CLIScriptPath(family string) (string, error) {
 	if family == "" {
 		return "", fmt.Errorf("cli family is required")
 	}
-	if envPath := strings.TrimSpace(os.Getenv("VIBE_TREE_AGENT_RUNTIME_" + strings.ToUpper(family) + "_SCRIPT")); envPath != "" {
+	if envPath := strings.TrimSpace(os.Getenv("VIBECRAFT_AGENT_RUNTIME_" + strings.ToUpper(family) + "_SCRIPT")); envPath != "" {
 		return envPath, nil
 	}
 	name := family + "_exec.sh"
 	candidates := make([]string, 0, 8)
-	if root := strings.TrimSpace(os.Getenv("VIBE_TREE_AGENT_RUNTIMES_DIR")); root != "" {
+	if root := strings.TrimSpace(os.Getenv("VIBECRAFT_AGENT_RUNTIMES_DIR")); root != "" {
 		candidates = append(candidates, filepath.Join(root, name))
 	}
 	if wd, err := os.Getwd(); err == nil {

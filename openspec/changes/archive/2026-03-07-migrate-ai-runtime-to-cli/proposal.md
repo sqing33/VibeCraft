@@ -1,6 +1,6 @@
 ## Why
 
-`vibe-tree` 当前的主要 AI 执行链路仍以 SDK provider/model 为中心，这让 chat、workflow、orchestration 等需要文件操作、工具调用、长上下文连续性的场景被迫围绕“流式文本调用”设计。现在最需要解决的不是再加更多模型，而是把后端主执行路径切换为 CLI runtime，让 SDK 只保留在 thinking translation、模型测试等超轻量辅助任务里。
+`vibecraft` 当前的主要 AI 执行链路仍以 SDK provider/model 为中心，这让 chat、workflow、orchestration 等需要文件操作、工具调用、长上下文连续性的场景被迫围绕“流式文本调用”设计。现在最需要解决的不是再加更多模型，而是把后端主执行路径切换为 CLI runtime，让 SDK 只保留在 thinking translation、模型测试等超轻量辅助任务里。
 
 ## What Changes
 

@@ -39,7 +39,7 @@ If validation fails, the API MUST return HTTP 400 with an error message.
 #### Scenario: Update LLM settings successfully
 
 - **WHEN** client calls `PUT /api/v1/settings/llm` with a valid settings payload
-- **THEN** the daemon persists the settings to `~/.config/vibe-tree/config.json`
+- **THEN** the daemon persists the settings to `~/.config/vibecraft/config.json`
 - **AND** the response returns the updated settings (with masked keys)
 
 #### Scenario: Reject unknown source reference
@@ -71,7 +71,7 @@ When persisting LLM settings to disk, the system MUST:
 
 #### Scenario: Persisted config is private
 
-- **WHEN** daemon writes `~/.config/vibe-tree/config.json`
+- **WHEN** daemon writes `~/.config/vibecraft/config.json`
 - **THEN** the file mode is `0600`
 
 ### Requirement: LLM settings API MUST NOT expose plaintext API keys

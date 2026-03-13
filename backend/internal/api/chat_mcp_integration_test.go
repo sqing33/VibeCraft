@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/store"
 )
 
 func TestChatSession_CreateUsesDefaultMCPSelectionAndPatchPersists(t *testing.T) {

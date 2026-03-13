@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/store"
 )
 
 type PreparedWorkspace struct {
@@ -65,8 +65,8 @@ func Prepare(ctx context.Context, run store.AgentRun) (PreparedWorkspace, error)
 	if strings.TrimSpace(baseRef) == "HEAD" {
 		baseRef, _ = gitOutput(ctx, repoRoot, "rev-parse", "--short", "HEAD")
 	}
-	branchName := sanitizeBranch(fmt.Sprintf("vibe-tree/%s/%s", trimID(run.OrchestrationID), trimID(run.ID)))
-	worktreePath := filepath.Join(os.TempDir(), "vibe-tree-worktrees", trimID(run.OrchestrationID), trimID(run.ID))
+	branchName := sanitizeBranch(fmt.Sprintf("vibecraft/%s/%s", trimID(run.OrchestrationID), trimID(run.ID)))
+	worktreePath := filepath.Join(os.TempDir(), "vibecraft-worktrees", trimID(run.OrchestrationID), trimID(run.ID))
 	if err := os.MkdirAll(filepath.Dir(worktreePath), 0o755); err != nil {
 		prepared.Mode = "shared_workspace"
 		prepared.WorkspacePath = run.WorkspacePath
@@ -275,7 +275,7 @@ func sanitizeBranch(v string) string {
 	v = branchUnsafe.ReplaceAllString(v, "-")
 	v = strings.Trim(v, "-/")
 	if v == "" {
-		return "vibe-tree/agent"
+		return "vibecraft/agent"
 	}
 	return v
 }

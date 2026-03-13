@@ -18,7 +18,7 @@ New iFlow-only config fields:
 
 ### 2. Use an app-managed iFlow home
 
-The daemon uses `$XDG_DATA_HOME/vibe-tree/iflow-home` as the iFlow home for:
+The daemon uses `$XDG_DATA_HOME/vibecraft/iflow-home` as the iFlow home for:
 
 - browser-login persistence
 - runtime reuse across sessions
@@ -48,11 +48,11 @@ For each iFlow run:
 - sync effective MCP server definitions into project scope with `iflow mcp add-json ... --scope project`
 - pass `--allowed-mcp-server-names` for the session-selected/default-enabled subset
 
-This preserves existing vibe-tree MCP registry semantics while using iFlow’s native MCP loading path.
+This preserves existing vibecraft MCP registry semantics while using iFlow’s native MCP loading path.
 
 ### 5. Skill injection is prompt-based
 
-The existing skill binding registry is reused. Effective skills are appended to `VIBE_TREE_SYSTEM_PROMPT` in the same style already used for Codex. This keeps one consistent cross-tool skill model without depending on iFlow marketplace installs.
+The existing skill binding registry is reused. Effective skills are appended to `VIBECRAFT_SYSTEM_PROMPT` in the same style already used for Codex. This keeps one consistent cross-tool skill model without depending on iFlow marketplace installs.
 
 ## Backend Changes
 

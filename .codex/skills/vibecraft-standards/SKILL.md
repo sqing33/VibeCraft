@@ -1,6 +1,6 @@
 ---
-name: vibe-tree-standards
-description: "统一 vibe-tree 全仓库开发规范：运行日志格式、中文四要素注释、Git 提交标题 `type(scope): 中文信息`，并强制先读取 `PROJECT_STRUCTURE.md` 做功能定位。Use when users ask to standardize logs/comments/commit naming, request commit title suggestions, or ask where a feature is implemented."
+name: vibecraft-standards
+description: "统一 VibeCraft 全仓库开发规范：运行日志格式、中文四要素注释、Git 提交标题 `type(scope): 中文信息`，并强制先读取 `PROJECT_STRUCTURE.md` 做功能定位。Use when users ask to standardize logs/comments/commit naming, request commit title suggestions, or ask where a feature is implemented."
 ---
 
 # Vibe Tree Standards

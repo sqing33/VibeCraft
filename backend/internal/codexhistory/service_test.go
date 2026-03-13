@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/store"
 
 	_ "modernc.org/sqlite"
 )

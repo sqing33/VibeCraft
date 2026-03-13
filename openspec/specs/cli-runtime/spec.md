@@ -2,7 +2,7 @@
 
 ## Purpose
 
-CLI runtime 定义 `vibe-tree` 默认 AI 执行路径的统一 contract：主 chat / workflow / orchestration 通过外部 CLI agent 执行，SDK 仅保留为 helper-only 能力。
+CLI runtime 定义 `vibecraft` 默认 AI 执行路径的统一 contract：主 chat / workflow / orchestration 通过外部 CLI agent 执行，SDK 仅保留为 helper-only 能力。
 ## Requirements
 ### Requirement: CLI runtime MUST be the default AI execution path
 The system MUST execute the following primary AI surfaces through CLI runtime by default:
@@ -67,7 +67,7 @@ CLI wrappers used by chat turns MUST write a `session.json` artifact whenever th
 When a chat session already has a CLI-native session/thread id, wrappers MUST prefer the tool's native resume mechanism and accept only the current turn input from the application layer.
 
 #### Scenario: Codex wrapper resumes by stored session id
-- **WHEN** a chat turn provides `VIBE_TREE_RESUME_SESSION_ID` to the Codex wrapper
+- **WHEN** a chat turn provides `VIBECRAFT_RESUME_SESSION_ID` to the Codex wrapper
 - **THEN** the wrapper invokes `codex exec resume` for that turn
 
 ### Requirement: Chat wrappers MUST emit normalized or parseable streaming events
@@ -245,3 +245,15 @@ The runtime MUST NOT require the user to separately copy the saved MCP registry 
 - **THEN** the runtime syncs only the gateway MCP connection into the managed iFlow project config
 - **AND** iFlow can use session-authorized downstream tools through that gateway
 
+### Requirement: CLI runtime defaults MUST migrate away from vibe-tree-prefixed identifiers
+CLI runtime defaults MUST use the current product runtime prefix for managed config roots, environment variables, and generated runtime metadata.
+
+Where older `vibe-tree`-prefixed identifiers already exist in user environments, the runtime MUST preserve compatibility through migration or fallback lookup during the rename transition.
+
+#### Scenario: Runtime starts after rename on a fresh machine
+- **WHEN** the system launches a CLI runtime in a fresh environment
+- **THEN** managed config roots and runtime metadata use the current runtime prefix
+
+#### Scenario: Runtime starts after rename on an upgraded machine
+- **WHEN** the system launches a CLI runtime on a machine that already has old `vibe-tree`-prefixed state
+- **THEN** the runtime can still resolve the required state through migration or compatibility lookup

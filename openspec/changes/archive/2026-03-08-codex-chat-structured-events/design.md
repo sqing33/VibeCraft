@@ -1,6 +1,6 @@
 ## Context
 
-当前 `vibe-tree` 的 Codex 聊天路径已经从 `codex exec --json` 切到优先使用 `codex app-server`，并能在 turn 运行中广播：
+当前 `vibecraft` 的 Codex 聊天路径已经从 `codex exec --json` 切到优先使用 `codex app-server`，并能在 turn 运行中广播：
 
 - `chat.turn.delta`：最终回答文本增量
 - `chat.turn.thinking.delta`：thinking 或 progress 文本增量

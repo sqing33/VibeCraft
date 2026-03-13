@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"vibe-tree/backend/internal/execution"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/ws"
+	"vibecraft/backend/internal/execution"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/ws"
 )
 
 type mockSDKRunner struct{}
@@ -24,14 +24,14 @@ func (r mockProcessRunner) StartOneshot(ctx context.Context, spec runner.RunSpec
 		return nil, errors.New("mockProcessRunner requires non-SDK spec")
 	}
 	joined := strings.Join(spec.Args, " ")
-	if strings.Contains(joined, "codex_exec.sh") || strings.Contains(joined, "claude_exec.sh") || strings.TrimSpace(spec.Env["VIBE_TREE_CLI_FAMILY"]) != "" {
+	if strings.Contains(joined, "codex_exec.sh") || strings.Contains(joined, "claude_exec.sh") || strings.TrimSpace(spec.Env["VIBECRAFT_CLI_FAMILY"]) != "" {
 		runCtx, cancel := context.WithCancel(ctx)
 		pr, pw := io.Pipe()
 		h := &mockPipeHandle{ctx: runCtx, cancel: cancel, outR: pr, outW: pw, startedAt: time.Now(), done: make(chan struct{})}
 		go h.run(func() error {
-			prompt := strings.TrimSpace(spec.Env["VIBE_TREE_PROMPT"])
+			prompt := strings.TrimSpace(spec.Env["VIBECRAFT_PROMPT"])
 			output := "mock cli: " + prompt
-			if strings.TrimSpace(spec.Env["VIBE_TREE_OUTPUT_SCHEMA"]) == "dag_v1" || strings.Contains(strings.ToLower(spec.Env["VIBE_TREE_SYSTEM_PROMPT"]), "single json object") {
+			if strings.TrimSpace(spec.Env["VIBECRAFT_OUTPUT_SCHEMA"]) == "dag_v1" || strings.Contains(strings.ToLower(spec.Env["VIBECRAFT_SYSTEM_PROMPT"]), "single json object") {
 				output = `{
   "workflow_title": "",
   "nodes": [

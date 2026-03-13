@@ -11,8 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"vibe-tree/backend/internal/repolib"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/repolib"
+	"vibecraft/backend/internal/store"
 )
 
 type createRepoAnalysisRequest struct {
@@ -239,7 +239,7 @@ func listRepoCardsHandler(deps Deps) gin.HandlerFunc {
 		items, err := deps.RepoLibrary.ListCards(c.Request.Context(), store.ListRepoCardsParams{
 			RepoSourceID: strings.TrimSpace(c.Query("repository_id")),
 			AnalysisID:   strings.TrimSpace(c.Query("analysis_id")),
-			Limit:          queryLimit(c, 500),
+			Limit:        queryLimit(c, 500),
 		})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

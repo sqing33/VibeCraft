@@ -16,17 +16,17 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"vibe-tree/backend/internal/api"
-	"vibe-tree/backend/internal/chat"
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/execution"
-	"vibe-tree/backend/internal/expert"
-	"vibe-tree/backend/internal/orchestration"
-	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/scheduler"
-	"vibe-tree/backend/internal/server"
-	"vibe-tree/backend/internal/store"
-	"vibe-tree/backend/internal/ws"
+	"vibecraft/backend/internal/api"
+	"vibecraft/backend/internal/chat"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/execution"
+	"vibecraft/backend/internal/expert"
+	"vibecraft/backend/internal/orchestration"
+	"vibecraft/backend/internal/paths"
+	"vibecraft/backend/internal/scheduler"
+	"vibecraft/backend/internal/server"
+	"vibecraft/backend/internal/store"
+	"vibecraft/backend/internal/ws"
 )
 
 type testEnv struct {
@@ -40,7 +40,7 @@ type testEnv struct {
 func newTestEnv(t *testing.T, cfg config.Config, maxConcurrency int) *testEnv {
 	t.Helper()
 
-	// Ensure tests do not depend on a developer's local ~/.config/vibe-tree/config.json.
+	// Ensure tests do not depend on a developer's local ~/.config/vibecraft/config.json.
 	// Some API handlers load persisted config (for defaults), so we isolate XDG config per test.
 	if os.Getenv("XDG_CONFIG_HOME") == "" {
 		t.Setenv("XDG_CONFIG_HOME", t.TempDir())

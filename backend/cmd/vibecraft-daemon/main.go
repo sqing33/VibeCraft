@@ -11,24 +11,24 @@ import (
 	"syscall"
 	"time"
 
-	"vibe-tree/backend/internal/api"
-	"vibe-tree/backend/internal/chat"
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/codexhistory"
-	"vibe-tree/backend/internal/dotenv"
-	"vibe-tree/backend/internal/execution"
-	"vibe-tree/backend/internal/expert"
-	iflowcli "vibe-tree/backend/internal/iflow"
-	"vibe-tree/backend/internal/logx"
-	"vibe-tree/backend/internal/mcpgateway"
-	"vibe-tree/backend/internal/orchestration"
-	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/repolib"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/scheduler"
-	"vibe-tree/backend/internal/server"
-	"vibe-tree/backend/internal/store"
-	"vibe-tree/backend/internal/ws"
+	"vibecraft/backend/internal/api"
+	"vibecraft/backend/internal/chat"
+	"vibecraft/backend/internal/codexhistory"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/dotenv"
+	"vibecraft/backend/internal/execution"
+	"vibecraft/backend/internal/expert"
+	iflowcli "vibecraft/backend/internal/iflow"
+	"vibecraft/backend/internal/logx"
+	"vibecraft/backend/internal/mcpgateway"
+	"vibecraft/backend/internal/orchestration"
+	"vibecraft/backend/internal/paths"
+	"vibecraft/backend/internal/repolib"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/scheduler"
+	"vibecraft/backend/internal/server"
+	"vibecraft/backend/internal/store"
+	"vibecraft/backend/internal/ws"
 )
 
 func main() {
@@ -39,7 +39,7 @@ func main() {
 	} else if res.Attempted && res.FailureReason == "not_found" {
 		logx.Info("daemon", "dotenv", "未找到 .env，已跳过", "path", res.Path)
 	} else if res.SkippedReason == "disabled" {
-		logx.Info("daemon", "dotenv", "dotenv 已禁用（VIBE_TREE_DOTENV=0）")
+		logx.Info("daemon", "dotenv", "dotenv 已禁用（VIBECRAFT_DOTENV=0）")
 	}
 
 	cfg, cfgPath, err := config.Load()

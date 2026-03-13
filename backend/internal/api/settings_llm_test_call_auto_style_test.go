@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
+	"vibecraft/backend/internal/config"
 )
 
 func TestLLMTestAPI_PersistsDetectedStyleForSavedModel(t *testing.T) {

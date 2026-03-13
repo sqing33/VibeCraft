@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-prompt="${VIBE_TREE_PROMPT:-}"
-system_prompt="${VIBE_TREE_SYSTEM_PROMPT:-}"
-model="${VIBE_TREE_MODEL:-${VIBE_TREE_MODEL_ID:-}}"
-model_id="${VIBE_TREE_MODEL_ID:-}"
-artifact_dir="${VIBE_TREE_ARTIFACT_DIR:-}"
-workspace="${VIBE_TREE_WORKSPACE:-$PWD}"
-cli_cmd="${VIBE_TREE_CLI_COMMAND_PATH:-iflow}"
-resume_session_id="${VIBE_TREE_RESUME_SESSION_ID:-}"
-iflow_home="${VIBE_TREE_IFLOW_HOME:-}"
-iflow_auth_mode="${VIBE_TREE_IFLOW_AUTH_MODE:-browser}"
-iflow_api_key="${VIBE_TREE_IFLOW_API_KEY:-}"
-iflow_base_url="${VIBE_TREE_IFLOW_BASE_URL:-https://apis.iflow.cn/v1}"
-iflow_allowed_mcp_servers="${VIBE_TREE_IFLOW_ALLOWED_MCP_SERVERS:-}"
-iflow_mcp_servers_json="${VIBE_TREE_IFLOW_MCP_SERVERS_JSON:-}"
+prompt="${VIBECRAFT_PROMPT:-}"
+system_prompt="${VIBECRAFT_SYSTEM_PROMPT:-}"
+model="${VIBECRAFT_MODEL:-${VIBECRAFT_MODEL_ID:-}}"
+model_id="${VIBECRAFT_MODEL_ID:-}"
+artifact_dir="${VIBECRAFT_ARTIFACT_DIR:-}"
+workspace="${VIBECRAFT_WORKSPACE:-$PWD}"
+cli_cmd="${VIBECRAFT_CLI_COMMAND_PATH:-iflow}"
+resume_session_id="${VIBECRAFT_RESUME_SESSION_ID:-}"
+iflow_home="${VIBECRAFT_IFLOW_HOME:-}"
+iflow_auth_mode="${VIBECRAFT_IFLOW_AUTH_MODE:-browser}"
+iflow_api_key="${VIBECRAFT_IFLOW_API_KEY:-}"
+iflow_base_url="${VIBECRAFT_IFLOW_BASE_URL:-https://apis.iflow.cn/v1}"
+iflow_allowed_mcp_servers="${VIBECRAFT_IFLOW_ALLOWED_MCP_SERVERS:-}"
+iflow_mcp_servers_json="${VIBECRAFT_IFLOW_MCP_SERVERS_JSON:-}"
 status="ok"
 summary_text=""
 next_action=""
@@ -63,7 +63,7 @@ bootstrap_iflow_home() {
   if [[ ! -f "$target_home/.iflow/settings.json" ]]; then
     cat > "$target_home/.iflow/settings.json" <<'JSON'
 {
-  "cna": "vibe-tree",
+  "cna": "vibecraft",
   "checkpointing": {
     "enabled": true
   },

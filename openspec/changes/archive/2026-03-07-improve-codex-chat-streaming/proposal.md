@@ -1,6 +1,6 @@
 ## Why
 
-当前 `vibe-tree` 的 Codex 聊天链路仍然依赖 `codex exec --json` 的高层事件输出，后端只在 `item.completed` 时把整段 `agent_message` / `reasoning` 映射成 `chat.turn.delta` 与 `chat.turn.thinking.delta`。这会让前端表现成“长时间静止 → 一次性出现一大段思考/答案”，与用户预期的逐步展开体验不一致。
+当前 `vibecraft` 的 Codex 聊天链路仍然依赖 `codex exec --json` 的高层事件输出，后端只在 `item.completed` 时把整段 `agent_message` / `reasoning` 映射成 `chat.turn.delta` 与 `chat.turn.thinking.delta`。这会让前端表现成“长时间静止 → 一次性出现一大段思考/答案”，与用户预期的逐步展开体验不一致。
 
 并行调研结果表明，更顺滑的项目并不是单纯前端做了动画，而是后端消费了更细粒度的事件：官方 Codex app-server 协议提供 `item/agentMessage/delta`、`item/reasoning/summaryTextDelta`、`item/reasoning/textDelta` 等通知；`BloopAI-vibe-kanban` 与 `iOfficeAI-AionUi` 也都是基于细粒度语义事件而不是 `item.completed` 才获得更流畅的体验。
 

@@ -1,6 +1,6 @@
 ## Context
 
-当前 `vibe-tree` 已支持工具优先的 `Codex CLI / Claude Code` 选择，但 Chat 仍未充分利用 CLI 自身的会话能力：
+当前 `vibecraft` 已支持工具优先的 `Codex CLI / Claude Code` 选择，但 Chat 仍未充分利用 CLI 自身的会话能力：
 
 - `chat.Manager.runCLITurn()` 仍会把 `summary + recent history + current input` 重建成 prompt，再每次启动一次新的 CLI oneshot。
 - wrapper 目前只写 `final_message.md/summary.json/artifacts.json`，没有稳定产出 CLI session/thread 引用。

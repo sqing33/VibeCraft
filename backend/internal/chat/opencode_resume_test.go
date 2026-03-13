@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"vibe-tree/backend/internal/chat"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/chat"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/store"
 )
 
 type opencodeMockRunner struct {
@@ -27,17 +27,17 @@ func (r *opencodeMockRunner) StartOneshot(ctx context.Context, spec runner.RunSp
 	r.calls += 1
 	callIndex := r.calls
 	if callIndex == 1 {
-		r.resumeSessionID = strings.TrimSpace(spec.Env["VIBE_TREE_RESUME_SESSION_ID"])
+		r.resumeSessionID = strings.TrimSpace(spec.Env["VIBECRAFT_RESUME_SESSION_ID"])
 	}
 	r.mu.Unlock()
 
-	artifactDir := strings.TrimSpace(spec.Env["VIBE_TREE_ARTIFACT_DIR"])
+	artifactDir := strings.TrimSpace(spec.Env["VIBECRAFT_ARTIFACT_DIR"])
 	if artifactDir != "" {
 		if err := os.MkdirAll(artifactDir, 0o755); err != nil {
 			return nil, err
 		}
 	}
-	if strings.TrimSpace(spec.Env["VIBE_TREE_RESUME_SESSION_ID"]) != "" {
+	if strings.TrimSpace(spec.Env["VIBECRAFT_RESUME_SESSION_ID"]) != "" {
 		_ = os.WriteFile(filepath.Join(artifactDir, "summary.json"), []byte(`{"status":"error","summary":"resume failed","modified_code":false,"next_action":"retry without resume","key_files":[]}`), 0o644)
 		_ = os.WriteFile(filepath.Join(artifactDir, "final_message.md"), []byte("resume failed\n"), 0o644)
 		return &opencodeMockHandle{out: io.NopCloser(strings.NewReader("")), exitCode: 1}, nil
@@ -48,7 +48,7 @@ func (r *opencodeMockRunner) StartOneshot(ctx context.Context, spec runner.RunSp
 	payload, _ := json.Marshal(map[string]any{
 		"tool_id":    "opencode",
 		"session_id": "opencode-new-session",
-		"model":      spec.Env["VIBE_TREE_MODEL"],
+		"model":      spec.Env["VIBECRAFT_MODEL"],
 		"resumed":    false,
 		"call_index": callIndex,
 	})
@@ -119,10 +119,10 @@ func TestRunTurn_OpenCodeResumeFailureFallsBackToReconstructedPrompt(t *testing.
 			Command: "bash",
 			Args:    []string{"scripts/agent-runtimes/opencode_exec.sh"},
 			Env: map[string]string{
-				"VIBE_TREE_CLI_FAMILY":  "opencode",
-				"VIBE_TREE_CLI_TOOL_ID": "opencode",
-				"VIBE_TREE_MODEL":       "claude-3-7-sonnet",
-				"VIBE_TREE_MODEL_ID":    "claude-sonnet",
+				"VIBECRAFT_CLI_FAMILY":  "opencode",
+				"VIBECRAFT_CLI_TOOL_ID": "opencode",
+				"VIBECRAFT_MODEL":       "claude-3-7-sonnet",
+				"VIBECRAFT_MODEL_ID":    "claude-sonnet",
 			},
 			Cwd: ".",
 		},

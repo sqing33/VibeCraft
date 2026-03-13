@@ -1,6 +1,6 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "vibe-tree-desktop",
+  "name": "vibecraft-desktop",
   "outputfilename": "desktop",
   "wailsjsdir": "./frontend",
   "author": {

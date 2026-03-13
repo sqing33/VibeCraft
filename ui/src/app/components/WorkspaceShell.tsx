@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Button } from '@heroui/react'
 import { ChevronRight, Github, MessageSquare, Moon, Sun, Workflow } from 'lucide-react'
 
-import { goHome, goToChat, goToRepoLibraryRepositories } from '@/app/routes'
+import { goToChat, goToOrchestrations, goToRepoLibraryRepositories } from '@/app/routes'
 import { cn } from '@/lib/utils'
 import { AnimatedGradientText } from '@/registry/magicui/animated-gradient-text'
 import { MorphingText } from '@/registry/magicui/morphing-text'
@@ -162,7 +162,7 @@ export function WorkspaceShell(props: WorkspaceShellProps) {
                 active={activeNav === 'orchestrations'}
                 icon={<Workflow className="h-4 w-4" aria-hidden="true" focusable="false" />}
                 label="工作流"
-                onPress={goHome}
+                onPress={goToOrchestrations}
               />
               <SidebarNavItem
                 active={activeNav === 'repo_library'}

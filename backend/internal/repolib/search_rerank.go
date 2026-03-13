@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"vibe-tree/backend/internal/repolib/searchdb"
+	"vibecraft/backend/internal/repolib/searchdb"
 )
 
 type rerankedHit struct {

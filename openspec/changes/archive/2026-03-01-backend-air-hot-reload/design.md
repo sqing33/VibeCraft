@@ -1,6 +1,6 @@
 ## Context
 
-当前本地开发通过 `scripts/dev.sh` 在后台 `go run ./cmd/vibe-tree-daemon` 启动后端，同时在前台启动 UI（Vite dev server）。后端代码改动需要手动重启 daemon，导致联调效率偏低。
+当前本地开发通过 `scripts/dev.sh` 在后台 `go run ./cmd/vibecraft-daemon` 启动后端，同时在前台启动 UI（Vite dev server）。后端代码改动需要手动重启 daemon，导致联调效率偏低。
 
 目标是在不改变 daemon 运行时行为/对外 API 的前提下，引入 Air（Go 热重载工具）用于开发期自动重建与重启。
 
@@ -29,13 +29,13 @@
    - 备选：仓库根 `.air.toml`（放弃：需要更复杂的 include/exclude 规则）
 
 2. **Air 通过 `go build` 生成临时二进制再运行**
-   - 使用 `go build -o ./tmp/vibe-tree-daemon ./cmd/vibe-tree-daemon`，运行 `./tmp/vibe-tree-daemon`
+   - 使用 `go build -o ./tmp/vibecraft-daemon ./cmd/vibecraft-daemon`，运行 `./tmp/vibecraft-daemon`
    - 相比 `go run`：更接近真实运行方式，启动更稳定，且避免每次运行重复编译所有包的临时缓存行为不确定
 
 3. **脚本“优先 Air、缺失降级”**
    - `scripts/dev.sh` 在启动后端前检测 `air` 是否在 PATH（`command -v air`）
    - 若存在则运行 `air -c .air.toml`（在 `backend/` 目录内），否则继续 `go run`
-   - 保留一个显式开关以禁用热重载（例如 `VIBE_TREE_NO_AIR=1`），便于排障与最小依赖运行
+   - 保留一个显式开关以禁用热重载（例如 `VIBECRAFT_NO_AIR=1`），便于排障与最小依赖运行
 
 ## Risks / Trade-offs
 

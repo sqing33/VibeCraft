@@ -1,6 +1,6 @@
 ## Why
 
-`vibe-tree` 当前把主执行型 CLI 工具限定在 `Codex CLI` 与 `Claude Code` 两条路径上，缺少一个基于 OpenAI 兼容协议、适合国内模型生态的第三选择。`iFlow CLI` 已经具备非交互执行、模型切换、对话恢复与项目级配置能力，适合作为第三个主执行 CLI runtime 接入。
+`vibecraft` 当前把主执行型 CLI 工具限定在 `Codex CLI` 与 `Claude Code` 两条路径上，缺少一个基于 OpenAI 兼容协议、适合国内模型生态的第三选择。`iFlow CLI` 已经具备非交互执行、模型切换、对话恢复与项目级配置能力，适合作为第三个主执行 CLI runtime 接入。
 
 现有实现还存在一个结构性缺口：CLI runtime 的模型选择虽然能切换 `model_id`，但不会把所选模型 source 的 `base_url/api_key` 注入到 CLI wrapper。这个缺口对 Codex / Claude 影响不大，但会直接限制 `iFlow CLI` 这类 OpenAI-compatible CLI 的可用性。
 

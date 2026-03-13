@@ -59,7 +59,8 @@ type LiveDeltaBatch = {
   turnEvents?: ChatTurnEventPayload[];
 };
 
-const chatRuntimeStorageKey = "vibe-tree-chat-runtime";
+const chatRuntimeStorageKey = "vibecraft-chat-runtime";
+const legacyChatRuntimeStorageKey = "vibe-tree-chat-runtime";
 
 function appendTextDeltas(
   current: Record<string, string>,
@@ -844,7 +845,20 @@ export const useChatStore = create<ChatStore>()(
     }),
     {
       name: chatRuntimeStorageKey,
-      storage: createJSONStorage(() => sessionStorage),
+      storage: createJSONStorage(() => ({
+        getItem: (name) => {
+          const current = sessionStorage.getItem(name);
+          if (current) return current;
+          const legacy = sessionStorage.getItem(legacyChatRuntimeStorageKey);
+          if (legacy) sessionStorage.setItem(name, legacy);
+          return legacy;
+        },
+        setItem: (name, value) => sessionStorage.setItem(name, value),
+        removeItem: (name) => {
+          sessionStorage.removeItem(name);
+          sessionStorage.removeItem(legacyChatRuntimeStorageKey);
+        },
+      })),
       partialize: (state) => ({
         activeSessionId: state.activeSessionId,
       }),

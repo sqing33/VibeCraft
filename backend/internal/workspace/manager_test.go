@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/store"
 )
 
 func TestPrepare_ReusesAndRecoversGitWorktree(t *testing.T) {

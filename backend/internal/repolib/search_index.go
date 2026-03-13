@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"vibe-tree/backend/internal/logx"
-	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/repolib/searchdb"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/logx"
+	"vibecraft/backend/internal/paths"
+	"vibecraft/backend/internal/repolib/searchdb"
+	"vibecraft/backend/internal/store"
 )
 
 type searchIndex struct {
@@ -33,8 +33,8 @@ func openSearchIndex(ctx context.Context) (*searchIndex, error) {
 	}
 	dbPath := filepath.Join(searchDir, "search.db")
 
-	vecPath := strings.TrimSpace(os.Getenv("VIBE_TREE_SQLITE_VEC_PATH")) // optional override
-	embedderMode := strings.ToLower(strings.TrimSpace(os.Getenv("VIBE_TREE_EMBEDDER")))
+	vecPath := strings.TrimSpace(os.Getenv("VIBECRAFT_SQLITE_VEC_PATH")) // optional override
+	embedderMode := strings.ToLower(strings.TrimSpace(os.Getenv("VIBECRAFT_EMBEDDER")))
 	if embedderMode == "" {
 		embedderMode = "hugot"
 	}
@@ -56,7 +56,7 @@ func openSearchIndex(ctx context.Context) (*searchIndex, error) {
 			closers = append(closers, e)
 		}
 	default:
-		logx.Warn("repolib", "embedder_init", "unknown VIBE_TREE_EMBEDDER; falling back to keyword-only", "value", embedderMode)
+		logx.Warn("repolib", "embedder_init", "unknown VIBECRAFT_EMBEDDER; falling back to keyword-only", "value", embedderMode)
 		embedder = &missingEmbedder{}
 	}
 
@@ -189,18 +189,18 @@ func buildSearchChunks(
 		display := strings.TrimSpace(titlePath + "\n\n" + text)
 		search := strings.TrimSpace(titlePath + "\n\n" + text)
 		chunks = append(chunks, searchdb.Chunk{
-			ChunkID:        chunkID,
-			RepoSourceID:   source.ID,
-			AnalysisID:     analysis.ID,
-			SourceKind:     "report_section",
-			SourceRefID:    card.ID,
-			Title:          titlePath,
-			DisplayText:    display,
-			SearchText:     search,
-			EvidenceRefs:   strings.Join(extractFileRefs(block), "\n"),
-			TextExcerpt:    excerpt(display, 360),
-			ContentHash:    sha256Hex(search),
-			UpdatedAt:      now,
+			ChunkID:      chunkID,
+			RepoSourceID: source.ID,
+			AnalysisID:   analysis.ID,
+			SourceKind:   "report_section",
+			SourceRefID:  card.ID,
+			Title:        titlePath,
+			DisplayText:  display,
+			SearchText:   search,
+			EvidenceRefs: strings.Join(extractFileRefs(block), "\n"),
+			TextExcerpt:  excerpt(display, 360),
+			ContentHash:  sha256Hex(search),
+			UpdatedAt:    now,
 		})
 	}
 
@@ -220,19 +220,19 @@ func buildSearchChunks(
 			"EvidenceRefs: " + strings.Join(refs, " "),
 		}, "\n"))
 		chunks = append(chunks, searchdb.Chunk{
-			ChunkID:        "card:" + card.ID,
-			RepoSourceID:   source.ID,
-			AnalysisID:     analysis.ID,
-			SourceKind:     "card",
-			SourceRefID:    card.ID,
-			Title:          card.Title,
-			DisplayText:    display,
-			SearchText:     search,
-			TagsFlat:       tags,
-			EvidenceRefs:   strings.Join(refs, "\n"),
-			TextExcerpt:    excerpt(display, 360),
-			ContentHash:    sha256Hex(search),
-			UpdatedAt:      now,
+			ChunkID:      "card:" + card.ID,
+			RepoSourceID: source.ID,
+			AnalysisID:   analysis.ID,
+			SourceKind:   "card",
+			SourceRefID:  card.ID,
+			Title:        card.Title,
+			DisplayText:  display,
+			SearchText:   search,
+			TagsFlat:     tags,
+			EvidenceRefs: strings.Join(refs, "\n"),
+			TextExcerpt:  excerpt(display, 360),
+			ContentHash:  sha256Hex(search),
+			UpdatedAt:    now,
 		})
 		for _, item := range ev {
 			lineText := ""
@@ -250,19 +250,19 @@ func buildSearchChunks(
 				"CardConclusion: " + conclusion,
 			}, "\n"))
 			chunks = append(chunks, searchdb.Chunk{
-				ChunkID:        "evidence:" + item.ID,
-				RepoSourceID:   source.ID,
-				AnalysisID:     analysis.ID,
-				SourceKind:     "evidence",
-				SourceRefID:    card.ID,
-				Title:          evTitle,
-				DisplayText:    evDisplay,
-				SearchText:     evSearch,
-				SymbolsFlat:    "",
-				EvidenceRefs:   strings.Join([]string{evTitle}, "\n"),
-				TextExcerpt:    excerpt(evDisplay, 260),
-				ContentHash:    sha256Hex(evSearch),
-				UpdatedAt:      now,
+				ChunkID:      "evidence:" + item.ID,
+				RepoSourceID: source.ID,
+				AnalysisID:   analysis.ID,
+				SourceKind:   "evidence",
+				SourceRefID:  card.ID,
+				Title:        evTitle,
+				DisplayText:  evDisplay,
+				SearchText:   evSearch,
+				SymbolsFlat:  "",
+				EvidenceRefs: strings.Join([]string{evTitle}, "\n"),
+				TextExcerpt:  excerpt(evDisplay, 260),
+				ContentHash:  sha256Hex(evSearch),
+				UpdatedAt:    now,
 			})
 		}
 	}

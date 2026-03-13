@@ -3,7 +3,7 @@ package config_test
 import (
 	"testing"
 
-	"vibe-tree/backend/internal/config"
+	"vibecraft/backend/internal/config"
 )
 
 func TestRebuildExperts_BackfillsBuiltinCLIExperts(t *testing.T) {

@@ -18,9 +18,9 @@ import (
 	"sync"
 	"time"
 
-	"vibe-tree/backend/internal/cliruntime"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/cliruntime"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/store"
 )
 
 type codexAppServerClient interface {
@@ -87,7 +87,7 @@ var codexAppServerOptOutNotificationMethods = []string{
 }
 
 func (m *Manager) runCLITurn(ctx context.Context, sess store.ChatSession, turn store.ChatTurn, userMsg store.ChatMessage, modelInput string, spec runner.RunSpec, expertID, provider, model string, cliToolID, modelID, reasoningEffort *string, thinkingTranslation *ThinkingTranslationSpec) (TurnResult, error) {
-	if runner.NormalizeCLIFamily(spec.Env["VIBE_TREE_CLI_FAMILY"]) == "codex" {
+	if runner.NormalizeCLIFamily(spec.Env["VIBECRAFT_CLI_FAMILY"]) == "codex" {
 		result, err := m.runCodexAppServerTurn(ctx, sess, turn, userMsg, modelInput, spec, expertID, provider, model, cliToolID, modelID, reasoningEffort, thinkingTranslation)
 		if err == nil {
 			return result, nil
@@ -228,8 +228,8 @@ func (m *Manager) runCodexAppServerTurn(ctx context.Context, sess store.ChatSess
 			_, _ = m.store.UpdateChatSessionDefaults(persistCtx, store.UpdateChatSessionDefaultsParams{
 				SessionID:       sess.ID,
 				ExpertID:        expertID,
-				CLIToolID:       resolvedTurnOptionPointer(cliToolID, spec.Env["VIBE_TREE_CLI_TOOL_ID"], sess.CLIToolID),
-				ModelID:         resolvedTurnOptionPointer(modelID, spec.Env["VIBE_TREE_MODEL_ID"], sess.ModelID),
+				CLIToolID:       resolvedTurnOptionPointer(cliToolID, spec.Env["VIBECRAFT_CLI_TOOL_ID"], sess.CLIToolID),
+				ModelID:         resolvedTurnOptionPointer(modelID, spec.Env["VIBECRAFT_MODEL_ID"], sess.ModelID),
 				ReasoningEffort: reasoningEffort,
 				CLISessionID:    pointerOrNilString(threadID),
 				Provider:        provider,
@@ -750,7 +750,7 @@ type codexRPCError struct {
 }
 
 func startCodexAppServerClient(ctx context.Context, spec runner.RunSpec) (codexAppServerClient, error) {
-	cliCmd := firstNonEmptyTrimmed(strings.TrimSpace(spec.Env["VIBE_TREE_CLI_COMMAND_PATH"]), "codex")
+	cliCmd := firstNonEmptyTrimmed(strings.TrimSpace(spec.Env["VIBECRAFT_CLI_COMMAND_PATH"]), "codex")
 	cmdCtx, cancel := context.WithCancel(ctx)
 	cmd := exec.CommandContext(cmdCtx, cliCmd, "app-server", "--listen", "stdio://")
 	cmd.Dir = firstNonEmptyTrimmed(strings.TrimSpace(spec.Cwd), ".")
@@ -800,8 +800,8 @@ func (c *stdioCodexAppServerClient) Initialize(ctx context.Context) error {
 	var result map[string]any
 	if err := c.call(ctx, "initialize", map[string]any{
 		"clientInfo": map[string]any{
-			"name":    "vibe_tree",
-			"title":   "vibe-tree",
+			"name":    "vibecraft",
+			"title":   "vibecraft",
 			"version": "0.1.0",
 		},
 		"capabilities": map[string]any{
@@ -1230,7 +1230,7 @@ func (c *stdioCodexAppServerClient) readLoop(stdout io.Reader) {
 		if env.Method != "" && env.ID != nil {
 			_ = c.write(map[string]any{
 				"id":    rawJSONValue(*env.ID),
-				"error": map[string]any{"code": -32601, "message": "method not supported by vibe-tree"},
+				"error": map[string]any{"code": -32601, "message": "method not supported by vibecraft"},
 			})
 			continue
 		}

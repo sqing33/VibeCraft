@@ -22,8 +22,8 @@ type Result struct {
 // Load 功能：在 daemon 启动阶段加载 dotenv，并将其写入进程环境变量。
 //
 // 规则：
-// - 若 `VIBE_TREE_DOTENV=0`：跳过加载。
-// - 若 `VIBE_TREE_DOTENV_PATH` 非空：从该路径加载。
+// - 若 `VIBECRAFT_DOTENV=0`（兼容 `VIBE_TREE_DOTENV=0`）：跳过加载。
+// - 若 `VIBECRAFT_DOTENV_PATH` 非空（兼容 `VIBE_TREE_DOTENV_PATH`）：从该路径加载。
 // - 否则：向上查找 `.git`（目录或文件）定位 repo root，并尝试加载 `<repo_root>/.env`。
 // - dotenv 写入环境变量采用覆盖策略（.env 覆盖同名 env）。
 //
@@ -31,11 +31,11 @@ type Result struct {
 // 失败场景：读取/解析失败返回 error；文件不存在不视为 error（FailureReason="not_found"）。
 // 副作用：可能覆盖进程环境变量（os.Setenv）。
 func Load() (Result, error) {
-	if strings.TrimSpace(os.Getenv("VIBE_TREE_DOTENV")) == "0" {
+	if firstEnv("VIBECRAFT_DOTENV", "VIBE_TREE_DOTENV") == "0" {
 		return Result{Enabled: false, SkippedReason: "disabled"}, nil
 	}
 
-	path := strings.TrimSpace(os.Getenv("VIBE_TREE_DOTENV_PATH"))
+	path := strings.TrimSpace(firstEnv("VIBECRAFT_DOTENV_PATH", "VIBE_TREE_DOTENV_PATH"))
 	if path == "" {
 		wd, err := os.Getwd()
 		if err != nil {
@@ -80,6 +80,15 @@ func Load() (Result, error) {
 		Path:      path,
 		Keys:      len(m),
 	}, nil
+}
+
+func firstEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func findRepoRoot(start string) (string, bool) {

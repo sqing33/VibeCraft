@@ -20,7 +20,7 @@ If validation fails, the API MUST return HTTP 400 with an error message.
 #### Scenario: Update LLM settings successfully
 
 - **WHEN** client calls `PUT /api/v1/settings/llm` with a valid settings payload
-- **THEN** the daemon persists the settings to `~/.config/vibe-tree/config.json`
+- **THEN** the daemon persists the settings to `~/.config/vibecraft/config.json`
 - **AND** the response returns the updated settings (with masked keys)
 
 #### Scenario: Reject unknown source reference

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"vibe-tree/backend/internal/chat"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/chat"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/store"
 )
 
 type opencodeLoopGuardRunner struct {
@@ -104,10 +104,10 @@ func TestRunTurn_OpenCodeBlankStepLoopReturnsHelpfulMessage(t *testing.T) {
 			Command: "bash",
 			Args:    []string{"scripts/agent-runtimes/opencode_exec.sh"},
 			Env: map[string]string{
-				"VIBE_TREE_CLI_FAMILY":  "opencode",
-				"VIBE_TREE_CLI_TOOL_ID": "opencode",
-				"VIBE_TREE_MODEL":       "openai/minimax-2.5",
-				"VIBE_TREE_MODEL_ID":    "minimax-2.5",
+				"VIBECRAFT_CLI_FAMILY":  "opencode",
+				"VIBECRAFT_CLI_TOOL_ID": "opencode",
+				"VIBECRAFT_MODEL":       "openai/minimax-2.5",
+				"VIBECRAFT_MODEL_ID":    "minimax-2.5",
 			},
 			Cwd: ".",
 		},

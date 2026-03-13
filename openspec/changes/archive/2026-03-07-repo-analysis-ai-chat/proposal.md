@@ -1,6 +1,6 @@
 ## Why
 
-当前 Repo Library 的报告主要由脚本模板与索引启发式生成，不能真实复用 `vibe-tree` 已经打通的 CLI AI Chat 能力，导致分析质量偏低、过程不可追问，也无法把分析过程作为一个可继续优化的真实对话留给用户。现在需要把 Repo analysis 的核心分析阶段切换到真实 AI Chat，会话过程保留在 Chat 页面，同时保持自动化完成与后处理闭环。
+当前 Repo Library 的报告主要由脚本模板与索引启发式生成，不能真实复用 `vibecraft` 已经打通的 CLI AI Chat 能力，导致分析质量偏低、过程不可追问，也无法把分析过程作为一个可继续优化的真实对话留给用户。现在需要把 Repo analysis 的核心分析阶段切换到真实 AI Chat，会话过程保留在 Chat 页面，同时保持自动化完成与后处理闭环。
 
 ## What Changes
 
@@ -23,7 +23,7 @@
 
 ## Impact
 
-- 后端：`backend/internal/repolib/`, `backend/internal/store/`, `backend/internal/api/`, `backend/cmd/vibe-tree-daemon/main.go`
+- 后端：`backend/internal/repolib/`, `backend/internal/store/`, `backend/internal/api/`, `backend/cmd/vibecraft-daemon/main.go`
 - Chat/CLI 运行时：`backend/internal/chat/manager.go`, `backend/internal/api/chat.go`, `backend/internal/expert/`
 - Python 引擎：`services/repo-analyzer/app/cli.py`, `services/repo-analyzer/app/ingest.py`（或 prepare 流程）, `services/repo-analyzer/app/search.py`
 - 前端：`ui/src/app/pages/RepoLibrary*`, `ui/src/app/routes.ts`, `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/lib/daemon.ts`

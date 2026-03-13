@@ -6,8 +6,8 @@
 
 - daemon 启动时自动加载 dotenv：
   - 默认从仓库根目录 `.env` 读取（通过向上查找包含 `.git/` 的目录定位 repo root）。
-  - 支持 `VIBE_TREE_DOTENV_PATH` 指定 dotenv 文件路径。
-  - 支持 `VIBE_TREE_DOTENV=0` 禁用自动加载。
+  - 支持 `VIBECRAFT_DOTENV_PATH` 指定 dotenv 文件路径。
+  - 支持 `VIBECRAFT_DOTENV=0` 禁用自动加载。
 - dotenv 的键值写入进程环境变量（`os.Setenv`），用于后续 `${ENV_VAR}` 注入（例如 `ANTHROPIC_API_KEY`）。
 - 记录启动日志（仅路径与 key 数量，不打印 value）。
 - 提供根目录 `.env.example` 与根目录 `.gitignore`（忽略 `.env`），并更新 README 的开发配置说明。
@@ -25,7 +25,7 @@
 
 ## Impact
 
-- 后端启动入口：`backend/cmd/vibe-tree-daemon/main.go` 将在 `config.Load()` 前增加 dotenv 加载逻辑。
+- 后端启动入口：`backend/cmd/vibecraft-daemon/main.go` 将在 `config.Load()` 前增加 dotenv 加载逻辑。
 - 新增后端内部模块：`backend/internal/dotenv/`。
 - Go 依赖新增：用于解析 `.env` 文件的库。
 - 仓库根新增文件：`.gitignore`、`.env.example`；README 增补开发说明。

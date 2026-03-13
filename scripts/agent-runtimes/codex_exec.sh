@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-artifact_dir="${VIBE_TREE_ARTIFACT_DIR:-}"
-prompt="${VIBE_TREE_PROMPT:-}"
-system_prompt="${VIBE_TREE_SYSTEM_PROMPT:-}"
-model="${VIBE_TREE_MODEL:-}"
-model_id="${VIBE_TREE_MODEL_ID:-}"
-workspace="${VIBE_TREE_WORKSPACE:-$PWD}"
-cli_cmd="${VIBE_TREE_CLI_COMMAND_PATH:-codex}"
-resume_session_id="${VIBE_TREE_RESUME_SESSION_ID:-}"
-cli_tool_id="${VIBE_TREE_CLI_TOOL_ID:-codex}"
+artifact_dir="${VIBECRAFT_ARTIFACT_DIR:-}"
+prompt="${VIBECRAFT_PROMPT:-}"
+system_prompt="${VIBECRAFT_SYSTEM_PROMPT:-}"
+model="${VIBECRAFT_MODEL:-}"
+model_id="${VIBECRAFT_MODEL_ID:-}"
+workspace="${VIBECRAFT_WORKSPACE:-$PWD}"
+cli_cmd="${VIBECRAFT_CLI_COMMAND_PATH:-codex}"
+resume_session_id="${VIBECRAFT_RESUME_SESSION_ID:-}"
+cli_tool_id="${VIBECRAFT_CLI_TOOL_ID:-codex}"
 openai_api_key="${OPENAI_API_KEY:-}"
-openai_base_url="${OPENAI_BASE_URL:-${VIBE_TREE_BASE_URL:-}}"
+openai_base_url="${OPENAI_BASE_URL:-${VIBECRAFT_BASE_URL:-}}"
 codex_home="${CODEX_HOME:-}"
 status="ok"
 summary_text=""
@@ -46,17 +46,17 @@ ensure_codex_home() {
     if [[ -z "$xdg_data_home" ]]; then
       xdg_data_home="$HOME/.local/share"
     fi
-    target_home="$xdg_data_home/vibe-tree/managed-clis/${tool_id:-codex}"
+    target_home="$xdg_data_home/vibecraft/managed-clis/${tool_id:-codex}"
   fi
   mkdir -p "$target_home"
   if [[ -z "$base_url" ]]; then
     base_url="https://api.openai.com/v1"
   fi
   cat > "$target_home/config.toml" <<TOML
-model_provider = "vibe_tree"
+model_provider = "vibecraft"
 
-[model_providers.vibe_tree]
-name = "vibe-tree-managed"
+[model_providers.vibecraft]
+name = "vibecraft-managed"
 base_url = "$base_url"
 env_key = "OPENAI_API_KEY"
 wire_api = "responses"

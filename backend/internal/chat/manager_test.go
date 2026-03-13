@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"vibe-tree/backend/internal/chat"
-	"vibe-tree/backend/internal/runner"
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/chat"
+	"vibecraft/backend/internal/runner"
+	"vibecraft/backend/internal/store"
 )
 
 func TestCompactionLLMFallback_DemoProviderDoesNotFail(t *testing.T) {

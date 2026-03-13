@@ -99,4 +99,3 @@ func (s *Store) UpdateRepoAnalysisChatBinding(ctx context.Context, params Update
 	}
 	return result, nil
 }
-

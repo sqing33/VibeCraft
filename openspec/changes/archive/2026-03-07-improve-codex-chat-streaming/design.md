@@ -39,7 +39,7 @@
 
 1) **Codex 聊天单独走 app-server，其他 CLI 保持原样**
 
-- 方案：在 `chat.Manager` 中检测 `VIBE_TREE_CLI_FAMILY=codex`，优先走新的 app-server client；其它 CLI 仍使用 legacy `runCLITurn` wrapper。
+- 方案：在 `chat.Manager` 中检测 `VIBECRAFT_CLI_FAMILY=codex`，优先走新的 app-server client；其它 CLI 仍使用 legacy `runCLITurn` wrapper。
 - 取舍：变更面最小，避免把 workflow/orchestration 与 Claude 路径一起卷进来。
 
 2) **保留现有 WS 事件类型，不新增前端协议版本**

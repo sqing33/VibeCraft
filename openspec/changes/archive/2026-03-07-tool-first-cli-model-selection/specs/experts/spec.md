@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Configuration Loading
-The system MUST load expert configurations from `~/.config/vibe-tree/config.json` under the `experts` array. Each expert MUST have a unique `id`. Each expert MUST be classifiable as one of:
+The system MUST load expert configurations from `~/.config/vibecraft/config.json` under the `experts` array. Each expert MUST have a unique `id`. Each expert MUST be classifiable as one of:
 - a process expert
 - a primary CLI tool expert
 - a helper SDK expert

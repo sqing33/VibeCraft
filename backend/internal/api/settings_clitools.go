@@ -8,8 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"vibe-tree/backend/internal/config"
-	iflowcli "vibe-tree/backend/internal/iflow"
+	"vibecraft/backend/internal/config"
+	iflowcli "vibecraft/backend/internal/iflow"
 )
 
 type cliToolSettingsResponse struct {

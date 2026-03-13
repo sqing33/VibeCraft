@@ -1,6 +1,6 @@
 ## Why
 
-当前 `vibe-tree` 已经能用 Codex app-server 运行聊天，但 MCP 与 Skill 仍停留在“本机已有配置/目录自动生效”的隐式模式。这样既无法在前端集中配置，也无法按会话精确控制 MCP 暴露范围，容易让无关 MCP 增加对话上下文与工具噪声。
+当前 `vibecraft` 已经能用 Codex app-server 运行聊天，但 MCP 与 Skill 仍停留在“本机已有配置/目录自动生效”的隐式模式。这样既无法在前端集中配置，也无法按会话精确控制 MCP 暴露范围，容易让无关 MCP 增加对话上下文与工具噪声。
 
 ## What Changes
 

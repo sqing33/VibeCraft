@@ -8,7 +8,7 @@
 
 现状中 `codex` 与 `claude` 的接入已跑通，但它们都不依赖 `llm.sources` 中的 source-level `base_url/api_key`。`iFlow CLI` 若以 `openai-compatible` 方式运行，则必须拿到所选 `model_id` 对应 source 的连接信息，因此不能只复制现有两条 wrapper。
 
-另外，聊天恢复链路已经具备通用 contract：chat manager 会优先把 `sess.CLISessionID` 注入 `VIBE_TREE_RESUME_SESSION_ID`，wrapper 若写出 `session.json`，后端就会自动回写 session defaults。iFlow 需要接上这套 contract，而不是另起一套会话系统。
+另外，聊天恢复链路已经具备通用 contract：chat manager 会优先把 `sess.CLISessionID` 注入 `VIBECRAFT_RESUME_SESSION_ID`，wrapper 若写出 `session.json`，后端就会自动回写 session defaults。iFlow 需要接上这套 contract，而不是另起一套会话系统。
 
 ## Goals / Non-Goals
 
@@ -34,7 +34,7 @@
 - **不选原因**：会连带修改 LLM settings、provider 校验、模型池过滤、API 兼容测试，收益低于成本。
 
 ### 2. 在 expert 解析层补齐 CLI 模型 source 运行时注入
-- **方案**：当 `provider=cli` 且 `model_id` 解析到具体 `llm.models` / `llm.sources` 时，把 source 的 `api_key/base_url` 注入 `RunSpec.Env`，并同步写入 `VIBE_TREE_BASE_URL`。
+- **方案**：当 `provider=cli` 且 `model_id` 解析到具体 `llm.models` / `llm.sources` 时，把 source 的 `api_key/base_url` 注入 `RunSpec.Env`，并同步写入 `VIBECRAFT_BASE_URL`。
 - **原因**：这能从根因上修复所有“需要 OpenAI-compatible / Anthropic-compatible 连接信息的外部 CLI”场景，而不是只在 chat API 针对 iFlow 做临时 patch。
 - **备选**：只在 `backend/internal/api/chat.go` 给 iFlow 单独补 env。
 - **不选原因**：无法覆盖 repo library、workflow、orchestration 等其他 CLI 调用点。

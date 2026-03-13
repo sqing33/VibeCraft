@@ -36,7 +36,7 @@ func ValidateDownstreamConfig(ctx context.Context, cfgMap map[string]any) error 
 		return fmt.Errorf("list tools: %w", err)
 	}
 	if res == nil || len(res.Tools) == 0 {
-		return errors.New("exposes 0 tools; current vibe-tree gateway proxies tools only")
+		return errors.New("exposes 0 tools; current vibecraft gateway proxies tools only")
 	}
 	return nil
 }
@@ -50,7 +50,7 @@ func connectDownstream(ctx context.Context, cfgMap map[string]any) (*mcp.ClientS
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		transport := &mcp.CommandTransport{Command: cmd}
-		client := mcp.NewClient(&mcp.Implementation{Name: "vibe-tree-validate", Version: "v1"}, nil)
+		client := mcp.NewClient(&mcp.Implementation{Name: "vibecraft-validate", Version: "v1"}, nil)
 		session, err := client.Connect(ctx, transport, nil)
 		if err != nil {
 			msg := strings.TrimSpace(stderr.String())
@@ -68,7 +68,7 @@ func connectDownstream(ctx context.Context, cfgMap map[string]any) (*mcp.ClientS
 	}
 	httpClient := &http.Client{Transport: &headerRoundTripper{base: http.DefaultTransport, headers: gatewayHeadersForConfig(cfgMap)}}
 	transport := &mcp.StreamableClientTransport{Endpoint: url, HTTPClient: httpClient}
-	client := mcp.NewClient(&mcp.Implementation{Name: "vibe-tree-validate", Version: "v1"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "vibecraft-validate", Version: "v1"}, nil)
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("connect remote: %w", err)
@@ -85,4 +85,3 @@ func truncateOneLine(s string, max int) string {
 	}
 	return s[:max] + "..."
 }
-

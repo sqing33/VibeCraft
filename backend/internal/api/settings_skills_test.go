@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
+	"vibecraft/backend/internal/config"
 )
 
 func TestSkillSettings_GetReturnsDiscoveredCatalogWithEnabledState(t *testing.T) {

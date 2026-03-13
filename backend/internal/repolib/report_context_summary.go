@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"vibe-tree/backend/internal/store"
+	"vibecraft/backend/internal/store"
 )
 
 // extractReportContextSummary 功能：从正式报告第一部分提取仓库级技术栈摘要。

@@ -1,6 +1,6 @@
 ## Context
 
-当前 `vibe-tree` 的设置链路将 OpenAI / Anthropic 的 `sources + models` 放在 `llm` 下，再让 CLI 工具通过协议族过滤这份共享模型池。这个设计对 `codex` / `claude` / `opencode` 来说已经过于抽象：UI 看起来像“统一配置”，但运行时仍依赖各 CLI 的原生配置语义；对 `iflow` 来说则完全是另一套逻辑。结果是：
+当前 `vibecraft` 的设置链路将 OpenAI / Anthropic 的 `sources + models` 放在 `llm` 下，再让 CLI 工具通过协议族过滤这份共享模型池。这个设计对 `codex` / `claude` / `opencode` 来说已经过于抽象：UI 看起来像“统一配置”，但运行时仍依赖各 CLI 的原生配置语义；对 `iflow` 来说则完全是另一套逻辑。结果是：
 
 - 设置页职责不清，用户不知道哪个页面的配置会生效。
 - CLI 与 SDK 共享一份模型池，导致聊天页的 runtime/model 选择不等于真实执行能力。
@@ -47,7 +47,7 @@
 
 ### 3. CLI 采用“受管配置根目录/文件 + 启动参数”混合物化策略
 
-受管配置文件统一落在应用数据目录下，例如 `$XDG_DATA_HOME/vibe-tree/managed-clis/...`，而不是项目目录或用户默认全局路径。
+受管配置文件统一落在应用数据目录下，例如 `$XDG_DATA_HOME/vibecraft/managed-clis/...`，而不是项目目录或用户默认全局路径。
 
 - `codex`: 使用 `CODEX_HOME=<managed-root>` 指向受管 `config.toml`
 - `claude`: 使用 `--settings <managed-settings.json>` 指向受管设置文件

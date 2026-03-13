@@ -1,6 +1,6 @@
 ## Context
 
-vibe-tree currently executes SDK calls in stateless oneshot mode. `runner.SDKSpec` contains only per-call prompt/inference parameters, and `sdk_runner` always sends a fresh request without conversation continuity. The state database stores workflows/nodes/executions/events only, so chat conversations cannot be resumed across requests or daemon restarts.
+vibecraft currently executes SDK calls in stateless oneshot mode. `runner.SDKSpec` contains only per-call prompt/inference parameters, and `sdk_runner` always sends a fresh request without conversation continuity. The state database stores workflows/nodes/executions/events only, so chat conversations cannot be resumed across requests or daemon restarts.
 
 This change introduces a persistent chat session layer with automatic context compaction. It must integrate with existing HTTP + WebSocket patterns, reuse the current SQLite migration style, and keep workflow execution behavior backward compatible.
 

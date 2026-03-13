@@ -10,7 +10,7 @@ import (
 // Save 功能：将 cfg 写回到 XDG config.json（原子替换 + 0600 权限）。
 // 参数/返回：cfg 为完整配置；返回写入路径与错误信息。
 // 失败场景：路径解析失败、序列化失败、写盘失败时返回 error。
-// 副作用：在磁盘上创建/覆盖 `~/.config/vibe-tree/config.json`。
+// 副作用：在磁盘上创建/覆盖 `~/.config/vibecraft/config.json`。
 func Save(cfg Config) (string, error) {
 	path, err := Path()
 	if err != nil {
@@ -72,4 +72,3 @@ func SaveTo(path string, cfg Config) error {
 	}
 	return nil
 }
-

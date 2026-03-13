@@ -21,7 +21,7 @@ Constraints:
 **Non-Goals:**
 - Windows support.
 - Full parity with the existing Python orchestrator (no synthesize/report/inspect in v1).
-- Integrating orchestration into vibe-tree daemon HTTP APIs or UI.
+- Integrating orchestration into vibecraft daemon HTTP APIs or UI.
 - Auto-selecting the tool without any prompting (selection is still driven by the model + system instructions).
 
 ## Decisions

@@ -1,4 +1,4 @@
-module vibe-tree/backend
+module vibecraft/backend
 
 go 1.25.0
 

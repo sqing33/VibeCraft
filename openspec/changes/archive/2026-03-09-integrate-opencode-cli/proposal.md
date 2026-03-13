@@ -1,6 +1,6 @@
 ## Why
 
-`vibe-tree` 目前已经支持 `Codex CLI`、`Claude Code` 与 `iFlow CLI` 三条主执行路径，但还缺少一个可以同时承接 OpenAI / Anthropic 模型池、并通过官方 `run` / `serve` 能力执行的通用 CLI runtime。`OpenCode CLI` 已经具备会话续跑、JSON 事件流、agent / permission / server 能力，适合作为新的并列 CLI tool 接入。
+`vibecraft` 目前已经支持 `Codex CLI`、`Claude Code` 与 `iFlow CLI` 三条主执行路径，但还缺少一个可以同时承接 OpenAI / Anthropic 模型池、并通过官方 `run` / `serve` 能力执行的通用 CLI runtime。`OpenCode CLI` 已经具备会话续跑、JSON 事件流、agent / permission / server 能力，适合作为新的并列 CLI tool 接入。
 
 当前实现还存在一个结构性限制：CLI tool 只能声明单一 `protocol_family`。这对 `codex` / `claude` / `iflow` 足够，但会直接限制 `opencode` 这类多 provider CLI 的模型选择与 UI 过滤能力，因此需要把 CLI tool 配置扩展成“单协议兼容、多协议优先”。
 

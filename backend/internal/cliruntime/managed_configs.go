@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/runner"
+	"vibecraft/backend/internal/paths"
+	"vibecraft/backend/internal/runner"
 )
 
 const defaultManagedOpenAIBaseURL = "https://api.openai.com/v1"
@@ -40,7 +40,7 @@ func EnsureCodexHome(toolID string) (string, error) {
 	} else if !os.IsNotExist(err) {
 		return "", fmt.Errorf("stat codex config: %w", err)
 	}
-	if err := os.WriteFile(configPath, []byte("# managed by vibe-tree\n"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte("# managed by vibecraft\n"), 0o600); err != nil {
 		return "", fmt.Errorf("write codex config: %w", err)
 	}
 	return root, nil
@@ -57,10 +57,10 @@ func WriteCodexProviderConfig(toolID, baseURL string) (string, error) {
 	}
 	baseURL = runner.NormalizeBaseURL("openai", baseURL)
 	content := strings.TrimSpace(fmt.Sprintf(`
-model_provider = "vibe_tree"
+model_provider = "vibecraft"
 
-[model_providers.vibe_tree]
-name = "vibe-tree-managed"
+[model_providers.vibecraft]
+name = "vibecraft-managed"
 base_url = %s
 env_key = "OPENAI_API_KEY"
 wire_api = "responses"
@@ -159,9 +159,9 @@ func WriteOpenCodeGatewayConfig(toolID string, payload map[string]any) (string, 
 }
 
 func ClaudeGatewayPayloadFromEnv(env map[string]string) (map[string]any, bool) {
-	name := strings.TrimSpace(env["VIBE_TREE_MCP_GATEWAY_NAME"])
-	url := strings.TrimSpace(env["VIBE_TREE_MCP_GATEWAY_URL"])
-	token := strings.TrimSpace(env["VIBE_TREE_MCP_GATEWAY_TOKEN"])
+	name := strings.TrimSpace(env["VIBECRAFT_MCP_GATEWAY_NAME"])
+	url := strings.TrimSpace(env["VIBECRAFT_MCP_GATEWAY_URL"])
+	token := strings.TrimSpace(env["VIBECRAFT_MCP_GATEWAY_TOKEN"])
 	if name == "" || url == "" || token == "" {
 		return nil, false
 	}
@@ -179,9 +179,9 @@ func ClaudeGatewayPayloadFromEnv(env map[string]string) (map[string]any, bool) {
 }
 
 func OpenCodeGatewayPayloadFromEnv(env map[string]string) (map[string]any, bool) {
-	name := strings.TrimSpace(env["VIBE_TREE_MCP_GATEWAY_NAME"])
-	url := strings.TrimSpace(env["VIBE_TREE_MCP_GATEWAY_URL"])
-	token := strings.TrimSpace(env["VIBE_TREE_MCP_GATEWAY_TOKEN"])
+	name := strings.TrimSpace(env["VIBECRAFT_MCP_GATEWAY_NAME"])
+	url := strings.TrimSpace(env["VIBECRAFT_MCP_GATEWAY_URL"])
+	token := strings.TrimSpace(env["VIBECRAFT_MCP_GATEWAY_TOKEN"])
 	if name == "" || url == "" || token == "" {
 		return nil, false
 	}

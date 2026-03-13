@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"vibe-tree/backend/internal/dag"
-	"vibe-tree/backend/internal/id"
+	"vibecraft/backend/internal/dag"
+	"vibecraft/backend/internal/id"
 )
 
 type Edge struct {

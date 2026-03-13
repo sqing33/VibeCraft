@@ -1,7 +1,7 @@
-# vibe-tree CLI-First 转型与 Repo Library 集成方案
+# vibecraft CLI-First 转型与 Repo Library 集成方案
 
 > 状态：设计草案 / 待落地
-> 适用范围：`vibe-tree` 主仓库、当前本地 `github-feature-analyzer` skill、后续 OpenSpec proposal
+> 适用范围：`vibecraft` 主仓库、当前本地 `github-feature-analyzer` skill、后续 OpenSpec proposal
 > 目标读者：产品 owner、后端开发、前端开发、AI/runtime 集成开发
 
 ---
@@ -10,8 +10,8 @@
 
 本文档分两大部分：
 
-1. 说明 `vibe-tree` 从当前的 **SDK-first 对话/执行模式**，转向 **CLI-first agent runtime** 的完整思路、边界、模块改造点、实施顺序与风险控制。
-2. 说明如何把现有的 `github-feature-analyzer` 从一个本地 skill，演进成 `vibe-tree` 内部的一个长期能力：**Repo Library / Pattern Library / GitHub 项目知识库**。
+1. 说明 `vibecraft` 从当前的 **SDK-first 对话/执行模式**，转向 **CLI-first agent runtime** 的完整思路、边界、模块改造点、实施顺序与风险控制。
+2. 说明如何把现有的 `github-feature-analyzer` 从一个本地 skill，演进成 `vibecraft` 内部的一个长期能力：**Repo Library / Pattern Library / GitHub 项目知识库**。
 
 本文档不是 OpenSpec 变更提案本身，但它可以直接作为后续 `/opsx:propose` 的上游输入。
 
@@ -21,7 +21,7 @@
 
 ### 1.1 核心判断
 
-`vibe-tree` 当前最有价值的不是某个具体模型接入，而是它已经具备的以下基础设施能力：
+`vibecraft` 当前最有价值的不是某个具体模型接入，而是它已经具备的以下基础设施能力：
 
 - 本地 daemon + UI + WebSocket 实时反馈
 - execution 生命周期管理
@@ -37,7 +37,7 @@
 
 ### 1.2 总体方向
 
-`vibe-tree` 应从“可切模型的多轮 chat + workflow 工具”升级为：
+`vibecraft` 应从“可切模型的多轮 chat + workflow 工具”升级为：
 
 > **本地优先的 CLI-first AI 开发 runtime**
 
@@ -58,7 +58,7 @@
 
 ---
 
-# Part I：`vibe-tree` 转向 CLI-first 的完整方案
+# Part I：`vibecraft` 转向 CLI-first 的完整方案
 
 ## 2. 现状分析
 
@@ -81,7 +81,7 @@
 
 这意味着：
 
-- `vibe-tree` 其实已经不是“纯 chat 产品”了。
+- `vibecraft` 其实已经不是“纯 chat 产品”了。
 - 它已经天然更接近“AI runtime 平台”。
 
 ### 2.2 当前系统的关键限制
@@ -145,7 +145,7 @@
 
 ### 3.1 目标定义
 
-将 `vibe-tree` 改造为：
+将 `vibecraft` 改造为：
 
 > 一个以 Orchestration 为主流程、以 CLI agent 为主执行内核、以 SDK 为辅助智能层、以 Repo Library 为长期知识层的本地 AI 开发平台。
 
@@ -228,7 +228,7 @@ flowchart LR
 
 ### 4.4 不推翻 execution/workspace/orchestration 基座
 
-`vibe-tree` 当前已有的 runtime 基础是正确的，应大量复用：
+`vibecraft` 当前已有的 runtime 基础是正确的，应大量复用：
 
 - `execution.Manager`
 - `workspace.Prepare()` / `workspace.Inspect()`
@@ -544,7 +544,7 @@ CLI adapter 负责：
 ### 建议增强点
 
 1. 对 CLI agent 增加 workspace policy 注释文件
-   - 如在 worktree 根目录生成 `.vibe-tree-agent-context.md`
+   - 如在 worktree 根目录生成 `.vibecraft-agent-context.md`
    - 内容包括 orchestration id、agent run id、目标、限制、输出位置
 2. 对 repo-analyzer 场景增加 cache workspace 模式
    - `repo_cache`
@@ -668,10 +668,10 @@ CLI adapter 负责：
 ### wrapper 的职责
 
 1. 读取环境变量：
-   - `VIBE_TREE_AGENT_RUN_ID`
-   - `VIBE_TREE_WORKSPACE`
-   - `VIBE_TREE_ARTIFACT_DIR`
-   - `VIBE_TREE_PROMPT_FILE`
+   - `VIBECRAFT_AGENT_RUN_ID`
+   - `VIBECRAFT_WORKSPACE`
+   - `VIBECRAFT_ARTIFACT_DIR`
+   - `VIBECRAFT_PROMPT_FILE`
 2. 拼接 CLI 参数
 3. 执行 CLI
 4. 把最终摘要和 side artifacts 写回 `artifact_dir`
@@ -780,7 +780,7 @@ CLI adapter 负责：
 
 ### 目标
 
-让 `vibe-tree` 自己不去重新实现：
+让 `vibecraft` 自己不去重新实现：
 
 - skills runtime
 - MCP routing
@@ -797,8 +797,8 @@ CLI adapter 负责：
 
 ### 原则
 
-- `vibe-tree` 不做 skill 平台重写
-- `vibe-tree` 做的是“运行、展示、沉淀、编排”
+- `vibecraft` 不做 skill 平台重写
+- `vibecraft` 做的是“运行、展示、沉淀、编排”
 
 ---
 
@@ -1047,13 +1047,13 @@ CLI adapter 负责：
 
 ---
 
-# Part II：把 `github-feature-analyzer` 变成 `vibe-tree` 的一个功能
+# Part II：把 `github-feature-analyzer` 变成 `vibecraft` 的一个功能
 
 ## 14. 产品定位
 
 `github-feature-analyzer` 不应继续只作为一个“本地 skill”。
 
-在 `vibe-tree` 中，它应该被重新定位为：
+在 `vibecraft` 中，它应该被重新定位为：
 
 > **Repo Library / Pattern Library / 外部代码实现知识库**
 
@@ -1065,11 +1065,11 @@ CLI adapter 负责：
 
 ---
 
-## 15. 为什么它非常适合并入 `vibe-tree`
+## 15. 为什么它非常适合并入 `vibecraft`
 
 ### 15.1 两者能力互补
 
-`vibe-tree` 擅长：
+`vibecraft` 擅长：
 
 - 任务创建
 - agent 编排
@@ -1086,12 +1086,12 @@ CLI adapter 负责：
 
 它们组合后，正好形成：
 
-- 运行平台（`vibe-tree`）
+- 运行平台（`vibecraft`）
 - 知识生产器（`github-feature-analyzer`）
 
-### 15.2 它能反向提升 `vibe-tree`
+### 15.2 它能反向提升 `vibecraft`
 
-未来 `vibe-tree` 自己的 coding agent 可以在执行前先问：
+未来 `vibecraft` 自己的 coding agent 可以在执行前先问：
 
 - “有没有类似登录流程实现？”
 - “有没有类似 DAG 任务编排实现？”
@@ -1146,7 +1146,7 @@ CLI adapter 负责：
 
 ### 方式
 
-- 在 `vibe-tree` 中新增 `repo-analyzer` expert
+- 在 `vibecraft` 中新增 `repo-analyzer` expert
 - 其本质是 `provider=process`
 - 由 wrapper 调用现有 analyzer 流程
 
@@ -1159,7 +1159,7 @@ CLI adapter 负责：
 ### 缺点
 
 - skill 仍偏“外部脚本包”
-- 与 `vibe-tree` 数据模型还不是强耦合
+- 与 `vibecraft` 数据模型还不是强耦合
 
 ## 17.2 方案 B：把 analyzer 逻辑原生移植进 Go backend（不推荐第一阶段）
 
@@ -1177,12 +1177,12 @@ CLI adapter 负责：
 ### 方式
 
 - 新增一个 Python service：`services/repo-analyzer/`
-- `vibe-tree` 通过本地 HTTP/CLI 调它
+- `vibecraft` 通过本地 HTTP/CLI 调它
 
 ### 优点
 
 - 易于扩展 embedding/retrieval
-- 与 `vibe-tree` 保持清晰边界
+- 与 `vibecraft` 保持清晰边界
 
 ### 缺点
 
@@ -1200,7 +1200,7 @@ CLI adapter 负责：
 ```mermaid
 flowchart LR
     U["User"] --> UI["Repo Library UI"]
-    UI --> GO["vibe-tree Go daemon"]
+    UI --> GO["vibecraft Go daemon"]
 
     GO --> ORCH["Repo Analysis Orchestration"]
     ORCH --> EXP["repo-analyzer expert"]
@@ -1230,13 +1230,13 @@ flowchart LR
 
 这是 skill 场景下合理的，但集成到应用后，建议迁移为：
 
-- 主存储：`~/.local/share/vibe-tree/repo-library/`
+- 主存储：`~/.local/share/vibecraft/repo-library/`
 - 兼容导入：仍可读取旧 `.github-feature-analyzer/` 结果
 
 ### 推荐目录
 
 ```text
-~/.local/share/vibe-tree/repo-library/
+~/.local/share/vibecraft/repo-library/
   repositories/
     <repo_key>/
       snapshots/
@@ -1579,7 +1579,7 @@ modify 型 agent 可以收到：
 ## Phase E：sidecar service 化
 
 - 将 analyzer 脚本从“技能脚本集合”升级为独立 `repo-analyzer` service
-- 由 `vibe-tree` 调其 ingest/search/extract API
+- 由 `vibecraft` 调其 ingest/search/extract API
 
 ---
 
@@ -1615,7 +1615,7 @@ modify 型 agent 可以收到：
 
 ## 27. 最终建议（明确结论）
 
-### 对 `vibe-tree`
+### 对 `vibecraft`
 
 最重要的决策不是“继续增强 SDK”，而是：
 
@@ -1627,7 +1627,7 @@ modify 型 agent 可以收到：
 
 最重要的决策不是“继续作为一个 skill 打补丁”，而是：
 
-- 把它升级为 `vibe-tree` 内部的 **Repo Library / Pattern Library**
+- 把它升级为 `vibecraft` 内部的 **Repo Library / Pattern Library**
 - 让它服务于后续所有 AI 开发任务
 
 ### 对实施方式
@@ -1684,4 +1684,4 @@ modify 型 agent 可以收到：
 3. 跑通一个真实 `codex-cli` modify 型 orchestration
 4. 再做第二个 change：`repo-library-ingestion`
 
-到这一步，`vibe-tree` 就会从“一个会聊天、能跑点 workflow 的工具”，变成“一个真正能承接 AI 开发与外部知识复用的平台”。
+到这一步，`vibecraft` 就会从“一个会聊天、能跑点 workflow 的工具”，变成“一个真正能承接 AI 开发与外部知识复用的平台”。

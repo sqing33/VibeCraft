@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/openaicompat"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/openaicompat"
 )
 
 func TestStreamOpenAI_RejectsStructuredOutputOnChatCompletionsStyle(t *testing.T) {

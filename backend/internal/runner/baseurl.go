@@ -47,4 +47,3 @@ func NormalizeBaseURL(provider, raw string) string {
 	out = strings.TrimSuffix(out, "/")
 	return out
 }
-

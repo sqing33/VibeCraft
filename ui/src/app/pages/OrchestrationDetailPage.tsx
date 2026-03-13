@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Chip, Skeleton } from '@heroui/react'
 import { Plus, RefreshCcw, RotateCcw, Square } from 'lucide-react'
 
-import { goHome, goToOrchestration } from '@/app/routes'
+import { goToOrchestration, goToOrchestrations } from '@/app/routes'
 import { LoadingVeil } from '@/app/components/LoadingVeil'
 import { OrchestrationsShell } from '@/app/components/OrchestrationsShell'
 import { TerminalPane, type TerminalPaneHandle } from '@/components/TerminalPane'
@@ -363,7 +363,7 @@ export function OrchestrationDetailPage(props: OrchestrationDetailPageProps) {
           size="sm"
           className="w-[25%] min-w-[86px] rounded-2xl"
           startContent={<Plus className="h-4 w-4 shrink-0 stroke-[3]" />}
-          onPress={goHome}
+          onPress={goToOrchestrations}
         >
           新建编排
         </Button>

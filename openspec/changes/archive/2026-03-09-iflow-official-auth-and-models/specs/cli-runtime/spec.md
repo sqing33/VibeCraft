@@ -18,7 +18,7 @@ The runtime MUST support exactly these official iFlow auth inputs:
 - **AND** it relies on the persisted official browser login state
 
 ### Requirement: iFlow runtime MUST support per-turn MCP and skill injection
-The `iflow` runtime MUST inject the effective MCP and skill selection derived from vibe-tree settings and the chat session.
+The `iflow` runtime MUST inject the effective MCP and skill selection derived from vibecraft settings and the chat session.
 
 #### Scenario: iFlow turn receives effective MCP allow-list
 - **WHEN** an iFlow chat turn runs with selected/default MCP server ids

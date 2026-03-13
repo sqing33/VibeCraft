@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"vibe-tree/backend/internal/runner"
+	"vibecraft/backend/internal/runner"
 )
 
 func TestNormalizeBaseURL_OpenAI_AppendsV1(t *testing.T) {

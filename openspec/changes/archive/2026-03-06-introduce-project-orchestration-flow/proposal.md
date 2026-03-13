@@ -1,8 +1,8 @@
 ## Why
 
-当前 `workflows` 的核心价值，其实是“master 生成静态 DAG → daemon 落库 → scheduler 按依赖驱动 execution”的运行时链路：它已经具备 execution、日志流、取消、重试、WebSocket 推送、SQLite 持久化与并发控制这些底层能力，但它的主产品模型仍然是 DAG-first automation。这个模型并不匹配 `vibe-tree` 真正想做的“AI 辅助项目开发”：用户先输入一个开发目标，master 再按需要动态拆成多名子 agent 并行分析/修改/验证，经过 synthesis 后必要时继续下一轮。
+当前 `workflows` 的核心价值，其实是“master 生成静态 DAG → daemon 落库 → scheduler 按依赖驱动 execution”的运行时链路：它已经具备 execution、日志流、取消、重试、WebSocket 推送、SQLite 持久化与并发控制这些底层能力，但它的主产品模型仍然是 DAG-first automation。这个模型并不匹配 `vibecraft` 真正想做的“AI 辅助项目开发”：用户先输入一个开发目标，master 再按需要动态拆成多名子 agent 并行分析/修改/验证，经过 synthesis 后必要时继续下一轮。
 
-现在需要在不破坏既有 `workflows` 价值的前提下，把 `vibe-tree` 的主入口从“静态 DAG 编排器”升级为“面向项目开发的 orchestration 系统”：保留旧 runtime，冻结旧产品方向，新增一套 prompt-first 的主流程作为未来主入口。
+现在需要在不破坏既有 `workflows` 价值的前提下，把 `vibecraft` 的主入口从“静态 DAG 编排器”升级为“面向项目开发的 orchestration 系统”：保留旧 runtime，冻结旧产品方向，新增一套 prompt-first 的主流程作为未来主入口。
 
 ## What Changes
 

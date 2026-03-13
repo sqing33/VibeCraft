@@ -1,6 +1,6 @@
 ## Context
 
-`vibe-tree` 当前已经使用 `codex app-server` 承载 Codex 聊天，但 MCP 与 Skill 仍主要依赖用户本机已有的 Codex 配置与技能目录自动发现。前端缺少集中设置入口，聊天会话也无法按当前任务精确选择要暴露给 Codex 的 MCP 集合。
+`vibecraft` 当前已经使用 `codex app-server` 承载 Codex 聊天，但 MCP 与 Skill 仍主要依赖用户本机已有的 Codex 配置与技能目录自动发现。前端缺少集中设置入口，聊天会话也无法按当前任务精确选择要暴露给 Codex 的 MCP 集合。
 
 本次变更同时涉及配置模型、设置 API、聊天会话数据模型、Codex app-server 请求构造、以及前端设置/聊天交互，属于跨模块运行时变更。约束上需要避免修改用户全局 `~/.codex/config.toml`，并保持现有 CLI tool / model 选择链路兼容。
 
@@ -22,7 +22,7 @@
 ## Decisions
 
 ### 1. MCP 采用“配置持久化 + 线程级注入”而不是写全局 Codex 配置
-- 持久层把 MCP 注册表保存在 `vibe-tree` 自己的配置文件中。
+- 持久层把 MCP 注册表保存在 `vibecraft` 自己的配置文件中。
 - 运行时在 `thread/start` / `thread/resume` 的 `config` 字段中注入当前会话选中的 `mcp_servers`。
 - 这样可以按会话隔离 MCP，避免全局配置污染，并与 Codex app-server 的原生覆盖层兼容。
 - 备选方案是直接写 `~/.codex/config.toml` 或为每个会话创建临时 `CODEX_HOME/config.toml`；前者会污染用户环境，后者要管理额外目录生命周期，首版复杂度更高。

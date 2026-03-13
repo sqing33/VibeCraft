@@ -8,7 +8,7 @@
 - Air 仍是开发期工具，不应成为运行时依赖
 - 安装方式优先 `go install github.com/air-verse/air@latest`（可重复执行，行为可预测）
 - 需要兼容 `GOBIN`/`GOPATH` 安装路径不在当前 `PATH` 的情况
-- 保留 `VIBE_TREE_NO_AIR=1` 作为显式禁用开关（用于排障/最小依赖）
+- 保留 `VIBECRAFT_NO_AIR=1` 作为显式禁用开关（用于排障/最小依赖）
 
 ## Goals / Non-Goals
 
@@ -38,4 +38,4 @@
 ## Risks / Trade-offs
 
 - [Risk] 自动安装会触发网络下载，首次启动变慢 → Mitigation：仅在缺失 Air 时执行，并输出明确日志
-- [Risk] 开发者不希望脚本自动改动本机 Go 工具链环境 → Mitigation：提供 `VIBE_TREE_NO_AIR=1` 禁用开关
+- [Risk] 开发者不希望脚本自动改动本机 Go 工具链环境 → Mitigation：提供 `VIBECRAFT_NO_AIR=1` 禁用开关

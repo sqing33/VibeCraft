@@ -6,9 +6,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"vibe-tree/backend/internal/config"
-	"vibe-tree/backend/internal/paths"
-	"vibe-tree/backend/internal/version"
+	"vibecraft/backend/internal/config"
+	"vibecraft/backend/internal/paths"
+	"vibecraft/backend/internal/version"
 )
 
 type infoResponse struct {
