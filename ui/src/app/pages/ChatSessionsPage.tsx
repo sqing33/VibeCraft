@@ -55,6 +55,7 @@ import {
   type AttachmentPreviewState,
 } from "@/app/components/AttachmentPreviewModal";
 import { CodexHistoryImportDialog } from "@/app/components/chat/CodexHistoryImportDialog";
+import { ChatMessageList } from "@/app/components/chat/ChatMessageList";
 import { ChatTurnFeed as ChatTurnFeedView } from "@/app/components/chat/ChatTurnFeed";
 import {
   canPreviewAttachmentTarget,
@@ -286,11 +287,14 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const clearTurnFeed = useChatStore((s) => s.clearTurnFeed);
   const refreshSessions = useChatStore((s) => s.refreshSessions);
   const loadMessages = useChatStore((s) => s.loadMessages);
+  const loadOlderMessages = useChatStore((s) => s.loadOlderMessages);
   const loadTurns = useChatStore((s) => s.loadTurns);
   const createSession = useChatStore((s) => s.createSession);
   const sendTurn = useChatStore((s) => s.sendTurn);
   const forkSession = useChatStore((s) => s.forkSession);
   const archiveSession = useChatStore((s) => s.archiveSession);
+  const loadingOlderBySession = useChatStore((s) => s.loadingOlderBySession);
+  const hasMoreOlderBySession = useChatStore((s) => s.hasMoreOlderBySession);
 
   const [newTitle, setNewTitle] = useState("");
   const [newExpertId, setNewExpertId] = useState("");
@@ -312,13 +316,10 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     string[]
   >([]);
   const [sessionMCPDraft, setSessionMCPDraft] = useState<string[]>([]);
-  const messageScrollRef = useRef<HTMLDivElement | null>(null);
-  const shouldAutoScrollRef = useRef(true);
   const liveUpdateBufferRef = useRef<LiveUpdateBuffer>(
     createLiveUpdateBuffer(),
   );
   const liveUpdateFrameRef = useRef<number | null>(null);
-  const scrollFrameRef = useRef<number | null>(null);
   const lastChatLiveEventAtBySessionRef = useRef<Record<string, number>>({});
   const lastTurnRequestAtBySessionRef = useRef<Record<string, number>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -975,6 +976,34 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
   const pendingAnswerText = feedAnswerText(activeTurnFeed) || streaming;
   const pendingAssistant =
     sending || hasFeedEntries(activeTurnFeed) || streaming.length > 0;
+  const loadingOlder = activeSessionId
+    ? Boolean(loadingOlderBySession[activeSessionId])
+    : false;
+  const hasMoreOlder = activeSessionId
+    ? hasMoreOlderBySession[activeSessionId] !== false
+    : false;
+
+  const handleTranscriptStartReached = useCallback(() => {
+    if (!activeSessionId) return;
+    if (!hasMoreOlder) return;
+    if (loadingOlder) return;
+    if (messages.length === 0) return;
+    void loadOlderMessages(daemonUrl, activeSessionId).catch((err: unknown) => {
+      console.warn(
+        "[ui:chat] 加载更早消息失败 session_id=%s err=%o",
+        activeSessionId,
+        err,
+      );
+      toast({ title: "加载更早消息失败", variant: "destructive" });
+    });
+  }, [
+    activeSessionId,
+    daemonUrl,
+    hasMoreOlder,
+    loadOlderMessages,
+    loadingOlder,
+    messages.length,
+  ]);
 
   useEffect(() => {
     if (!activeSessionId) return;
@@ -1061,19 +1090,6 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     });
   }, [flushBufferedLiveUpdates]);
 
-  const scheduleScrollToBottom = useCallback(() => {
-    if (!shouldAutoScrollRef.current) return;
-    if (scrollFrameRef.current !== null) {
-      window.cancelAnimationFrame(scrollFrameRef.current);
-    }
-    scrollFrameRef.current = window.requestAnimationFrame(() => {
-      scrollFrameRef.current = null;
-      const el = messageScrollRef.current;
-      if (!el || !shouldAutoScrollRef.current) return;
-      el.scrollTop = el.scrollHeight;
-    });
-  }, []);
-
   const refresh = useCallback(async () => {
     await refreshSessions(daemonUrl);
   }, [daemonUrl, refreshSessions]);
@@ -1099,53 +1115,11 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
     ]);
   }, [activeSessionId, daemonUrl, loadMessages, loadTurns]);
 
-  useEffect(() => {
-    scheduleScrollToBottom();
-  }, [
-    activeTurnFeed,
-    messages,
-    scheduleScrollToBottom,
-    streaming,
-    thinking,
-    thinkingTranslationState.failed,
-    translatedThinking,
-  ]);
-
-  useEffect(() => {
-    const el = messageScrollRef.current;
-    if (!el) return;
-    const onScroll = () => {
-      const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      shouldAutoScrollRef.current = distanceToBottom < 64;
-    };
-    const onWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0) {
-        shouldAutoScrollRef.current = false;
-      }
-    };
-    onScroll();
-    el.addEventListener("scroll", onScroll, { passive: true });
-    el.addEventListener("wheel", onWheel, { passive: true });
-    return () => {
-      el.removeEventListener("scroll", onScroll);
-      el.removeEventListener("wheel", onWheel);
-    };
-  }, [activeSessionId]);
-
-  useEffect(() => {
-    shouldAutoScrollRef.current = true;
-    scheduleScrollToBottom();
-  }, [activeSessionId, scheduleScrollToBottom]);
-
   useEffect(
     () => () => {
       if (liveUpdateFrameRef.current !== null) {
         window.cancelAnimationFrame(liveUpdateFrameRef.current);
         liveUpdateFrameRef.current = null;
-      }
-      if (scrollFrameRef.current !== null) {
-        window.cancelAnimationFrame(scrollFrameRef.current);
-        scrollFrameRef.current = null;
       }
     },
     [],
@@ -1797,12 +1771,9 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
 
       <WorkspacePortal target="content">
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background/30">
-          <div
-            ref={messageScrollRef}
-            className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8"
-          >
-            <div className="mx-auto flex w-full max-w-[880px] flex-col gap-5">
-              {messages.length === 0 && !pendingAssistant ? (
+          {messages.length === 0 && !pendingAssistant ? (
+            <div className="min-h-0 flex-1 px-4 py-6 md:px-8">
+              <div className="mx-auto flex w-full max-w-[880px] flex-col gap-5">
                 <div className="flex min-h-full flex-1 items-center justify-center py-16">
                   <div className="max-w-md rounded-[24px] border border-dashed bg-background/70 px-6 py-8 text-center">
                     <div className="text-base font-medium">开始新的对话</div>
@@ -1811,9 +1782,20 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                     </div>
                   </div>
                 </div>
-              ) : null}
-
-              {messages.map((m) => {
+              </div>
+            </div>
+          ) : (
+            <ChatMessageList
+              sessionId={activeSessionId ?? null}
+              messages={messages}
+              pending={pendingAssistant}
+              pendingAutoscrollKey={
+                pendingAssistant
+                  ? pendingAnswerText.length + displayedThinking.length
+                  : undefined
+              }
+              onStartReached={handleTranscriptStartReached}
+              renderMessage={(m) => {
                 const isUser = m.role === "user";
                 const isAssistant = m.role === "assistant";
                 const fullWidth = shouldUseFullWidth(m.content_text);
@@ -1992,9 +1974,8 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                     </div>
                   </div>
                 );
-              })}
-
-              {pendingAssistant ? (
+              }}
+              renderPending={() => (
                 <div className="flex justify-start">
                   <div
                     className={`rounded-[24px] border border-dashed bg-background/80 px-4 py-3 shadow-sm ${
@@ -2049,9 +2030,9 @@ export function ChatSessionsPage(props: ChatSessionsPageProps) {
                     )}
                   </div>
                 </div>
-              ) : null}
-            </div>
-          </div>
+              )}
+            />
+          )}
 
           <div className="shrink-0 bg-background/80 px-4 py-2.5 backdrop-blur md:px-8">
             <div className="mx-auto w-full max-w-[880px]">

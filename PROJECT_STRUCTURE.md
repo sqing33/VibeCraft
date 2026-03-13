@@ -120,7 +120,7 @@
 | `backend/internal/ws/hub.go`               | WebSocket hub：连接管理与广播（配合 log tail 断线补齐）                                                                               |
 | `backend/internal/store/sqlite.go`         | SQLite state DB 打开与 pragma 初始化（WAL/busy_timeout/foreign_keys）                                                                 |
 | `backend/internal/store/migrate.go`        | SQLite migrations（使用 `PRAGMA user_version` 管理 schema 版本；含 chat attachments 与 expert builder sessions）                     |
-| `backend/internal/store/chat.go`           | Chat 存储：chat sessions/messages/attachments/anchors/compactions 的 SQLite CRUD + hydration；消息读取按 `turn DESC, created_at DESC` 归并 |
+| `backend/internal/store/chat.go`           | Chat 存储：chat sessions/messages/attachments/anchors/compactions 的 SQLite CRUD + hydration；消息读取按 `turn DESC, created_at DESC` 归并，并支持按 `before_turn` 向上分页 |
 | `backend/internal/store/chat_import.go`    | Chat 历史导入 helper：按显式 turn 批量写入 imported session/messages/turns/items，并基于 CLI session 做幂等判断 |
 | `backend/internal/store/chat_turns.go`     | Chat turn timeline 存储：turn/item 创建、增量 upsert、翻译状态回写、完成态收敛与 session 级恢复查询 |
 | `backend/internal/store/orchestrations.go` | Orchestration 存储：SQLite orchestration/round/agent_run/synthesis/artifact CRUD 与详情查询                                           |
@@ -144,7 +144,8 @@
 | `ui/src/app/components/OrchestrationsShell.tsx` | Orchestrations 共享壳适配层：把最近编排侧栏、页头与内容通过 portal 挂载到 `WorkspaceShell` |
 | `ui/src/stores/orchestrationUIStore.ts` | Orchestrations 跨路由 UI 缓存：保留最近编排列表与详情快照，避免页面切换时闪空 |
 | `ui/src/app/pages/OrchestrationDetailPage.tsx` | Orchestration 详情页：按 round 展示并行 agent 卡片、详情面板、日志、artifact、continue/retry/cancel 控制                    |
-| `ui/src/app/pages/ChatSessionsPage.tsx`    | Chat 会话页：会话列表、结构化 turn feed 渲染、消息流式渲染、发送消息/上传附件、拖拽上传、附件预览、手动压缩/分叉/归档，以及 Codex 历史导入入口与新建/当前会话的 MCP 选择与保存 |
+| `ui/src/app/pages/ChatSessionsPage.tsx`    | Chat 会话页：会话列表、结构化 turn feed 渲染、消息流式渲染、发送消息/上传附件、拖拽上传、附件预览、手动压缩/分叉/归档，消息虚拟列表渲染与无限上拉加载更早消息，以及 Codex 历史导入入口与新建/当前会话的 MCP 选择与保存 |
+| `ui/src/app/components/chat/ChatMessageList.tsx` | Chat transcript 虚拟列表：react-virtuoso windowing、顶部触发加载更早消息、底部自动跟随与“回到底部”按钮 |
 | `ui/src/app/components/chat/CodexHistoryImportDialog.tsx` | Codex 历史导入弹窗：读取线程列表、搜索过滤、批量选择导入，并在 UI 中展示解析后的可读标题 |
 | `ui/src/app/components/chat/ChatTurnFeed.tsx` | Chat turn feed 组件：按 thinking/tool/plan/question/progress/answer 分层渲染 Codex 运行时条目 |
 | `ui/src/lib/chatTurnFeed.ts`                 | Chat turn feed 类型与 reducer：前端运行时结构化事件应用、thinking 翻译合并与 completed feed 收敛 |
@@ -238,7 +239,7 @@
 | Workflow DAG 视图（React Flow）    | `ui/src/components/DAGView.tsx`, `ui/src/App.tsx`                                                                                                                                                                                          |
 | health/workflow/execution API 封装 | `ui/src/lib/daemon.ts`                                                                                                                                                                                                                     |
 | 终端渲染与路由                     | `ui/src/components/TerminalPane.tsx`, `ui/src/App.tsx`                                                                                                                                                                                     |
-| Chat 会话 UI                       | `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/app/components/WorkspaceShell.tsx`, `ui/src/app/components/chat/ChatTurnFeed.tsx`, `ui/src/app/components/chat/CodexHistoryImportDialog.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/chatTurnFeed.ts`, `ui/src/App.tsx`, `ui/src/app/components/Topbar.tsx`                                                                                                                       |
+| Chat 会话 UI                       | `ui/src/app/pages/ChatSessionsPage.tsx`, `ui/src/app/components/chat/ChatMessageList.tsx`, `ui/src/app/components/WorkspaceShell.tsx`, `ui/src/app/components/chat/ChatTurnFeed.tsx`, `ui/src/app/components/chat/CodexHistoryImportDialog.tsx`, `ui/src/stores/chatStore.ts`, `ui/src/lib/chatTurnFeed.ts`, `ui/src/App.tsx`, `ui/src/app/components/Topbar.tsx`                                                                                                                       |
 | 本地一键启动                       | `scripts/dev.sh`                                                                                                                                                                                                                           |
 | Web 单进程启动（daemon 托管 UI）   | `scripts/web.sh`, `backend/internal/server/server.go`                                                                                                                                                                                      |
 | UI 开发端口代理与构建配置          | `ui/vite.config.ts`, `ui/package.json`                                                                                                                                                                                                     |

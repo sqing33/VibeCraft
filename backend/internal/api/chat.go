@@ -156,6 +156,10 @@ func listChatSessionsHandler(deps Deps) gin.HandlerFunc {
 	}
 }
 
+// listChatMessagesHandler 功能：返回一个 session 下的消息历史列表，支持按 turn 游标向上分页。
+// 参数/返回：通过 `:id` 指定 session；`limit` 控制返回消息数；`before_turn`（可选）用于返回 `turn < before_turn` 的更早消息。
+// 失败场景：session 不存在、before_turn 非法或查询失败时返回 4xx/5xx。
+// 副作用：无；仅查询 SQLite 中的消息与附件元数据。
 func listChatMessagesHandler(deps Deps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.Store == nil {
@@ -168,6 +172,15 @@ func listChatMessagesHandler(deps Deps) gin.HandlerFunc {
 				limit = v
 			}
 		}
+		var beforeTurn int64
+		if raw := strings.TrimSpace(c.Query("before_turn")); raw != "" {
+			v, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || v <= 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid before_turn"})
+				return
+			}
+			beforeTurn = v
+		}
 		sessionID := c.Param("id")
 		if _, err := deps.Store.GetChatSession(c.Request.Context(), sessionID); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -177,7 +190,15 @@ func listChatMessagesHandler(deps Deps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		msgs, err := deps.Store.ListChatMessages(c.Request.Context(), sessionID, limit)
+		var (
+			msgs []store.ChatMessage
+			err  error
+		)
+		if beforeTurn > 0 {
+			msgs, err = deps.Store.ListChatMessagesBeforeTurn(c.Request.Context(), sessionID, limit, beforeTurn)
+		} else {
+			msgs, err = deps.Store.ListChatMessages(c.Request.Context(), sessionID, limit)
+		}
 		if err != nil {
 			if errors.Is(err, store.ErrValidation) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

@@ -678,6 +678,68 @@ func (s *Store) ListChatMessages(ctx context.Context, sessionID string, limit in
 	return out, nil
 }
 
+// ListChatMessagesBeforeTurn 功能：按 beforeTurn 分页列出某个 session 的更早消息（turn < beforeTurn）。
+// 参数/返回：接收 sessionID、limit、beforeTurn；返回按 turn/created_at 升序的消息列表。
+// 失败场景：store 未初始化、参数非法或查询失败时返回 error。
+// 副作用：无；仅读取 SQLite 中的消息与附件元数据。
+func (s *Store) ListChatMessagesBeforeTurn(ctx context.Context, sessionID string, limit int, beforeTurn int64) ([]ChatMessage, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("store not initialized")
+	}
+	if limit <= 0 || limit > 2000 {
+		limit = 200
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("%w: session_id is required", ErrValidation)
+	}
+	if beforeTurn <= 0 {
+		return nil, fmt.Errorf("%w: before_turn must be positive", ErrValidation)
+	}
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT id, session_id, turn, role, content_text, expert_id, provider, model, token_in, token_out, provider_message_id, created_at
+		   FROM chat_messages
+		  WHERE session_id = ?
+			AND turn < ?
+		  ORDER BY turn DESC, created_at DESC
+		  LIMIT ?;`,
+		sessionID,
+		beforeTurn,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query chat messages: %w", err)
+	}
+	defer rows.Close()
+	out := make([]ChatMessage, 0)
+	messageIDs := make([]string, 0)
+	for rows.Next() {
+		msg, err := scanChatMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, msg)
+		messageIDs = append(messageIDs, msg.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate chat messages: %w", err)
+	}
+	attachmentsByMessage, err := s.listChatAttachmentsByMessageIDs(ctx, messageIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if atts := attachmentsByMessage[out[i].ID]; len(atts) > 0 {
+			out[i].Attachments = atts
+		}
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
 type UpsertChatAnchorParams struct {
 	SessionID         string
 	Provider          string

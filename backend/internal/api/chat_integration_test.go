@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -110,6 +111,94 @@ func TestChatSessionLifecycle_DemoExpert(t *testing.T) {
 	}
 	if forked.ID == "" || forked.ID == sess.ID {
 		t.Fatalf("expected new fork session id")
+	}
+}
+
+func TestChatMessagesPagination_BeforeTurn(t *testing.T) {
+	env := newTestEnv(t, config.Default(), 2)
+	baseURL := env.httpSrv.URL
+
+	createBody, _ := json.Marshal(map[string]any{
+		"title":          "chat-pagination",
+		"expert_id":      "demo",
+		"workspace_path": ".",
+	})
+	createRes, err := http.Post(baseURL+"/api/v1/chat/sessions", "application/json", bytes.NewReader(createBody))
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer createRes.Body.Close()
+	if createRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected create status: %s", createRes.Status)
+	}
+
+	var sess store.ChatSession
+	if err := json.NewDecoder(createRes.Body).Decode(&sess); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if sess.ID == "" {
+		t.Fatalf("missing session id")
+	}
+
+	for i := 1; i <= 3; i++ {
+		turnBody, _ := json.Marshal(map[string]any{"input": fmt.Sprintf("turn %d", i)})
+		turnRes, err := http.Post(baseURL+"/api/v1/chat/sessions/"+sess.ID+"/turns", "application/json", bytes.NewReader(turnBody))
+		if err != nil {
+			t.Fatalf("post turn %d: %v", i, err)
+		}
+		turnRes.Body.Close()
+		if turnRes.StatusCode != http.StatusOK {
+			t.Fatalf("unexpected turn status for %d: %s", i, turnRes.Status)
+		}
+	}
+
+	msgsRes, err := http.Get(baseURL + "/api/v1/chat/sessions/" + sess.ID + "/messages?limit=4")
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	defer msgsRes.Body.Close()
+	if msgsRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected messages status: %s", msgsRes.Status)
+	}
+	var page []store.ChatMessage
+	if err := json.NewDecoder(msgsRes.Body).Decode(&page); err != nil {
+		t.Fatalf("decode messages response: %v", err)
+	}
+	if len(page) != 4 {
+		t.Fatalf("expected 4 messages, got %d", len(page))
+	}
+	if page[0].Turn != 3 || page[3].Turn != 6 {
+		t.Fatalf("expected turns 3..6 page, got %d..%d", page[0].Turn, page[3].Turn)
+	}
+
+	olderRes, err := http.Get(baseURL + "/api/v1/chat/sessions/" + sess.ID + "/messages?limit=4&before_turn=3")
+	if err != nil {
+		t.Fatalf("list older messages: %v", err)
+	}
+	defer olderRes.Body.Close()
+	if olderRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected older messages status: %s", olderRes.Status)
+	}
+	var older []store.ChatMessage
+	if err := json.NewDecoder(olderRes.Body).Decode(&older); err != nil {
+		t.Fatalf("decode older messages response: %v", err)
+	}
+	if len(older) != 2 {
+		t.Fatalf("expected 2 older messages, got %d", len(older))
+	}
+	for _, msg := range older {
+		if msg.Turn >= 3 {
+			t.Fatalf("expected msg turn < 3, got %d", msg.Turn)
+		}
+	}
+
+	invalidRes, err := http.Get(baseURL + "/api/v1/chat/sessions/" + sess.ID + "/messages?before_turn=0")
+	if err != nil {
+		t.Fatalf("list invalid before_turn: %v", err)
+	}
+	defer invalidRes.Body.Close()
+	if invalidRes.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid before_turn, got %s", invalidRes.Status)
 	}
 }
 

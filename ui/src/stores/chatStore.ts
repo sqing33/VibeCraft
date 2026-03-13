@@ -266,6 +266,26 @@ function buildOptimisticAttachments(
   }));
 }
 
+function sortChatMessages(messages: ChatMessage[]): ChatMessage[] {
+  return [...messages].sort((a, b) => {
+    if (a.turn !== b.turn) return a.turn - b.turn;
+    if (a.created_at !== b.created_at) return a.created_at - b.created_at;
+    return a.message_id.localeCompare(b.message_id);
+  });
+}
+
+function mergeChatMessageLists(
+  existing: ChatMessage[],
+  incoming: ChatMessage[],
+): ChatMessage[] {
+  if (existing.length === 0) return sortChatMessages(incoming);
+  if (incoming.length === 0) return existing;
+  const byId = new Map<string, ChatMessage>();
+  for (const msg of existing) byId.set(msg.message_id, msg);
+  for (const msg of incoming) byId.set(msg.message_id, msg);
+  return sortChatMessages(Array.from(byId.values()));
+}
+
 function hydrateTurnsIntoState<
   T extends {
     messagesBySession: Record<string, ChatMessage[]>;
@@ -395,6 +415,8 @@ export type ChatStore = {
   sessions: ChatSession[];
   activeSessionId: string | null;
   messagesBySession: Record<string, ChatMessage[]>;
+  loadingOlderBySession: Record<string, boolean>;
+  hasMoreOlderBySession: Record<string, boolean>;
   streamingBySession: Record<string, string>;
   thinkingBySession: Record<string, string>;
   translatedThinkingBySession: Record<string, string>;
@@ -456,6 +478,7 @@ export type ChatStore = {
   clearTurnFeed: (sessionId: string) => void;
   refreshSessions: (daemonUrl: string) => Promise<void>;
   loadMessages: (daemonUrl: string, sessionId: string) => Promise<void>;
+  loadOlderMessages: (daemonUrl: string, sessionId: string) => Promise<void>;
   loadTurns: (
     daemonUrl: string,
     sessionId: string,
@@ -494,6 +517,8 @@ export const useChatStore = create<ChatStore>()(
       sessions: [],
       activeSessionId: null,
       messagesBySession: {},
+      loadingOlderBySession: {},
+      hasMoreOlderBySession: {},
       streamingBySession: {},
       thinkingBySession: {},
       translatedThinkingBySession: {},
@@ -734,8 +759,94 @@ export const useChatStore = create<ChatStore>()(
         }
       },
       loadMessages: async (daemonUrl, sessionId) => {
-        const messages = await fetchChatMessages(daemonUrl, sessionId);
-        get().setMessages(sessionId, messages);
+        const incoming = await fetchChatMessages(daemonUrl, sessionId);
+        set((state) => {
+          const merged = mergeChatMessageLists(
+            state.messagesBySession[sessionId] ?? [],
+            incoming,
+          );
+          const nextState = {
+            ...state,
+            messagesBySession: {
+              ...state.messagesBySession,
+              [sessionId]: merged,
+            },
+          };
+          if (
+            !shouldClearActiveTurnFeed(
+              state.activeTurnFeedBySession[sessionId],
+              merged,
+            )
+          ) {
+            return nextState;
+          }
+          return clearLiveTurnStateShape(nextState, sessionId);
+        });
+      },
+      loadOlderMessages: async (daemonUrl, sessionId) => {
+        const state = get();
+        if (state.loadingOlderBySession[sessionId]) return;
+        if (state.hasMoreOlderBySession[sessionId] === false) return;
+
+        const current = state.messagesBySession[sessionId] ?? [];
+        if (current.length === 0) return;
+
+        const beforeTurn = current[0]?.turn ?? 0;
+        if (beforeTurn <= 1) {
+          set((state) => ({
+            hasMoreOlderBySession: {
+              ...state.hasMoreOlderBySession,
+              [sessionId]: false,
+            },
+          }));
+          return;
+        }
+
+        set((state) => ({
+          loadingOlderBySession: {
+            ...state.loadingOlderBySession,
+            [sessionId]: true,
+          },
+        }));
+
+        const limit = 200;
+        try {
+          const older = await fetchChatMessages(
+            daemonUrl,
+            sessionId,
+            limit,
+            beforeTurn,
+          );
+          set((state) => {
+            const merged = mergeChatMessageLists(
+              older,
+              state.messagesBySession[sessionId] ?? [],
+            );
+            return {
+              ...state,
+              messagesBySession: {
+                ...state.messagesBySession,
+                [sessionId]: merged,
+              },
+              loadingOlderBySession: {
+                ...state.loadingOlderBySession,
+                [sessionId]: false,
+              },
+              hasMoreOlderBySession: {
+                ...state.hasMoreOlderBySession,
+                [sessionId]: older.length === limit,
+              },
+            };
+          });
+        } catch (err: unknown) {
+          set((state) => ({
+            loadingOlderBySession: {
+              ...state.loadingOlderBySession,
+              [sessionId]: false,
+            },
+          }));
+          throw err;
+        }
       },
       loadTurns: async (daemonUrl, sessionId) => {
         const turns = await fetchChatTurns(daemonUrl, sessionId);

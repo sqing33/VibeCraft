@@ -1222,11 +1222,15 @@ export async function fetchChatMessages(
   daemonUrl: string,
   sessionId: string,
   limit = 200,
+  beforeTurn?: number,
 ): Promise<ChatMessage[]> {
   const url = new URL(
     `${daemonUrl}/api/v1/chat/sessions/${sessionId}/messages`,
   );
   url.searchParams.set("limit", String(limit));
+  if (typeof beforeTurn === "number" && beforeTurn > 0) {
+    url.searchParams.set("before_turn", String(beforeTurn));
+  }
   const res = await fetch(url);
   if (!res.ok) {
     const text = await res.text().catch(() => "");
